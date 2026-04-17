@@ -1,0 +1,208 @@
+##0.5#0.5###########
+1#Sgl Clr 3mm#1#1#6.61#.90#.84#2#######
+2#Sgl Clr 6mm#1#1#6.17#.88#.77#3#######
+3#Sgl Clr Low Iron 3mm#1#1#6.31#.91#.90#14#######
+4#Sgl Clr Low Iron 5mm#1#1#6.22#.91#.89#16#######
+5#Sgl Bronze 3mm#1#1#6.31#.69#.64#5#######
+6#Sgl Bronze 6mm#1#1#6.17#.53#.48#6#######
+7#Sgl Green 3mm#1#1#6.31#.82#.63#11#######
+8#Sgl Green 6mm#1#1#6.17#.75#.49#12#######
+9#Sgl Grey 3mm#1#1#6.31#.61#.63#8#######
+10#Sgl Grey 6mm#1#1#6.17#.43#.46#9#######
+11#Sgl Blue 6mm#1#1#6.17#.57#.48#17#######
+12#Sgl Ref-A-L Clr 6mm#1#1#4.90#.08#.07#18#######
+13#Sgl Ref-A-M Clr 6mm#1#1#5.11#.14#.11#19#######
+14#Sgl Ref-A-H Clr 6mm#1#1#5.41#.20#.16#20#######
+15#Sgl Ref-A-L Tint 6mm#1#1#4.93#.05#.04#21#######
+16#Sgl Ref-A-M Tint 6mm#1#1#5.11#.09#.06#22#######
+17#Sgl Ref-A-H Tint 6mm#1#1#5.29#.10#.10#23#######
+18#Sgl Ref-B-L Clr 6mm#1#1#5.44#.20#.15#24#######
+19#Sgl Ref-B-H Clr 6mm#1#1#5.50#.30#.24#25#######
+20#Sgl Ref-B-L Tint 6mm#1#1#4.93#.05#.04#26#######
+21#Sgl Ref-B-M Tint 6mm#1#1#5.05#.13#.10#27#######
+22#Sgl Ref-B-H Tint 6mm#1#1#5.50#.18#.15#28#######
+23#Sgl Ref-C-L Clr 6mm#1#1#4.99#.13#.11#29#######
+24#Sgl Ref-C-M Clr 6mm#1#1#5.23#.19#.17#30#######
+25#Sgl Ref-C-H Clr 6mm#1#1#5.35#.22#.20#31#######
+26#Sgl Ref-C-L Tint 6mm#1#1#4.99#.08#.07#32#######
+27#Sgl Ref-C-M Tint 6mm#1#1#5.23#.11#.10#33#######
+28#Sgl Ref-C-H Tint 6mm#1#1#5.35#.13#.12#34#######
+29#Sgl Ref-D Clr 6mm#1#1#6.12#.33#.43#35#######
+30#Sgl Ref-D Tint 6mm#1#1#6.12#.33#.43#36#######
+31#Sgl LoE (e2=.4) Clr 3mm#1#1#4.99#.85#.75#37#######
+32#Sgl LoE (e2=.2) Clr 3mm#1#1#4.34#.82#.74#38#######
+33#Sgl LoE (e2=.2) Clr 6mm#1#1#4.27#.81#.68#39#######
+34#Sgl Elec Abs Bleached 6mm#1#1#6.17#.85#.81#55#######
+35#Sgl Elec Abs Colored 6mm#1#1#6.17#.13#.11#56#######
+36#Sgl Elec Ref Bleached 6mm#1#1#6.17#.82#.69#57#######
+37#Sgl Elec Ref Colored 6mm#1#1#6.17#.16#.10#58#######
+38#Dbl Clr 3mm/6mm Air#2#2#3.23#.81#.70#2#1#2#####
+39#Dbl Clr 3mm/13mm Air#2#2#2.79#.81#.70#2#2#2#####
+40#Dbl Clr 3mm/13mm Arg#2#2#2.61#.81#.70#2#4#2#####
+41#Dbl Clr 6mm/6mm Air#2#2#3.16#.78#.60#3#1#3#####
+42#Dbl Clr 6mm/13mm Air#2#2#2.74#.78#.60#3#2#3#####
+43#Dbl Clr 6mm/13mm Arg#2#2#2.56#.78#.60#3#4#3#####
+44#Dbl Clr Low Iron 3mm/6mm Air#2#2#3.23#.84#.81#14#1#14#####
+45#Dbl Clr Low Iron 3mm/13mm Air#2#2#2.79#.84#.81#14#2#14#####
+46#Dbl Clr Low Iron 3mm/13mm Arg#2#2#2.61#.84#.81#14#4#14#####
+47#Dbl Clr Low Iron 5mm/6mm Air#2#2#3.18#.83#.80#16#1#16#####
+48#Dbl Clr Low Iron 5mm/13mm Air#2#2#2.76#.83#.80#16#2#16#####
+49#Dbl Clr Low Iron 5mm/13mm Arg#2#2#2.58#.84#.81#16#4#16#####
+50#Dbl Bronze 3mm/6mm Air#2#2#3.23#.62#.54#5#1#2#####
+51#Dbl Bronze 3mm/13mm Air#2#2#2.79#.62#.54#5#2#2#####
+52#Dbl Bronze 3mm/13mm Arg#2#2#2.61#.62#.54#5#4#2#####
+53#Dbl Bronze 6mm/6mm Air#2#2#3.16#.47#.38#6#1#3#####
+54#Dbl Bronze 6mm/13mm Air#2#2#2.74#.47#.38#6#2#3#####
+55#Dbl Bronze 6mm/13mm Arg#2#2#2.56#.47#.38#6#4#3#####
+56#Dbl Green 3m/6mm Air#2#2#3.23#.74#.53#11#1#2#####
+57#Dbl Green 3mm/13mm Air#2#2#2.79#.74#.53#11#2#2#####
+58#Dbl Green 3mm/13mm Arg#2#2#2.61#.74#.53#11#4#2#####
+59#Dbl Green 6mm/6mm Air#2#2#3.16#.66#.38#12#1#3#####
+60#Dbl Green 6mm/13mm Air#2#2#2.74#.66#.38#12#2#3#####
+61#Dbl Green 6mm/13mm Arg#2#2#2.56#.66#.38#12#4#3#####
+62#Dbl Grey 3mm/6mm Air#2#2#3.23#.55#.53#8#1#2#####
+63#Dbl Grey 3mm/13mm Air#2#2#2.79#.55#.53#8#2#2#####
+64#Dbl Grey 3mm/13mm Arg#2#2#2.61#.55#.53#8#4#2#####
+65#Dbl Grey 6mm/6mm Air#2#2#3.16#.38#.35#9#1#3#####
+66#Dbl Grey 6mm/13mm Air#2#2#2.74#.38#.35#9#2#3#####
+67#Dbl Grey 6mm/13mm Arg#2#2#2.56#.38#.35#9#4#3#####
+68#Dbl Blue 6mm/6mm Air#2#2#3.16#.50#.37#17#1#3#####
+69#Dbl Blue 6mm/13mm Air#2#2#2.74#.50#.37#17#2#3#####
+70#Dbl Blue 6mm/13mm Arg#2#2#2.56#.50#.37#17#4#3#####
+71#Dbl Ref-A-L Clr 6mm/6mm Air#2#2#2.79#.07#.05#18#1#3#####
+72#Dbl Ref-A-L Clr 6mm/13mm Air#2#2#2.26#.07#.05#18#2#3#####
+73#Dbl Ref-A-L Clr 6mm/13mm Arg#2#2#2.02#.07#.05#18#4#3#####
+74#Dbl Ref-A-M Clr 6mm/6mm Air#2#2#2.86#.13#.09#19#1#3#####
+75#Dbl Ref-A-M Clr 6mm/13mm Air#2#2#2.35#.13#.09#19#2#3#####
+76#Dbl Ref-A-M Clr 6mm/13mm Arg#2#2#2.13#.13#.09#19#4#3#####
+77#Dbl Ref-A-H Clr 6mm/6mm Air#2#2#2.95#.18#.13#20#1#3#####
+78#Dbl Ref-A-H 6mm/13mm Air#2#2#2.47#.18#.13#20#2#3#####
+79#Dbl Ref-A-H Clr 6mm/13mm Arg#2#2#2.26#.18#.13#20#4#3#####
+80#Dbl Ref-A-L Tint 6mm/6mm Air#2#2#2.80#.05#.03#21#1#3#####
+81#Dbl Ref-A-L Tint 6mm/13mm Air#2#2#2.27#.05#.03#21#2#3#####
+82#Dbl Ref-A-L Tint 6mm/13mm Arg#2#2#2.04#.05#.03#21#4#3#####
+83#Dbl Ref-A-M Tint 6mm/6mm Air#2#2#2.86#.08#.05#22#1#3#####
+84#Dbl Ref-A-M Tint 6mm/13mm Air#2#2#2.35#.08#.05#22#2#3#####
+85#Dbl Ref-A-M Tint 6mm/13mm Arg#2#2#2.13#.08#.05#22#4#3#####
+86#Dbl Ref-A-H Tint 6mm/6mm Air#2#2#2.92#.09#.08#23#1#3#####
+87#Dbl Ref-A-H Tint 6mm/13mm Air#2#2#2.42#.09#.08#23#2#3#####
+88#Dbl Ref-A-H Tint 6mm/13mm Arg#2#2#2.21#.09#.08#23#4#3#####
+89#Dbl Ref-B-L Clr 6mm/6mm Air#2#2#2.96#.18#.12#24#1#3#####
+90#Dbl Ref-B-L Clr 6mm/13mm Air#2#2#2.48#.18#.12#24#2#3#####
+91#Dbl Ref-B-L Clr 6mm/13mm Arg#2#2#2.27#.18#.12#24#4#3#####
+92#Dbl Ref-B-H Clr 6mm/6mm Air#2#2#2.98#.27#.19#25#1#3#####
+93#Dbl Ref-B-H Clr 6mm/13mm Air#2#2#2.50#.27#.19#25#2#3#####
+94#Dbl Ref-B-H Clr 6mm/13mm Arg#2#2#2.30#.27#.19#25#4#3#####
+95#Dbl Ref-B-L Tint 6mm/6mm Air#2#2#2.80#.05#.03#26#1#3#####
+96#Dbl Ref-B-L Tint 6mm/13mm Air#2#2#2.27#.05#.03#26#2#3#####
+97#Dbl Ref-B-L Tint 6mm/13mm Arg#2#2#2.04#.05#.03#26#4#3#####
+98#Dbl Ref-B-M Tint 6mm/6mm Air#2#2#2.84#.12#.08#27#1#3#####
+99#Dbl Ref-B-M Tint 6mm/13mm Air#2#2#2.33#.12#.08#27#2#3#####
+100#Dbl Ref-B-M Tint 6mm/13mm Arg#2#2#2.10#.12#.08#27#4#3#####
+101#Dbl Ref-B-H Tint 6mm/6mm Air#2#2#2.98#.16#.12#28#1#3#####
+102#Dbl Ref-B-H Tint 6mm/13mm Air#2#2#2.50#.16#.12#28#2#3#####
+103#Dbl Ref B-H Tint 6mm/13mm Arg#2#2#2.30#.16#.12#28#4#3#####
+104#Dbl Ref-C-L Clr 6mm/6mm Air#2#2#2.82#.12#.09#29#1#3#####
+105#Dbl Ref-C-L Clr 6mm/13mm Air#2#2#2.30#.12#.09#29#2#3#####
+106#Dbl Ref-C-L Clr 6mm/13mm Arg#2#2#2.07#.12#.09#29#4#3#####
+107#Dbl Ref-C-M Clr 6mm/6mm Air#2#2#2.90#.17#.14#30#1#3#####
+108#Dbl Ref-C-M Clr 6mm/13mm Air#2#2#2.40#.17#.14#30#2#3#####
+109#Dbl Ref-C-M Clr 6mm/13mm Arg#2#2#2.18#.17#.14#30#4#3#####
+110#Dbl Ref-C-H Clr 6mm/6mm Air#2#2#2.94#.20#.16#31#1#3#####
+111#Dbl Ref-C-H Clr 6mm/13mm Air#2#2#2.45#.20#.16#31#2#3#####
+112#Dbl Ref-C-H Clr 6mm/13mm Arg#2#2#2.23#.20#.16#31#4#3#####
+113#Dbl Ref-C-L Tint 6mm/6mm Air#2#2#2.82#.07#.06#32#1#3#####
+114#Dbl Ref-C-L Tint 6mm/13mm Air#2#2#2.30#.07#.06#32#2#3#####
+115#Dbl Ref-C-L Tint 6mm/13mm Arg#2#2#2.07#.07#.06#32#4#3#####
+116#Dbl Ref-C-M Tint 6mm/6mm Air#2#2#2.90#.10#.08#33#1#3#####
+117#Dbl Ref-C-M Tint 6mm/13mm Air#2#2#2.40#.10#.08#33#2#3#####
+118#Dbl Ref-C-M Tint 6mm/13mm Arg#2#2#2.18#.10#.08#33#4#3#####
+119#Dbl Ref-C-H Tint 6mm/6mm Air#2#2#2.94#.12#.10#34#1#3#####
+120#Dbl Ref-C-H Tint 6mm/13mm Air#2#2#2.45#.12#.10#34#2#3#####
+121#Dbl Ref-C-H Tint 6mm/13mm Arg#2#2#2.23#.12#.10#34#4#3#####
+122#Dbl Ref-D Clr 6mm/6mm Air#2#2#3.15#.31#.34#35#1#3#####
+123#Dbl Ref-D Clr 6mm/13mm Air#2#2#2.72#.31#.34#35#2#3#####
+124#Dbl Ref-D Clr 6mm/13mm Arg#2#2#2.54#.31#.34#35#4#3#####
+125#Dbl Ref-D Tint 6mm/6mm Air#2#2#3.15#.23#.24#36#1#3#####
+126#Dbl Ref-D Tint 6mm/13mm Air#2#2#2.72#.23#.24#36#2#3#####
+127#Dbl Ref-D Tint 6mm/13mm Arg#2#2#2.54#.23#.24#36#4#3#####
+128#Dbl LoE (e2=.4) Clr 3mm/6mm Air#2#2#2.85#.77#.63#37#1#2#####
+129#Dbl LoE (e2=.4) Clr 3mm/13mm Air#2#2#2.30#.77#.63#37#2#2#####
+130#Dbl LoE (e2=.4) Clr 3mm/13mm Arg#2#2#2.05#.77#.63#37#4#2#####
+131#Dbl LoE (e2=.2) Clr 3mm/6mm Air#2#2#2.61#.74#.62#38#1#2#####
+132#Dbl LoE (e2=.2) Clr 3mm/13mm Air#2#2#1.99#.74#.62#38#2#2#####
+133#Dbl LoE (e2=.2) Clr 3mm/13mm Arg#2#2#1.70#.74#.62#38#4#2#####
+134#Dbl LoE (e2=.2) Clr 6mm/6mm Air#2#2#2.57#.72#.53#39#1#3#####
+135#Dbl LoE (e2=.2) Clr 6mm/13mm Air#2#2#1.96#.72#.53#39#2#3#####
+136#Dbl LoE (e2=.2) Clr 6mm/13mm Arg#2#2#1.67#.72#.53#39#4#3#####
+137#Dbl LoE (e2=.1) Clr 3mm/6mm Air#2#2#2.47#.77#.54#40#1#2#####
+138#Dbl LoE (e2=.1) Clr 3mm/13mm Air#2#2#1.81#.77#.54#40#2#2#####
+139#Dbl LoE (e2=.1) Clr 3mm/13mm Arg#2#2#1.48#.77#.54#40#4#2#####
+140#Dbl LoE (e2=.1) Clr 6mm/6mm Air#2#2#2.43#.75#.47#42#1#3#####
+141#Dbl LoE (e2=.1) Clr 6mm/13mm Air#2#2#1.78#.75#.47#42#2#3#####
+142#Dbl LoE (e2=.1) Clr 6mm/13mm Arg#2#2#1.46#.75#.47#42#4#3#####
+143#Dbl LoE (e2=.1) Tint 6mm/6mm Air#2#2#2.43#.44#.28#44#1#3#####
+144#Dbl LoE (e2=.1) Tint 6mm/13mm Air#2#2#1.78#.44#.28#44#2#3#####
+145#Dbl LoE (e2=.1) Tint 6mm/13mm Arg#2#2#1.46#.44#.28#44#4#3#####
+146#Dbl LoE (e3=.1) Clr 3mm/6mm Air#2#2#2.61#.74#.62#2#1#41#####
+147#Dbl LoE (e3=.1) Clr 3mm/13mm Air#2#2#1.99#.74#.62#2#2#41#####
+148#Dbl LoE (e3=.1) Clr 3mm/13mm Arg#2#2#1.70#.74#.62#2#4#41#####
+149#Dbl LoE Spec Sel Clr 3mm/6mm/6mm Air#2#2#2.38#.70#.39#45#1#3#####
+150#Dbl LoE Spec Sel Clr 3mm/13mm/6mm Air#2#2#1.68#.70#.39#45#2#3#####
+151#Dbl LoE Spec Sel Clr 3mm/13mm/6mm Arg#2#2#1.34#.70#.39#45#4#3#####
+152#Dbl LoE Spec Sel Clr 6mm/6mm Air#2#2#2.41#.68#.34#46#1#3#####
+153#Dbl LoE Spec Sel Clr 6mm/13mm Air#2#2#1.67#.68#.34#46#2#3#####
+154#Dbl LoE Spec Sel Clr 6mm/13mm Arg#2#2#1.32#.68#.34#46#4#3#####
+155#Dbl LoE Spec Sel Tint 6mm/6mm Air#2#2#2.41#.41#.21#48#1#3#####
+156#Dbl LoE Spec Sel Tint 6mm/13mm Air#2#2#1.67#.41#.21#48#2#3#####
+157#Dbl LoE Spec Sel Tint 6mm/13mm Arg#2#2#1.32#.41#.21#48#4#3#####
+158#Dbl Elec Abs Bleached 6mm/6mm Air#2#2#2.43#.76#.64#59#1#3#####
+159#Dbl Elec Abs Colored 6mm/6mm Air#2#2#2.43#.12#.09#60#1#3#####
+160#Dbl Elec Abs Bleached 6mm/13mm Air#2#2#1.78#.76#.64#59#2#3#####
+161#Dbl Elec Abs Colored 6mm/13mm Air#2#2#1.78#.12#.16#60#2#3#####
+162#Dbl Elec Abs Bleached 6mm/13mm Arg#2#2#1.49#.76#.64#59#4#3#####
+163#Dbl Elec Abs Colored 6mm/13mm Arg#2#2#1.49#.12#.09#60#4#3#####
+164#Dbl Elec Ref Bleached 6mm/6mm Air#2#2#2.43#.73#.55#61#1#3#####
+165#Dbl Elec Ref Colored 6mm/6mm Air#2#2#2.43#.14#.09#62#1#3#####
+166#Dbl Elec Ref Bleached 6mm/13mm Air#2#2#1.78#.73#.55#61#2#3#####
+167#Dbl Elec Ref Colored 6mm/13mm Air#2#2#1.78#.14#.09#62#2#3#####
+168#Dbl Elec Ref Bleached 6mm/13mm Arg#2#2#1.49#.73#.55#61#4#3#####
+169#Dbl Elec Ref Colored 6mm/13mm Arg#2#2#1.49#.14#.09#62#4#3#####
+170#Dbl LoE Elec Abs Bleached 6mm/6mm Air#2#2#2.33#.66#.34#59#1#47#####
+171#Dbl LoE Elec Abs Colored 6mm/6mm Air#2#2#2.33#.10#.06#60#1#47#####
+172#Dbl LoE Elec Abs Bleached 6mm/13mm Air#2#2#1.64#.66#.34#59#2#47#####
+173#Dbl LoE Elec Abs Colored 6mm/13mm Air#2#2#1.64#.10#.06#60#2#47#####
+174#Dbl LoE Elec Abs Bleached 6mm/13mm Arg#2#2#1.33#.66#.34#59#4#47#####
+175#Dbl LoE Elec Abs Colored 6mm/13mm Arg#2#2#1.33#.10#.06#60#4#47#####
+176#Dbl LoE Elec Ref Bleached 6mm/6mm Air#2#2#2.33#.64#.32#61#1#47#####
+177#Dbl LoE Elec Ref Colored 6mm/6mm Air#2#2#2.33#.12#.07#62#1#47#####
+178#Dbl LoE Elec Ref Bleached 6mm/13mm Air#2#2#1.64#.64#.32#61#2#47#####
+179#Dbl LoE Elec Ref Colored 6mm/13mm Air#2#2#1.64#.12#.07#62#2#47#####
+180#Dbl LoE Elec Ref Bleached 6mm/13mm Arg#2#2#1.33#.64#.32#61#4#47#####
+181#Dbl LoE Elec Ref Colored 6mm/13m Arg#2#2#1.33#.12#.07#62#4#47#####
+182#Trp Clr 3mm/6mm Air#3#3#2.19#.74#.60#2#1#2#1#2###
+183#Trp Clr 3mm/13mm Air#3#3#1.79#.74#.60#2#2#2#2#2###
+184#Trp Clr 3mm/13mm Arg#3#3#1.64#.74#.60#2#4#2#4#2###
+185#Trp LoE (e5=.1) Clr 3mm/6mm Air#3#3#1.81#.70#.46#2#1#2#1#41###
+186#Trp LoE (e5=.1) Clr 3mm/13mm Air#3#3#1.28#.70#.46#2#2#2#2#41###
+187#Trp LoE (e5=.1) Clr 3mm/13mm Arg#3#3#1.06#.70#.46#2#4#2#4#41###
+188#Trp LoE (e2=e5=.1) Clr 3mm/6mm Air#3#3#1.55#.66#.36#40#1#2#1#41###
+189#Trp LoE (e2=e5=.1) Clr 3mm/13mm Air#3#3#0.99#.66#.36#40#2#2#2#41###
+190#Trp LoE (e2=e5=.1) Clr 3mm/13mm Arg#3#3#0.77#.66#.36#40#4#2#4#41###
+191#Trp LoE Film (88) Clr 3mm/6mm Air#3#3#1.83#.71#.48#2#1#49#1#2###
+192#Trp LoE Film (88) Clr 3mm/13mm Air#3#3#1.32#.71#.48#2#2#49#2#2###
+193#Trp LoE Film (77) Clr 3mm/6mm Air#3#3#1.79#.64#.38#2#1#50#1#2###
+194#Trp LoE Film (77) Clr 3mm/13mm Air#3#3#1.26#.64#.38#2#2#50#2#2###
+195#Trp LoE Film (66) Clr 6mm/6mm Air#3#3#1.75#.54#.26#3#1#51#1#3###
+196#Trp LoE Film (66) Clr 6mm/13mm Air#3#3#1.23#.54#.26#3#2#51#2#3###
+197#Trp LoE Film (66) Bronze 6mm/6mm Air#3#3#1.75#.32#.16#6#1#51#1#3###
+198#Trp LoE Film (66) Bronze 6mm/13mm Air#3#3#1.23#.32#.16#6#2#51#2#3###
+199#Trp LoE Film (55) Clr 6mm/6mm Air#3#3#1.74#.45#.21#3#1#52#1#3###
+200#Trp LoE Film (55) Clr 6mm/13m Air#3#3#1.22#.45#.21#3#2#52#2#3###
+201#Trp LoE Film (55) Bronze 6mm/6mm Air#3#3#1.74#.27#.13#6#1#52#1#3###
+202#Trp LoE Film (55) Bronze 6mm/13mm Air#3#3#1.22#.27#.13#6#2#52#2#3###
+203#Trp LoE Film (44) Bronze 6mm/6mm Air#3#3#1.74#.22#.10#6#1#53#1#3###
+204#Trp LoE Film (44) Bronze 6mm/13mm Air#3#3#1.21#.22#.10#6#2#53#2#3###
+205#Trp LoE Film (33) Bronze 6mm/6mm Air#3#3#1.74#.17#.07#6#1#54#1#3###
+206#Trp LoE Film (33) Bronze 6mm/13mm Air#3#3#1.20#.17#.07#6#2#54#2#3###
+207#Quadruple LoE Films (88) 3mm/8mm Krypton#4#4#0.66#.62#.34#2#7#49#5#49#7#2#

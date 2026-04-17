@@ -1,0 +1,15 @@
+green-retrofit-frontend/node_modules/
+green-retrofit-frontend/dist/
+green-retrofit-frontend/.eslintcache
+
+green-retrofit-backend/__pycache__/
+green-retrofit-backend/temp_workspace/
+green-retrofit-backend/venv/
+green-retrofit-backend/env/
+
+_data/eplusout*
+_data/*.zip
+
+.DS_Store
+*.pyc
+.env

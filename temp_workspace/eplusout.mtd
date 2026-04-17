@@ -1,0 +1,1518 @@
+
+ Meters for 7,Z1-1_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-1 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z1-1 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z1-1 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 128,Z1-2_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-2 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z1-2 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z1-2 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 165,Z1-3_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-3 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z1-3 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z1-3 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 202,Z1-4_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-4 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z1-4 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z1-4 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 239,Z2-1_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-1 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z2-1 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z2-1 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 276,Z2-2_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-2 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z2-2 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z2-2 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 313,Z2-3_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-3 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z2-3 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z2-3 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 350,Z2-4_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-4 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z2-4 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z2-4 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 387,Z3-1_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-1 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z3-1 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z3-1 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 424,Z3-2_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-2 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z3-2 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z3-2 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 461,Z3-3_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-3 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z3-3 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z3-3 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 498,Z3-4_LGT:Lights Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-4 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorLights:Electricity [J]
+  OnMeter=InteriorLights:Electricity:Zone:Z3-4 [J]
+  OnMeter=InteriorLights:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorLights:Electricity [J]
+  OnMeter=General:InteriorLights:Electricity:Zone:Z3-4 [J]
+  OnMeter=General:InteriorLights:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 535,Z1-1_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-1 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z1-1 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z1-1 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 608,Z1-2_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-2 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z1-2 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z1-2 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 633,Z1-3_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-3 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z1-3 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z1-3 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 658,Z1-4_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z1-4 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z1-4 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z1-4 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 683,Z2-1_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-1 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z2-1 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z2-1 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 708,Z2-2_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-2 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z2-2 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z2-2 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 733,Z2-3_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-3 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z2-3 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z2-3 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 758,Z2-4_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z2-4 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z2-4 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z2-4 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 783,Z3-1_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-1 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z3-1 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z3-1 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 808,Z3-2_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-2 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z3-2 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z3-2 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 833,Z3-3_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-3 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z3-3 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z3-3 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 858,Z3-4_EQP:Electric Equipment Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:Z3-4 [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:Z3-4 [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=General:InteriorEquipment:Electricity [J]
+  OnMeter=General:InteriorEquipment:Electricity:Zone:Z3-4 [J]
+  OnMeter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 883,Z1-1:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-1 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z1-1 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z1-1 [J]
+
+ Meters for 968,Z1-1:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-1 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z1-1 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z1-1 [J]
+
+ Meters for 1017,Z1-2:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-2 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z1-2 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z1-2 [J]
+
+ Meters for 1054,Z1-2:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-2 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z1-2 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z1-2 [J]
+
+ Meters for 1079,Z1-3:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-3 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z1-3 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z1-3 [J]
+
+ Meters for 1116,Z1-3:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-3 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z1-3 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z1-3 [J]
+
+ Meters for 1141,Z1-4:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-4 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z1-4 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z1-4 [J]
+
+ Meters for 1178,Z1-4:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z1-4 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z1-4 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z1-4 [J]
+
+ Meters for 1203,Z2-1:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-1 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z2-1 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z2-1 [J]
+
+ Meters for 1240,Z2-1:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-1 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z2-1 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z2-1 [J]
+
+ Meters for 1265,Z2-2:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-2 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z2-2 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z2-2 [J]
+
+ Meters for 1302,Z2-2:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-2 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z2-2 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z2-2 [J]
+
+ Meters for 1327,Z2-3:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-3 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z2-3 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z2-3 [J]
+
+ Meters for 1364,Z2-3:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-3 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z2-3 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z2-3 [J]
+
+ Meters for 1389,Z2-4:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-4 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z2-4 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z2-4 [J]
+
+ Meters for 1426,Z2-4:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z2-4 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z2-4 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z2-4 [J]
+
+ Meters for 1451,Z3-1:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-1 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z3-1 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z3-1 [J]
+
+ Meters for 1488,Z3-1:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-1 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z3-1 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z3-1 [J]
+
+ Meters for 1513,Z3-2:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-2 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z3-2 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z3-2 [J]
+
+ Meters for 1550,Z3-2:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-2 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z3-2 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z3-2 [J]
+
+ Meters for 1575,Z3-3:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-3 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z3-3 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z3-3 [J]
+
+ Meters for 1612,Z3-3:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-3 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z3-3 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z3-3 [J]
+
+ Meters for 1637,Z3-4:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-4 [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:Z3-4 [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:Z3-4 [J]
+
+ Meters for 1674,Z3-4:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:Z3-4 [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:Z3-4 [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:Z3-4 [J]
+
+ Meters for 1701,Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1750,Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1801,Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1802,Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1805,Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1806,Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1809,Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1810,Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1813,Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1814,Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1817,Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1818,Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1821,Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1822,Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1825,Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1826,Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1829,Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1830,Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1833,Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1834,Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1837,Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1838,Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1841,Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy [J]
+  OnMeter=DistrictHeatingWater:Facility [J]
+  OnMeter=DistrictHeatingWater:HVAC [J]
+  OnMeter=Heating:DistrictHeatingWater [J]
+  OnMeter=General:Heating:DistrictHeatingWater [J]
+
+ Meters for 1842,Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy [J]
+  OnMeter=DistrictCooling:Facility [J]
+  OnMeter=DistrictCooling:HVAC [J]
+  OnMeter=Cooling:DistrictCooling [J]
+  OnMeter=General:Cooling:DistrictCooling [J]
+
+ Meters for 1843,Whole Building:Facility Total Purchased Electricity Energy [J]
+  OnMeter=ElectricityPurchased:Facility [J]
+  OnMeter=ElectricityPurchased:Plant [J]
+  OnMeter=Cogeneration:ElectricityPurchased [J]
+  OnMeter=General:Cogeneration:ElectricityPurchased [J]
+
+ Meters for 1892,Whole Building:Facility Total Surplus Electricity Energy [J]
+  OnMeter=ElectricitySurplusSold:Facility [J]
+  OnMeter=ElectricitySurplusSold:Plant [J]
+  OnMeter=Cogeneration:ElectricitySurplusSold [J]
+  OnMeter=General:Cogeneration:ElectricitySurplusSold [J]
+
+ Meters for 1941,Whole Building:Facility Net Purchased Electricity Energy [J]
+  OnMeter=ElectricityNet:Facility [J]
+  OnMeter=ElectricityNet:Plant [J]
+  OnMeter=Cogeneration:ElectricityNet [J]
+  OnMeter=General:Cogeneration:ElectricityNet [J]
+
+ Meters for 1990,Site:Environmental Impact Total N2O Emissions Carbon Equivalent Mass [kg]
+  OnMeter=Carbon Equivalent:Facility [kg]
+  OnMeter=CarbonEquivalentEmissions:Carbon Equivalent [kg]
+
+ Meters for 2015,Site:Environmental Impact Total CH4 Emissions Carbon Equivalent Mass [kg]
+  OnMeter=Carbon Equivalent:Facility [kg]
+  OnMeter=CarbonEquivalentEmissions:Carbon Equivalent [kg]
+
+ Meters for 2016,Site:Environmental Impact Total CO2 Emissions Carbon Equivalent Mass [kg]
+  OnMeter=Carbon Equivalent:Facility [kg]
+  OnMeter=CarbonEquivalentEmissions:Carbon Equivalent [kg]
+
+ For Meter=Electricity:Facility [J], ResourceType=Electricity, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=Electricity:Building [J], ResourceType=Electricity, Group=Building, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=Electricity:Zone:Z1-1 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, Group=SpaceType, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity [J], ResourceType=Electricity, EndUse=InteriorLights, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z1-1 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+
+ For Meter=InteriorLights:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorLights, Group=SpaceType, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity [J], ResourceType=Electricity, EndUse=InteriorLights, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z1-1 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorLights, Group=SpaceType, contents are:
+  Z1-1_LGT:Lights Electricity Energy
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-4_LGT:Lights Electricity Energy
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-4_LGT:Lights Electricity Energy
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-4_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z1-2 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z1-2_LGT:Lights Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z1-2 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-2_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z1-2 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-2_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z1-3 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z1-3_LGT:Lights Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z1-3 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-3_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z1-3 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-3_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z1-4 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z1-4_LGT:Lights Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z1-4 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-4_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z1-4 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z1-4_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z2-1 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z2-1_LGT:Lights Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z2-1 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-1_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z2-1 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-1_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z2-2 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z2-2_LGT:Lights Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z2-2 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-2_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z2-2 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-2_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z2-3 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z2-3_LGT:Lights Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z2-3 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-3_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z2-3 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-3_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z2-4 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z2-4_LGT:Lights Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z2-4 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-4_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z2-4 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z2-4_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z3-1 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z3-1_LGT:Lights Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z3-1 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-1_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z3-1 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-1_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z3-2 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z3-2_LGT:Lights Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z3-2 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-2_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z3-2 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-2_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z3-3 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z3-3_LGT:Lights Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z3-3 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-3_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z3-3 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-3_LGT:Lights Electricity Energy
+
+ For Meter=Electricity:Zone:Z3-4 [J], ResourceType=Electricity, Group=Zone, contents are:
+  Z3-4_LGT:Lights Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorLights:Electricity:Zone:Z3-4 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-4_LGT:Lights Electricity Energy
+
+ For Meter=General:InteriorLights:Electricity:Zone:Z3-4 [J], ResourceType=Electricity, EndUse=InteriorLights, Group=Zone, contents are:
+  Z3-4_LGT:Lights Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity [J], ResourceType=Electricity, EndUse=InteriorEquipment, contents are:
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z1-1 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=SpaceType, contents are:
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity [J], ResourceType=Electricity, EndUse=InteriorEquipment, contents are:
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z1-1 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=SpaceType, contents are:
+  Z1-1_EQP:Electric Equipment Electricity Energy
+  Z1-2_EQP:Electric Equipment Electricity Energy
+  Z1-3_EQP:Electric Equipment Electricity Energy
+  Z1-4_EQP:Electric Equipment Electricity Energy
+  Z2-1_EQP:Electric Equipment Electricity Energy
+  Z2-2_EQP:Electric Equipment Electricity Energy
+  Z2-3_EQP:Electric Equipment Electricity Energy
+  Z2-4_EQP:Electric Equipment Electricity Energy
+  Z3-1_EQP:Electric Equipment Electricity Energy
+  Z3-2_EQP:Electric Equipment Electricity Energy
+  Z3-3_EQP:Electric Equipment Electricity Energy
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z1-2 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z1-2 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z1-3 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z1-3 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z1-4 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z1-4 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z1-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z2-1 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z2-1 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z2-2 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z2-2 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z2-3 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z2-3 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z2-4 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z2-4 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z2-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z3-1 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z3-1 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-1_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z3-2 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z3-2 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-2_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z3-3 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z3-3 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-3_EQP:Electric Equipment Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:Z3-4 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=General:InteriorEquipment:Electricity:Zone:Z3-4 [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  Z3-4_EQP:Electric Equipment Electricity Energy
+
+ For Meter=EnergyTransfer:Facility [J], ResourceType=EnergyTransfer, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+  Z1-1:Zone Air System Sensible Cooling Energy
+  Z1-2:Zone Air System Sensible Heating Energy
+  Z1-2:Zone Air System Sensible Cooling Energy
+  Z1-3:Zone Air System Sensible Heating Energy
+  Z1-3:Zone Air System Sensible Cooling Energy
+  Z1-4:Zone Air System Sensible Heating Energy
+  Z1-4:Zone Air System Sensible Cooling Energy
+  Z2-1:Zone Air System Sensible Heating Energy
+  Z2-1:Zone Air System Sensible Cooling Energy
+  Z2-2:Zone Air System Sensible Heating Energy
+  Z2-2:Zone Air System Sensible Cooling Energy
+  Z2-3:Zone Air System Sensible Heating Energy
+  Z2-3:Zone Air System Sensible Cooling Energy
+  Z2-4:Zone Air System Sensible Heating Energy
+  Z2-4:Zone Air System Sensible Cooling Energy
+  Z3-1:Zone Air System Sensible Heating Energy
+  Z3-1:Zone Air System Sensible Cooling Energy
+  Z3-2:Zone Air System Sensible Heating Energy
+  Z3-2:Zone Air System Sensible Cooling Energy
+  Z3-3:Zone Air System Sensible Heating Energy
+  Z3-3:Zone Air System Sensible Cooling Energy
+  Z3-4:Zone Air System Sensible Heating Energy
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Building [J], ResourceType=EnergyTransfer, Group=Building, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+  Z1-1:Zone Air System Sensible Cooling Energy
+  Z1-2:Zone Air System Sensible Heating Energy
+  Z1-2:Zone Air System Sensible Cooling Energy
+  Z1-3:Zone Air System Sensible Heating Energy
+  Z1-3:Zone Air System Sensible Cooling Energy
+  Z1-4:Zone Air System Sensible Heating Energy
+  Z1-4:Zone Air System Sensible Cooling Energy
+  Z2-1:Zone Air System Sensible Heating Energy
+  Z2-1:Zone Air System Sensible Cooling Energy
+  Z2-2:Zone Air System Sensible Heating Energy
+  Z2-2:Zone Air System Sensible Cooling Energy
+  Z2-3:Zone Air System Sensible Heating Energy
+  Z2-3:Zone Air System Sensible Cooling Energy
+  Z2-4:Zone Air System Sensible Heating Energy
+  Z2-4:Zone Air System Sensible Cooling Energy
+  Z3-1:Zone Air System Sensible Heating Energy
+  Z3-1:Zone Air System Sensible Cooling Energy
+  Z3-2:Zone Air System Sensible Heating Energy
+  Z3-2:Zone Air System Sensible Cooling Energy
+  Z3-3:Zone Air System Sensible Heating Energy
+  Z3-3:Zone Air System Sensible Cooling Energy
+  Z3-4:Zone Air System Sensible Heating Energy
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z1-1 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+  Z1-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Heating, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+  Z1-2:Zone Air System Sensible Heating Energy
+  Z1-3:Zone Air System Sensible Heating Energy
+  Z1-4:Zone Air System Sensible Heating Energy
+  Z2-1:Zone Air System Sensible Heating Energy
+  Z2-2:Zone Air System Sensible Heating Energy
+  Z2-3:Zone Air System Sensible Heating Energy
+  Z2-4:Zone Air System Sensible Heating Energy
+  Z3-1:Zone Air System Sensible Heating Energy
+  Z3-2:Zone Air System Sensible Heating Energy
+  Z3-3:Zone Air System Sensible Heating Energy
+  Z3-4:Zone Air System Sensible Heating Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z1-1 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Heating, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+  Z1-2:Zone Air System Sensible Heating Energy
+  Z1-3:Zone Air System Sensible Heating Energy
+  Z1-4:Zone Air System Sensible Heating Energy
+  Z2-1:Zone Air System Sensible Heating Energy
+  Z2-2:Zone Air System Sensible Heating Energy
+  Z2-3:Zone Air System Sensible Heating Energy
+  Z2-4:Zone Air System Sensible Heating Energy
+  Z3-1:Zone Air System Sensible Heating Energy
+  Z3-2:Zone Air System Sensible Heating Energy
+  Z3-3:Zone Air System Sensible Heating Energy
+  Z3-4:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z1-1 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-1:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Cooling, contents are:
+  Z1-1:Zone Air System Sensible Cooling Energy
+  Z1-2:Zone Air System Sensible Cooling Energy
+  Z1-3:Zone Air System Sensible Cooling Energy
+  Z1-4:Zone Air System Sensible Cooling Energy
+  Z2-1:Zone Air System Sensible Cooling Energy
+  Z2-2:Zone Air System Sensible Cooling Energy
+  Z2-3:Zone Air System Sensible Cooling Energy
+  Z2-4:Zone Air System Sensible Cooling Energy
+  Z3-1:Zone Air System Sensible Cooling Energy
+  Z3-2:Zone Air System Sensible Cooling Energy
+  Z3-3:Zone Air System Sensible Cooling Energy
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z1-1 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Cooling, contents are:
+  Z1-1:Zone Air System Sensible Cooling Energy
+  Z1-2:Zone Air System Sensible Cooling Energy
+  Z1-3:Zone Air System Sensible Cooling Energy
+  Z1-4:Zone Air System Sensible Cooling Energy
+  Z2-1:Zone Air System Sensible Cooling Energy
+  Z2-2:Zone Air System Sensible Cooling Energy
+  Z2-3:Zone Air System Sensible Cooling Energy
+  Z2-4:Zone Air System Sensible Cooling Energy
+  Z3-1:Zone Air System Sensible Cooling Energy
+  Z3-2:Zone Air System Sensible Cooling Energy
+  Z3-3:Zone Air System Sensible Cooling Energy
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z1-1 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z1-2 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z1-2:Zone Air System Sensible Heating Energy
+  Z1-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z1-2 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-2:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z1-2 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-2:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z1-2 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z1-2 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z1-3 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z1-3:Zone Air System Sensible Heating Energy
+  Z1-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z1-3 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-3:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z1-3 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-3:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z1-3 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z1-3 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z1-4 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z1-4:Zone Air System Sensible Heating Energy
+  Z1-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z1-4 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-4:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z1-4 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z1-4:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z1-4 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z1-4 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z1-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z2-1 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z2-1:Zone Air System Sensible Heating Energy
+  Z2-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z2-1 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-1:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z2-1 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-1:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z2-1 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z2-1 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z2-2 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z2-2:Zone Air System Sensible Heating Energy
+  Z2-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z2-2 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-2:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z2-2 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-2:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z2-2 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z2-2 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z2-3 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z2-3:Zone Air System Sensible Heating Energy
+  Z2-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z2-3 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-3:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z2-3 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-3:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z2-3 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z2-3 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z2-4 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z2-4:Zone Air System Sensible Heating Energy
+  Z2-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z2-4 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-4:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z2-4 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z2-4:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z2-4 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z2-4 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z2-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z3-1 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z3-1:Zone Air System Sensible Heating Energy
+  Z3-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z3-1 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-1:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z3-1 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-1:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z3-1 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z3-1 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-1:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z3-2 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z3-2:Zone Air System Sensible Heating Energy
+  Z3-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z3-2 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-2:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z3-2 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-2:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z3-2 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z3-2 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-2:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z3-3 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z3-3:Zone Air System Sensible Heating Energy
+  Z3-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z3-3 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-3:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z3-3 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-3:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z3-3 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z3-3 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-3:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:Z3-4 [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  Z3-4:Zone Air System Sensible Heating Energy
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:Z3-4 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-4:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:Z3-4 [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  Z3-4:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:Z3-4 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:Z3-4 [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  Z3-4:Zone Air System Sensible Cooling Energy
+
+ For Meter=DistrictHeatingWater:Facility [J], ResourceType=DistrictHeatingWater, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+
+ For Meter=DistrictHeatingWater:HVAC [J], ResourceType=DistrictHeatingWater, Group=HVAC, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+
+ For Meter=Heating:DistrictHeatingWater [J], ResourceType=DistrictHeatingWater, EndUse=Heating, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+
+ For Meter=General:Heating:DistrictHeatingWater [J], ResourceType=DistrictHeatingWater, EndUse=Heating, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Heating Fuel Energy
+
+ For Meter=DistrictCooling:Facility [J], ResourceType=DistrictCooling, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+
+ For Meter=DistrictCooling:HVAC [J], ResourceType=DistrictCooling, Group=HVAC, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+
+ For Meter=Cooling:DistrictCooling [J], ResourceType=DistrictCooling, EndUse=Cooling, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+
+ For Meter=General:Cooling:DistrictCooling [J], ResourceType=DistrictCooling, EndUse=Cooling, contents are:
+  Z1-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z1-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z2-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-1_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-2_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-3_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+  Z3-4_IDEAL:Zone Ideal Loads Supply Air Total Cooling Fuel Energy
+
+ For Meter=ElectricityPurchased:Facility [J], ResourceType=ElectricityPurchased, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=ElectricityPurchased:Plant [J], ResourceType=ElectricityPurchased, Group=Plant, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=Cogeneration:ElectricityPurchased [J], ResourceType=ElectricityPurchased, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=General:Cogeneration:ElectricityPurchased [J], ResourceType=ElectricityPurchased, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=ElectricitySurplusSold:Facility [J], ResourceType=ElectricitySurplusSold, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=ElectricitySurplusSold:Plant [J], ResourceType=ElectricitySurplusSold, Group=Plant, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=Cogeneration:ElectricitySurplusSold [J], ResourceType=ElectricitySurplusSold, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=General:Cogeneration:ElectricitySurplusSold [J], ResourceType=ElectricitySurplusSold, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=ElectricityNet:Facility [J], ResourceType=ElectricityNet, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=ElectricityNet:Plant [J], ResourceType=ElectricityNet, Group=Plant, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=Cogeneration:ElectricityNet [J], ResourceType=ElectricityNet, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=General:Cogeneration:ElectricityNet [J], ResourceType=ElectricityNet, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=Carbon Equivalent:Facility [kg], ResourceType=Carbon Equivalent, contents are:
+  Site:Environmental Impact Total N2O Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CH4 Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CO2 Emissions Carbon Equivalent Mass
+
+ For Meter=CarbonEquivalentEmissions:Carbon Equivalent [kg], ResourceType=Carbon Equivalent, EndUse=CarbonEquivalentEmissions, contents are:
+  Site:Environmental Impact Total N2O Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CH4 Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CO2 Emissions Carbon Equivalent Mass
