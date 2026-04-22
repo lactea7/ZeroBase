@@ -1,5 +1,5 @@
 # src/gbxml_parser.py
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import re
 
 def strip_ns_and_lower(tag):
