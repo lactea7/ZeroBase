@@ -1116,7 +1116,7 @@ export default function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post('http://localhost:8000/api/upload-gbxml', formData);
+      const response = await axios.post('https://kaebseuton.onrender.com/api/upload-gbxml', formData);
       if (response.data && response.data.data) {
         setSurfaces(response.data.data.surfaces || []);
         const mappedZones = (response.data.data.zones || []).map((z) => ({
@@ -1196,7 +1196,7 @@ export default function App() {
 
     try {
       const payload = { projectData: projectData, zones: zones, surfaces: surfaces };
-      const response = await axios.post('http://localhost:8000/api/simulate', payload);
+      const response = await axios.post('https://kaebseuton.onrender.com/api/simulate', payload);
 
       clearInterval(interval);
       setRes(response.data.result);
@@ -1205,7 +1205,7 @@ export default function App() {
       setActiveResultTab('energy'); 
     } catch (error) {
       clearInterval(interval);
-      alert('백엔드 시뮬레이션 연동에 실패했습니다. 파이썬 서버(http://localhost:8000)가 켜져 있는지 확인하세요.');
+      alert('백엔드 시뮬레이션 연동에 실패했습니다. 파이썬 서버(https://kaebseuton.onrender.com)가 정상 동작하는지 확인하세요.');
       setStep('floorView');
     }
   };
