@@ -344,7 +344,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     # 💡 2단계: IDF 생성 (압축 해제 및 정렬)
     # =========================================================
     with open(idf_path_abs, "w", encoding="utf-8") as f:
-        f.write("Version, 25.2;\n")
+        idf_version = os.environ.get("EP_VERSION", "25.2")
+        f.write(f"Version, {idf_version};\n")
         f.write("SimulationControl, No, No, No, No, Yes;\n")
         f.write(f"Building, {project_data.get('name', 'BEM_Project')}, {project_data.get('orientation', 0)}, Suburbs, 0.04, 0.4, FullExterior, 25, 6;\n")
         f.write("SurfaceConvectionAlgorithm:Inside, TARP;\n")
