@@ -76,10 +76,10 @@ def parse_gbxml_to_json(filepath: str):
         }
         
     # 4. 면(Surface) 추출 및 층(Floor) 동적 슬라이싱
-    for surf in root.findall('.//surface'):
+    all_surfaces = root.findall('.//surface')
+    for surf in all_surfaces:
         surf_id = get_attr(surf, 'id')
         surf_type = get_attr(surf, 'surfacetype') or "Unknown"
-            
         adj_spaces = surf.findall('.//adjacentspaceid')
         space_1 = get_attr(adj_spaces[0], 'spaceidref') if len(adj_spaces) > 0 else None
         space_2 = get_attr(adj_spaces[1], 'spaceidref') if len(adj_spaces) > 1 else None

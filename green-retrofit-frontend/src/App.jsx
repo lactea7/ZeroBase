@@ -959,7 +959,7 @@ const BuildingViewer = ({
 export default function App() {
   const [step, setStep] = useState('upload');
   const [selectedMetric, setSelectedMetric] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   const [projectData, setProjectData] = useState({
     name: '신규 프로젝트',
@@ -1488,11 +1488,14 @@ export default function App() {
 
       <div className={`h-screen w-full transition-colors duration-300 ${theme.bg} font-sans flex flex-col overflow-hidden`}>
         <header className={`flex-shrink-0 px-8 py-4 border-b ${isDarkMode ? 'border-slate-800 bg-[#0B0F19]' : 'border-[#D5D2C9] bg-[#DFDCD5]'} flex justify-between items-center z-10 shadow-sm`}>
-          <div className="flex items-center gap-3">
+          <div 
+            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
+            onClick={() => setStep('upload')}
+          >
             <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg">
               <Layers className="text-white" size={18} />
             </div>
-            <h1 className="text-lg font-black tracking-tighter uppercase">Green Retrofit AI</h1>
+            <h1 className="text-lg font-black tracking-tighter uppercase">ZeroBase</h1>
           </div>
           <div className="hidden md:flex items-center gap-4 text-[10px] font-black tracking-widest uppercase opacity-60">
             <span className={step === 'upload' ? 'text-emerald-500' : ''}>1. Project Setup</span> <ArrowRight size={10} />
@@ -1516,9 +1519,9 @@ export default function App() {
         <main className="flex-1 flex overflow-hidden relative w-full h-full">
           {/* STEP 1: Upload & Project Setup */}
           {step === 'upload' && (
-            <div className="w-full h-full max-w-5xl mx-auto p-8 pt-12 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto custom-scrollbar">
+            <div className="w-full h-full mx-auto px-6 pt-8 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto custom-scrollbar">
               <div className="text-center mb-12">
-                <h2 className={`text-5xl font-black mb-6 tracking-tight ${theme.textMain}`}>전문가용 BEM 에너지 모델링</h2>
+                <h2 className={`text-5xl font-black mb-6 tracking-tight ${theme.textMain}`}>BEM 에너지 시뮬레이션</h2>
                 <p className={`text-lg ${theme.textSub}`}>BIM 형상 데이터를 분석하고 각 객체의 열역학적 속성과 신재생 설비를 튜닝하세요.</p>
               </div>
 
