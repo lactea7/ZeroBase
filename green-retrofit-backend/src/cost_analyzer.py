@@ -69,8 +69,8 @@ class LCCAnalyzer:
             "avg_prices": {
                 "window": 250000,
                 "insulation": 45000,
-                "led": 120000,
-                "hvac_kw": 200000
+                "led": 30000,
+                "hvac_kw": 2000000
             },
             "window_db": []
         }

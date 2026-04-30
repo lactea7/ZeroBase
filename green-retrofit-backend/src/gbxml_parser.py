@@ -9,6 +9,19 @@ def strip_ns_and_lower(tag):
         tag = tag.split(':')[-1]
     return tag.lower()
 
+def calculate_surface_area(vertices):
+    if len(vertices) < 3: 
+        return 0.0
+    nx, ny, nz = 0.0, 0.0, 0.0
+    for i in range(len(vertices)):
+        v1 = vertices[i]
+        v2 = vertices[(i + 1) % len(vertices)]
+        nx += (v1[1] - v2[1]) * (v1[2] + v2[2])
+        ny += (v1[2] - v2[2]) * (v1[0] + v2[0])
+        nz += (v1[0] - v2[0]) * (v1[1] + v2[1])
+    import math
+    return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
+
 def get_attr(elem, attr_name):
     """대소문자 및 네임스페이스 구분 없이 속성 값을 안전하게 가져옵니다."""
     if elem is None: return None
@@ -149,6 +162,9 @@ def parse_gbxml_to_json(filepath: str):
             "openings": []
         }
 
+        surf_area = calculate_surface_area(vertices)
+        total_op_area = 0.0
+
         # 5. 창문/문(Opening) 파싱
         for opening in surf.findall('.//opening'):
             op_id = get_attr(opening, 'id')
@@ -171,6 +187,9 @@ def parse_gbxml_to_json(filepath: str):
                         except:
                             pass
             
+            if len(op_verts) >= 3:
+                total_op_area += calculate_surface_area(op_verts)
+                
             surface_data["openings"].append({
                 "id": op_id,
                 "type": op_type or "Unknown",
@@ -178,6 +197,11 @@ def parse_gbxml_to_json(filepath: str):
                 "uValue": 2.5,
                 "shgc": 0.7
             })
+
+        # WWR 계산 반영
+        if surf_area > 0 and total_op_area > 0:
+            calc_wwr = int((total_op_area / surf_area) * 100)
+            surface_data["wwr"] = min(calc_wwr, 90)
 
         surfaces_list.append(surface_data)
 
