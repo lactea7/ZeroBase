@@ -193,7 +193,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     if not db_dir:
         db_dir = "/Users/minkimac/Desktop/gbXML_server/_data" 
     
-    GLAZING_DB, COST_DB = load_databases(db_dir)
+    GLAZING_DB = load_databases(db_dir)
     
     # 창호 속성
     selected_glazing = GLAZING_DB.get(target_glazing_id)
