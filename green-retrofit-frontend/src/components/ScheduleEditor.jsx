@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Calendar, Clock, Plus, X, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Plus, X, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const KOREAN_HOLIDAYS = [
   { date: "01/01", name: "신정" },
@@ -115,7 +115,7 @@ const InteractiveHourlyChart = ({ title, data, onChange, min, max, unit, colorCl
 
 export default function ScheduleEditor({ value, onChange }) {
   const [activeTab, setActiveTab] = useState('weekday');
-  const [newHoliday, setNewHoliday] = useState("");
+  const [currentDate, setCurrentDate] = useState(new Date(new Date().getFullYear(), 0, 1));
 
   const handleProfileChange = (metric, newData) => {
     onChange({
@@ -246,11 +246,19 @@ export default function ScheduleEditor({ value, onChange }) {
     );
   };
 
-  const removeHoliday = (date) => {
-    onChange({
-      ...value,
-      holidays: value.holidays.filter(h => h !== date)
-    });
+  const prevMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  };
+  const nextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  };
+
+  const toggleHoliday = (dateStr) => {
+    if (value.holidays.includes(dateStr)) {
+      onChange({ ...value, holidays: value.holidays.filter(h => h !== dateStr) });
+    } else {
+      onChange({ ...value, holidays: [...value.holidays, dateStr].sort() });
+    }
   };
 
   const addKoreanHolidays = () => {
@@ -268,6 +276,126 @@ export default function ScheduleEditor({ value, onChange }) {
         holidays: newHolidays.sort()
       });
     }
+  };
+
+  const renderCalendar = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+    const monthStr = (month + 1).toString().padStart(2, '0');
+
+    return (
+      <div className="mt-8 border-t border-slate-200 dark:border-slate-700 pt-6 animate-in fade-in slide-in-from-bottom-2">
+        <div className="flex flex-col md:flex-row gap-6">
+          {/* Calendar Left */}
+          <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
+            <div className="flex justify-between items-center mb-6">
+              <button onClick={prevMonth} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500 transition-colors">
+                <ChevronLeft size={20} />
+              </button>
+              <h4 className="text-lg font-black text-slate-800 dark:text-slate-100">
+                {month + 1}월
+              </h4>
+              <button onClick={nextMonth} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500 transition-colors">
+                <ChevronRight size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-2 text-center mb-2">
+              {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
+                <div key={day} className={`text-xs font-bold ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-slate-400'}`}>
+                  {day}
+                </div>
+              ))}
+            </div>
+            
+            <div className="grid grid-cols-7 gap-2">
+              {days.map((day, idx) => {
+                if (!day) return <div key={`empty-${idx}`} className="h-10" />;
+                
+                const dayStr = day.toString().padStart(2, '0');
+                const dateStr = `${monthStr}/${dayStr}`;
+                const isHoliday = value.holidays.includes(dateStr);
+                const isKoreanHoliday = KOREAN_HOLIDAYS.find(h => h.date === dateStr);
+
+                return (
+                  <button
+                    key={dateStr}
+                    onClick={() => toggleHoliday(dateStr)}
+                    className={`relative h-10 rounded-lg flex items-center justify-center text-sm font-medium transition-all group
+                      ${isHoliday 
+                        ? 'bg-red-500 hover:bg-red-600 text-white shadow-md shadow-red-500/30' 
+                        : 'bg-slate-50 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+                      }`}
+                  >
+                    {day}
+                    {isKoreanHoliday && !isHoliday && (
+                      <span className="absolute bottom-1 w-1 h-1 rounded-full bg-red-400"></span>
+                    )}
+                    {isKoreanHoliday && (
+                      <div className="absolute opacity-0 group-hover:opacity-100 -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none transition-opacity">
+                        {isKoreanHoliday.name}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right Info Panel */}
+          <div className="w-full md:w-72 flex flex-col gap-4">
+            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
+              <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-4">
+                <Calendar size={18} className="text-red-500" />
+                지정된 특별 휴일 ({value.holidays.length}일)
+              </h4>
+              <button 
+                onClick={addKoreanHolidays}
+                className="w-full py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold mb-4 hover:bg-slate-100 dark:hover:bg-slate-600 shadow-sm transition-all flex items-center justify-center gap-2"
+              >
+                🇰🇷 대한민국 기본 공휴일 일괄 추가
+              </button>
+              
+              <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 h-48 overflow-y-auto p-2">
+                {value.holidays.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-slate-400">
+                    지정된 휴일이 없습니다.
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {value.holidays.map(date => {
+                      const kHoliday = KOREAN_HOLIDAYS.find(h => h.date === date);
+                      return (
+                        <div key={date} className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1.5">
+                          {date}
+                          {kHoliday && <span className="opacity-60 font-normal">({kHoliday.name})</span>}
+                          <button onClick={() => toggleHoliday(date)} className="hover:text-red-800 dark:hover:text-red-300 ml-1">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl text-xs flex gap-3 items-start border border-blue-100 dark:border-blue-900/30">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <p className="leading-relaxed">달력에서 지정된 날짜에는 일반 스케줄을 무시하고, 현재 설정된 <strong>[공휴일]</strong> 스케줄이 최우선으로 적용됩니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -353,6 +481,8 @@ export default function ScheduleEditor({ value, onChange }) {
               />
             </div>
           )}
+
+          {activeTab === 'holiday' && renderCalendar()}
         </div>
       </div>
     </div>

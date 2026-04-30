@@ -2086,56 +2086,68 @@ export default function App() {
                                 </select>
                               </div>
                               <div className="grid grid-cols-2 gap-4 pt-2">
-                                <div
-                                  className={`p-3 rounded-xl border ${
-                                    isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-                                  }`}
-                                >
-                                  <label className="text-[10px] font-black uppercase text-red-500 flex items-center gap-1 mb-2">
-                                    <Flame size={12} /> 난방 설정온도
-                                  </label>
-                                  <div className="flex items-center gap-1 text-red-500">
-                                    <input
-                                      type="number"
-                                      min="16"
-                                      max="30"
-                                      value={editState.heatingSetpoint}
-                                      onChange={(e) =>
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          heatingSetpoint: parseFloat(e.target.value),
-                                        }))
-                                      }
-                                      className="w-12 bg-transparent font-black text-xl outline-none"
-                                    />
-                                    <span className="font-bold text-xs opacity-50">°C</span>
+                                {projectData.customSchedule.useCustom ? (
+                                  <div className="col-span-2 p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 flex items-center gap-3">
+                                    <Clock size={20} className="text-indigo-500 shrink-0" />
+                                    <div>
+                                      <p className="text-sm font-bold text-indigo-500">24시간 스케줄 온도 제어 중</p>
+                                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">이전 단계의 스케줄 에디터에서 설정한 상세 온도 곡선이 최우선으로 적용됩니다.</p>
+                                    </div>
                                   </div>
-                                </div>
-                                <div
-                                  className={`p-3 rounded-xl border ${
-                                    isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-                                  }`}
-                                >
-                                  <label className="text-[10px] font-black uppercase text-cyan-500 flex items-center gap-1 mb-2">
-                                    <Thermometer size={12} /> 냉방 설정온도
-                                  </label>
-                                  <div className="flex items-center gap-1 text-cyan-500">
-                                    <input
-                                      type="number"
-                                      min="18"
-                                      max="32"
-                                      value={editState.coolingSetpoint}
-                                      onChange={(e) =>
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          coolingSetpoint: parseFloat(e.target.value),
-                                        }))
-                                      }
-                                      className="w-12 bg-transparent font-black text-xl outline-none"
-                                    />
-                                    <span className="font-bold text-xs opacity-50">°C</span>
-                                  </div>
-                                </div>
+                                ) : (
+                                  <>
+                                    <div
+                                      className={`p-3 rounded-xl border ${
+                                        isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                                      }`}
+                                    >
+                                      <label className="text-[10px] font-black uppercase text-red-500 flex items-center gap-1 mb-2">
+                                        <Flame size={12} /> 난방 설정온도
+                                      </label>
+                                      <div className="flex items-center gap-1 text-red-500">
+                                        <input
+                                          type="number"
+                                          min="16"
+                                          max="30"
+                                          value={editState.heatingSetpoint}
+                                          onChange={(e) =>
+                                            setEditState((prev) => ({
+                                              ...prev,
+                                              heatingSetpoint: parseFloat(e.target.value),
+                                            }))
+                                          }
+                                          className="w-12 bg-transparent font-black text-xl outline-none"
+                                        />
+                                        <span className="font-bold text-xs opacity-50">°C</span>
+                                      </div>
+                                    </div>
+                                    <div
+                                      className={`p-3 rounded-xl border ${
+                                        isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                                      }`}
+                                    >
+                                      <label className="text-[10px] font-black uppercase text-cyan-500 flex items-center gap-1 mb-2">
+                                        <Thermometer size={12} /> 냉방 설정온도
+                                      </label>
+                                      <div className="flex items-center gap-1 text-cyan-500">
+                                        <input
+                                          type="number"
+                                          min="18"
+                                          max="32"
+                                          value={editState.coolingSetpoint}
+                                          onChange={(e) =>
+                                            setEditState((prev) => ({
+                                              ...prev,
+                                              coolingSetpoint: parseFloat(e.target.value),
+                                            }))
+                                          }
+                                          className="w-12 bg-transparent font-black text-xl outline-none"
+                                        />
+                                        <span className="font-bold text-xs opacity-50">°C</span>
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </div>
                           )}
