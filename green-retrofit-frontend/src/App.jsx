@@ -569,12 +569,18 @@ export default function App() {
     orientation: 0,
     customSchedule: {
       useCustom: true,
+      mode: 'simplified', // 'simplified' | 'detailed'
+      simplifiedParams: {
+        weekday: { openTime: 8, closeTime: 18, heatOcc: 20, heatUnocc: 15, coolOcc: 26, coolUnocc: 30, opOcc: 1.0, opUnocc: 0.0 },
+        weekend: { openTime: 0, closeTime: 0, heatOcc: 15, heatUnocc: 15, coolOcc: 30, coolUnocc: 30, opOcc: 0.0, opUnocc: 0.0 },
+        holiday: { openTime: 0, closeTime: 0, heatOcc: 15, heatUnocc: 15, coolOcc: 30, coolUnocc: 30, opOcc: 0.0, opUnocc: 0.0 }
+      },
       holidays: ["01/01", "03/01", "05/05", "06/06", "08/15", "10/03", "10/09", "12/25"],
       profiles: {
         weekday: {
-          heating: Array(24).fill().map((_, i) => (i >= 8 && i <= 18) ? 20 : 15),
-          cooling: Array(24).fill().map((_, i) => (i >= 8 && i <= 18) ? 26 : 30),
-          operation: Array(24).fill().map((_, i) => (i >= 8 && i <= 18) ? 1.0 : 0.0),
+          heating: Array(24).fill().map((_, i) => (i >= 8 && i < 18) ? 20 : 15),
+          cooling: Array(24).fill().map((_, i) => (i >= 8 && i < 18) ? 26 : 30),
+          operation: Array(24).fill().map((_, i) => (i >= 8 && i < 18) ? 1.0 : 0.0),
         },
         weekend: {
           heating: Array(24).fill(15),

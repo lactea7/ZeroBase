@@ -130,21 +130,120 @@ export default function ScheduleEditor({ value, onChange }) {
     });
   };
 
-  const addHoliday = () => {
-    if (!newHoliday) return;
-    // Format check (MM/DD)
-    if (!/^\d{2}\/\d{2}$/.test(newHoliday)) {
-      alert("MM/DD 형식으로 입력해주세요 (예: 12/25)");
-      return;
+  const updateProfileFromSimplified = (tab, params) => {
+    const { openTime, closeTime, heatOcc, heatUnocc, coolOcc, coolUnocc, opOcc, opUnocc } = params;
+    const newHeating = Array(24).fill(heatUnocc);
+    const newCooling = Array(24).fill(coolUnocc);
+    const newOp = Array(24).fill(opUnocc);
+
+    for (let i = 0; i < 24; i++) {
+      if (openTime < closeTime) {
+        if (i >= openTime && i < closeTime) {
+          newHeating[i] = heatOcc;
+          newCooling[i] = coolOcc;
+          newOp[i] = opOcc;
+        }
+      } else if (openTime > closeTime) { 
+        if (i >= openTime || i < closeTime) {
+          newHeating[i] = heatOcc;
+          newCooling[i] = coolOcc;
+          newOp[i] = opOcc;
+        }
+      }
     }
     
-    if (!value.holidays.includes(newHoliday)) {
-      onChange({
-        ...value,
-        holidays: [...value.holidays, newHoliday].sort()
-      });
-    }
-    setNewHoliday("");
+    return { heating: newHeating, cooling: newCooling, operation: newOp };
+  };
+
+  const handleSimplifiedChange = (tab, field, val) => {
+    const parsedVal = isNaN(val) ? 0 : val;
+    const newParams = { ...value.simplifiedParams[tab], [field]: parsedVal };
+    const newProfiles = updateProfileFromSimplified(tab, newParams);
+    
+    onChange({
+      ...value,
+      simplifiedParams: {
+        ...value.simplifiedParams,
+        [tab]: newParams
+      },
+      profiles: {
+        ...value.profiles,
+        [tab]: newProfiles
+      }
+    });
+  };
+
+  const renderSimplifiedUI = () => {
+    const p = value.simplifiedParams[activeTab];
+    return (
+      <div className="space-y-6">
+        <div className="p-5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+          <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-4">
+            <Clock size={16} className="text-indigo-500" />
+            운영 시간 (Operating Hours)
+          </h4>
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">시작 시간 (Opens at)</label>
+              <select value={p.openTime} onChange={e => handleSimplifiedChange(activeTab, 'openTime', parseInt(e.target.value))} className="w-full p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-sm font-medium outline-none focus:border-indigo-500">
+                {Array(24).fill().map((_, i) => <option key={i} value={i}>{i.toString().padStart(2, '0')}:00</option>)}
+              </select>
+            </div>
+            <span className="text-slate-400 mt-6 font-bold">~</span>
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">종료 시간 (Closes at)</label>
+              <select value={p.closeTime} onChange={e => handleSimplifiedChange(activeTab, 'closeTime', parseInt(e.target.value))} className="w-full p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-sm font-medium outline-none focus:border-indigo-500">
+                {Array(25).fill().map((_, i) => <option key={i} value={i}>{i.toString().padStart(2, '0')}:00</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-5 bg-red-50 dark:bg-red-900/10 rounded-xl border border-red-200 dark:border-red-900/30">
+            <h4 className="text-sm font-bold text-red-600 dark:text-red-400 mb-4">🔥 난방 온도 설정 (℃)</h4>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">운영 중 (Occupied)</span>
+                <input type="number" value={p.heatOcc} onChange={e => handleSimplifiedChange(activeTab, 'heatOcc', parseFloat(e.target.value))} className="w-24 p-2 text-right rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-bold outline-none focus:border-red-400" />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">비운영 중 (Unoccupied)</span>
+                <input type="number" value={p.heatUnocc} onChange={e => handleSimplifiedChange(activeTab, 'heatUnocc', parseFloat(e.target.value))} className="w-24 p-2 text-right rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-bold outline-none focus:border-red-400" />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 bg-blue-50 dark:bg-blue-900/10 rounded-xl border border-blue-200 dark:border-blue-900/30">
+            <h4 className="text-sm font-bold text-blue-600 dark:text-blue-400 mb-4">❄️ 냉방 온도 설정 (℃)</h4>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">운영 중 (Occupied)</span>
+                <input type="number" value={p.coolOcc} onChange={e => handleSimplifiedChange(activeTab, 'coolOcc', parseFloat(e.target.value))} className="w-24 p-2 text-right rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-bold outline-none focus:border-blue-400" />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">비운영 중 (Unoccupied)</span>
+                <input type="number" value={p.coolUnocc} onChange={e => handleSimplifiedChange(activeTab, 'coolUnocc', parseFloat(e.target.value))} className="w-24 p-2 text-right rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-bold outline-none focus:border-blue-400" />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 md:col-span-2 bg-emerald-50 dark:bg-emerald-900/10 rounded-xl border border-emerald-200 dark:border-emerald-900/30">
+            <h4 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">💡 내부 부하 운영률 (조명/기기)</h4>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">운영 중 (Occupied) <span className="text-xs font-normal text-slate-500 ml-1">[0~1.0]</span></span>
+                <input type="number" step="0.1" min="0" max="1" value={p.opOcc} onChange={e => handleSimplifiedChange(activeTab, 'opOcc', parseFloat(e.target.value))} className="w-24 p-2 text-right rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-bold outline-none focus:border-emerald-400" />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">비운영 중 (Unoccupied) <span className="text-xs font-normal text-slate-500 ml-1">[0~1.0]</span></span>
+                <input type="number" step="0.1" min="0" max="1" value={p.opUnocc} onChange={e => handleSimplifiedChange(activeTab, 'opUnocc', parseFloat(e.target.value))} className="w-24 p-2 text-right rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 font-bold outline-none focus:border-emerald-400" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const removeHoliday = (date) => {
@@ -173,14 +272,31 @@ export default function ScheduleEditor({ value, onChange }) {
 
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
-      <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-        <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-          <Clock className="text-indigo-500" />
-          프리미엄 스케줄 에디터
-        </h3>
-        <p className="text-sm text-slate-500 mt-1">
-          24시간 운영 스케줄과 공휴일을 세밀하게 커스텀합니다. (eQUEST 인터랙티브 차트 방식)
-        </p>
+      <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+            <Clock className="text-indigo-500" />
+            프리미엄 스케줄 에디터
+          </h3>
+          <p className="text-sm text-slate-500 mt-1">
+            24시간 운영 스케줄을 간편하게 설정하거나 상세 차트로 커스텀합니다.
+          </p>
+        </div>
+        
+        <div className="flex bg-slate-200 dark:bg-slate-800 p-1 rounded-lg w-fit">
+          <button 
+            onClick={() => onChange({ ...value, mode: 'simplified' })}
+            className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${value.mode === 'simplified' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            간편 설정 (Simplified)
+          </button>
+          <button 
+            onClick={() => onChange({ ...value, mode: 'detailed' })}
+            className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${value.mode === 'detailed' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            상세 설정 (Hourly)
+          </button>
+        </div>
       </div>
 
       <div className="p-5 flex flex-col lg:flex-row gap-6">
@@ -208,29 +324,35 @@ export default function ScheduleEditor({ value, onChange }) {
             ))}
           </div>
 
-          <InteractiveHourlyChart 
-            title="🔥 난방 설정 온도 (Heating Setpoint)" 
-            data={value.profiles[activeTab].heating} 
-            onChange={(d) => handleProfileChange('heating', d)} 
-            min={10} max={30} unit="℃" 
-            colorClass="bg-red-400 hover:bg-red-500" 
-          />
-          
-          <InteractiveHourlyChart 
-            title="❄️ 냉방 설정 온도 (Cooling Setpoint)" 
-            data={value.profiles[activeTab].cooling} 
-            onChange={(d) => handleProfileChange('cooling', d)} 
-            min={15} max={35} unit="℃" 
-            colorClass="bg-blue-400 hover:bg-blue-500" 
-          />
+          {value.mode === 'simplified' ? (
+            renderSimplifiedUI()
+          ) : (
+            <div className="animate-in fade-in slide-in-from-bottom-2">
+              <InteractiveHourlyChart 
+                title="🔥 난방 설정 온도 (Heating Setpoint)" 
+                data={value.profiles[activeTab].heating} 
+                onChange={(d) => handleProfileChange('heating', d)} 
+                min={10} max={30} unit="℃" 
+                colorClass="bg-red-400 hover:bg-red-500" 
+              />
+              
+              <InteractiveHourlyChart 
+                title="❄️ 냉방 설정 온도 (Cooling Setpoint)" 
+                data={value.profiles[activeTab].cooling} 
+                onChange={(d) => handleProfileChange('cooling', d)} 
+                min={15} max={35} unit="℃" 
+                colorClass="bg-blue-400 hover:bg-blue-500" 
+              />
 
-          <InteractiveHourlyChart 
-            title="💡 내부 부하 운영률 (Lighting/Equipment/People)" 
-            data={value.profiles[activeTab].operation} 
-            onChange={(d) => handleProfileChange('operation', d)} 
-            min={0} max={1} unit="%" 
-            colorClass="bg-emerald-400 hover:bg-emerald-500" 
-          />
+              <InteractiveHourlyChart 
+                title="💡 내부 부하 운영률 (Lighting/Equipment/People)" 
+                data={value.profiles[activeTab].operation} 
+                onChange={(d) => handleProfileChange('operation', d)} 
+                min={0} max={1} unit="%" 
+                colorClass="bg-emerald-400 hover:bg-emerald-500" 
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
