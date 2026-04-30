@@ -8,6 +8,8 @@ import shutil
 import sys
 import re
 
+from src.idf_builder import IdfBuilder
+
 try:
     import pandas as pd
 except ImportError:
@@ -42,6 +44,8 @@ def safe_read_csv(filepath):
         for skip in skips_to_try:
             try:
                 df = pd.read_csv(filepath, skiprows=skip, encoding=enc)
+                # 컬럼명의 여분 공백 제거 (예: '재  료  비' → '재료비')
+                df.columns = [re.sub(r'\s+', '', str(c)) for c in df.columns]
                 # 주요 키워드가 컬럼에 하나라도 잡히면 제대로 읽은 것으로 판정!
                 if '공급가격' in df.columns or '적용단가' in df.columns or '재료비' in df.columns or '거래가격' in df.columns or '품명' in df.columns:
                     return df
@@ -112,7 +116,7 @@ def load_databases(db_dir):
                     # 💡 파일 내용으로 어떤 DB인지 자동 감지
                     if '공급가격' in df.columns:
                         df['price_num'] = df['공급가격'].apply(clean_price)
-                        row_texts = df.astype(str).apply(lambda x: ' '.join(x), axis=1)
+                        row_texts = df.fillna('').astype(str).apply(lambda x: ' '.join(x), axis=1)
                         
                         # 창호/유리 항목 탐색
                         window_items = df[row_texts.str.contains('창호|유리|복층|로이', na=False, case=False)]
@@ -259,7 +263,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
 
     temp_dir_abs = os.path.abspath(temp_dir)
     os.makedirs(temp_dir_abs, exist_ok=True)
-    idf_path_abs = os.path.join(temp_dir_abs, "generated_model.idf")
+
     
     # 💡 [핵심 경로 수정] 프로젝트 구조에 최적화된 탐색
     search_ptr = os.path.dirname(os.path.abspath(__file__))
@@ -341,188 +345,122 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         print("🚨 치명적 경고: .epw 날씨 파일을 찾을 수 없습니다!")
 
     # =========================================================
-    # 💡 2단계: IDF 생성 (압축 해제 및 정렬)
+    # 💡 2단계: IDF 생성 (IdfBuilder 객체 패턴)
     # =========================================================
-    with open(idf_path_abs, "w", encoding="utf-8") as f:
-        idf_version = os.environ.get("EP_VERSION", "25.2")
-        f.write(f"Version, {idf_version};\n")
-        f.write("SimulationControl, No, No, No, No, Yes;\n")
-        f.write(f"Building, {project_data.get('name', 'BEM_Project')}, {project_data.get('orientation', 0)}, Suburbs, 0.04, 0.4, FullExterior, 25, 6;\n")
-        f.write("SurfaceConvectionAlgorithm:Inside, TARP;\n")
-        f.write("SurfaceConvectionAlgorithm:Outside, DOE-2;\n")
-        f.write("HeatBalanceAlgorithm, ConductionTransferFunction;\n")
-        f.write("Timestep, 4;\n")
-        f.write("GlobalGeometryRules, UpperLeftCorner, CounterClockwise, World;\n")
-        f.write("RunPeriod, AnnualRun, 1, 1, 2024, 12, 31, 2024, Sunday, Yes, Yes, No, Yes, Yes;\n")
-        f.write("Material, Concrete_Heavy, MediumRough, 0.2, 1.95, 2240, 900, 0.9, 0.7, 0.7;\n")
-
-        for s in surfaces:
-            u_val = max(0.1, s.get("uValue", 0.8))
-            r_insul = max(0.01, (1.0 / u_val) - 0.102)
-            t_insul = r_insul * 0.04
-            
-            f.write(f"Material, Insul_{s['id']}, Smooth, {t_insul:.4f}, 0.04, 50, 800, 0.9, 0.7, 0.7;\n")
-            f.write(f"Construction, Const_{s['id']}, Concrete_Heavy, Insul_{s['id']}, Concrete_Heavy;\n")
-            
-            wwr = s.get("wwr", 0)
-            if wwr > 0:
-                g_id = s.get("glazingId", 42)
-                g_info = GLAZING_DB.get(g_id, GLAZING_DB.get(42, {"u": 2.74, "shgc": 0.60}))
-                
-                f.write(f"WindowMaterial:SimpleGlazingSystem, Glass_{s['id']}, {g_info['u']:.2f}, {g_info['shgc']:.2f}, 0.8;\n")
-                f.write(f"Construction, WinConst_{s['id']}, Glass_{s['id']};\n")
-
-        f.write("ScheduleTypeLimits, AnyNumber;\n")
-        f.write("ScheduleTypeLimits, Fraction, 0.0, 1.0, Continuous;\n")
-        f.write("ScheduleTypeLimits, ControlType, 0, 4, Discrete;\n")
+    idf_version = os.environ.get("EP_VERSION", "25.2")
+    idf = IdfBuilder(version=idf_version)
+    
+    # 건물 기본 정보
+    idf.add_building(project_data.get('name', 'BEM_Project'), project_data.get('orientation', 0))
+    idf.add_run_period()
+    
+    # 기본 재료
+    idf.add_material("Concrete_Heavy", "MediumRough", 0.2, 1.95, 2240, 900)
+    
+    # 표면별 단열재 + 구조체 + 유리
+    for s in surfaces:
+        u_val = max(0.1, s.get("uValue", 0.8))
+        r_insul = max(0.01, (1.0 / u_val) - 0.102)
+        t_insul = r_insul * 0.04
         
-        f.write("Schedule:Compact, AlwaysOn, Fraction, Through: 12/31, For: AllDays, Until: 24:00, 1.0;\n")
-        f.write("Schedule:Compact, ActivitySch, AnyNumber, Through: 12/31, For: AllDays, Until: 24:00, 120.0;\n")
-        f.write("Schedule:Compact, DualZoneControlSch, ControlType, Through: 12/31, For: AllDays, Until: 24:00, 4;\n")
-        f.write("Schedule:Compact, Sch_Office, Fraction, Through: 12/31, For: Weekdays, Until: 08:00, 0.0, Until: 18:00, 1.0, Until: 24:00, 0.0, For: AllOtherDays, Until: 24:00, 0.0;\n")
-        f.write("Schedule:Compact, Sch_Res, Fraction, Through: 12/31, For: Weekdays, Until: 08:00, 1.0, Until: 18:00, 0.0, Until: 24:00, 1.0, For: AllOtherDays, Until: 24:00, 1.0;\n")
-        f.write("Schedule:Compact, Sch_Rest, Fraction, Through: 12/31, For: AllDays, Until: 10:00, 0.0, Until: 14:00, 1.0, Until: 17:00, 0.2, Until: 21:00, 1.0, Until: 24:00, 0.0;\n")
-        f.write("Schedule:Compact, Sch_Lab, Fraction, Through: 12/31, For: AllDays, Until: 24:00, 1.0;\n")
+        idf.add_material(f"Insul_{s['id']}", "Smooth", t_insul, 0.04, 50, 800)
+        idf.add_construction(f"Const_{s['id']}", ["Concrete_Heavy", f"Insul_{s['id']}", "Concrete_Heavy"])
+        
+        wwr = s.get("wwr", 0)
+        if wwr > 0:
+            g_id = s.get("glazingId", 42)
+            g_info = GLAZING_DB.get(g_id, GLAZING_DB.get(42, {"u": 2.74, "shgc": 0.60}))
+            idf.add_glazing_simple(f"Glass_{s['id']}", g_info['u'], g_info['shgc'])
+            idf.add_construction(f"WinConst_{s['id']}", [f"Glass_{s['id']}"])
 
-        for z in zones:
-            z_id = z['id'].replace(" ", "_")
-            z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and "floor" in s.get("type", "").lower()]
-            z_area = sum(z_area_list)
-            
-            if z_area < 1.0: 
-                z_area = 100.0 
-                
-            f.write(f"Zone, {z_id}, 0, 0, 0, 0, 1, 1, 3.0, {(z_area * 3.0):.2f}, {z_area:.2f};\n")
-            
-            heat_set = z.get("heatingSetpoint", 20.0)
-            cool_set = z.get("coolingSetpoint", 26.0)
-            activity = z.get("activityId", 1105)
-            
-            if activity in [1440, 1441, 1442, 1443, 1444, 1114, 1115, 1107, 1112, 1120, 1121, 1445]: 
-                op_sch = "Sch_Res"
-                sch_prefix = f"Through: 12/31, For: Weekdays, Until: 08:00, {heat_set}, Until: 18:00, 15.0, Until: 24:00, {heat_set}, For: AllOtherDays, Until: 24:00, {heat_set}"
-                cool_prefix = f"Through: 12/31, For: Weekdays, Until: 08:00, {cool_set}, Until: 18:00, 30.0, Until: 24:00, {cool_set}, For: AllOtherDays, Until: 24:00, {cool_set}"
-            elif activity in [1108, 1109, 1117, 1118]: 
-                op_sch = "Sch_Rest"
-                sch_prefix = f"Through: 12/31, For: AllDays, Until: 10:00, 15.0, Until: 21:00, {heat_set}, Until: 24:00, 15.0"
-                cool_prefix = f"Through: 12/31, For: AllDays, Until: 10:00, 30.0, Until: 21:00, {cool_set}, Until: 24:00, 30.0"
-            elif activity in [1447, 1448, 1449, 1104, 1457, 1458, 1452]: 
-                op_sch = "Sch_Lab"
-                sch_prefix = f"Through: 12/31, For: AllDays, Until: 24:00, {heat_set}"
-                cool_prefix = f"Through: 12/31, For: AllDays, Until: 24:00, {cool_set}"
-            else: 
-                op_sch = "Sch_Office"
-                sch_prefix = f"Through: 12/31, For: Weekdays, Until: 08:00, 15.0, Until: 18:00, {heat_set}, Until: 24:00, 15.0, For: AllOtherDays, Until: 24:00, 15.0"
-                cool_prefix = f"Through: 12/31, For: Weekdays, Until: 08:00, 30.0, Until: 18:00, {cool_set}, Until: 24:00, 30.0, For: AllOtherDays, Until: 24:00, 30.0"
+    # 스케줄
+    idf.add_standard_schedules()
+    
+    # 존별 설정
+    for z in zones:
+        z_id = z['id'].replace(" ", "_")
+        z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and "floor" in s.get("type", "").lower()]
+        z_area = sum(z_area_list) if sum(z_area_list) >= 1.0 else 100.0
+        
+        idf.add_zone(z_id, z_area)
+        
+        heat_set = z.get("heatingSetpoint", 20.0)
+        cool_set = z.get("coolingSetpoint", 26.0)
+        activity = z.get("activityId", 1105)
+        
+        # 용도별 운영 스케줄 결정
+        if activity in [1440, 1441, 1442, 1443, 1444, 1114, 1115, 1107, 1112, 1120, 1121, 1445]:
+            op_sch = "Sch_Res"
+            heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {heat_set}, Until: 18:00, 15.0, Until: 24:00, {heat_set}, For: AllOtherDays, Until: 24:00, {heat_set}"
+            cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {cool_set}, Until: 18:00, 30.0, Until: 24:00, {cool_set}, For: AllOtherDays, Until: 24:00, {cool_set}"
+        elif activity in [1108, 1109, 1117, 1118]:
+            op_sch = "Sch_Rest"
+            heat_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 15.0, Until: 21:00, {heat_set}, Until: 24:00, 15.0"
+            cool_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 30.0, Until: 21:00, {cool_set}, Until: 24:00, 30.0"
+        elif activity in [1447, 1448, 1449, 1104, 1457, 1458, 1452]:
+            op_sch = "Sch_Lab"
+            heat_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {heat_set}"
+            cool_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {cool_set}"
+        else:
+            op_sch = "Sch_Office"
+            heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 15.0, Until: 18:00, {heat_set}, Until: 24:00, 15.0, For: AllOtherDays, Until: 24:00, 15.0"
+            cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 30.0, Until: 18:00, {cool_set}, Until: 24:00, 30.0, For: AllOtherDays, Until: 24:00, 30.0"
 
-            if z.get("isConditioned", True):
-                f.write(f"ZoneHVAC:EquipmentConnections, {z_id}, {z_id}_Equip, {z_id}_Inlet, , {z_id}_Node, {z_id}_Return;\n")
-                f.write(f"ZoneHVAC:EquipmentList, {z_id}_Equip, SequentialLoad, ZoneHVAC:IdealLoadsAirSystem, {z_id}_Ideal, 1, 1;\n")
-                f.write(f"DesignSpecification:OutdoorAir, {z_id}_OA, Sum, 0.0025, 0.0008, , , {op_sch};\n")
-                f.write(f"ZoneHVAC:IdealLoadsAirSystem, {z_id}_Ideal, , {z_id}_Inlet, , , 50, 13, 0.015, 0.008, NoLimit, , , NoLimit, , , , , , , , {z_id}_OA;\n")
-                f.write(f"Schedule:Compact, {z_id}_HeatSch, AnyNumber, {sch_prefix};\n")
-                f.write(f"Schedule:Compact, {z_id}_CoolSch, AnyNumber, {cool_prefix};\n")
-                f.write(f"ThermostatSetpoint:DualSetpoint, {z_id}_DualSetp, {z_id}_HeatSch, {z_id}_CoolSch;\n")
-                f.write(f"ZoneControl:Thermostat, {z_id}_Thermostat, {z_id}, DualZoneControlSch, ThermostatSetpoint:DualSetpoint, {z_id}_DualSetp;\n")
+        if z.get("isConditioned", True):
+            idf.add_ideal_hvac(z_id, op_sch)
+            idf.add_schedule_compact(f"{z_id}_HeatSch", "AnyNumber", heat_sch_text)
+            idf.add_schedule_compact(f"{z_id}_CoolSch", "AnyNumber", cool_sch_text)
+            idf.add_thermostat(z_id, f"{z_id}_HeatSch", f"{z_id}_CoolSch")
 
-            ppl_dens = z.get("peopleDensity", 0.1)
-            light_p = z.get("lightingPower", 10.0)
-            equip_p = z.get("equipmentPower", 15.0)
-            
-            if ppl_dens > 0: 
-                f.write(f"People, {z_id}_Ppl, {z_id}, {op_sch}, People/Area, , {ppl_dens}, , , , ActivitySch;\n")
-            if light_p > 0: 
-                f.write(f"Lights, {z_id}_Lgt, {z_id}, {op_sch}, Watts/Area, , {light_p};\n")
-            if equip_p > 0: 
-                f.write(f"ElectricEquipment, {z_id}_Eqp, {z_id}, {op_sch}, Watts/Area, , {equip_p};\n")
-                
-            f.write(f"ZoneInfiltration:DesignFlowRate, {z_id}_Inf, {z_id}, AlwaysOn, AirChanges/Hour, , , , 0.5, 1.0, 0.0, 0.0, 0.0;\n")
-            
-        for s in surfaces:
-            ep_type = "Wall"
-            t = s.get("type", "").lower()
-            
-            if "roof" in t: 
-                ep_type = "Roof"
-            elif "floor" in t or "slab" in t: 
-                ep_type = "Floor"
-                
-            obc = "Outdoors"
-            sun = "SunExposed"
-            wind = "WindExposed"
-            
-            if "interior" in t or s.get("adjacentZone"): 
-                obc = "Adiabatic"
-                sun = "NoSun"
-                wind = "NoWind"
-                
-            z_id = s['zone'].replace(" ", "_")
-            verts = s.get('vertices', [])
-            
-            f.write(f"BuildingSurface:Detailed, {s['id']}, {ep_type}, Const_{s['id']}, {z_id}, , {obc}, , {sun}, {wind}, Autocalculate, {len(verts)}")
-            if verts:
-                f.write(",\n")
-                for i, v in enumerate(verts):
-                    terminator = ";" if i == len(verts) - 1 else ","
-                    f.write(f"  {v[0]:.4f}, {v[1]:.4f}, {v[2]:.4f}{terminator}\n")
-            else: 
-                f.write(";\n")
-            
-            wwr = s.get("wwr", 0)
-            if ep_type == "Wall" and wwr > 0:
-                win_verts = get_scaled_window_vertices(verts, wwr)
-                if win_verts:
-                    f.write(f"FenestrationSurface:Detailed, Win_{s['id']}, Window, WinConst_{s['id']}, {s['id']}, , Autocalculate, , 1, {len(win_verts)}")
-                    f.write(",\n")
-                    for i, v in enumerate(win_verts):
-                        terminator = ";" if i == len(win_verts) - 1 else ","
-                        f.write(f"  {v[0]:.4f}, {v[1]:.4f}, {v[2]:.4f}{terminator}\n")
-                
-        f.write("Output:Variable, *, Zone Ideal Loads Supply Air Total Heating Energy, Monthly;\n")
-        f.write("Output:Variable, *, Zone Ideal Loads Supply Air Total Cooling Energy, Monthly;\n")
-        f.write("Output:Variable, *, Lights Electricity Energy, Monthly;\n")
-        f.write("Output:Variable, *, Electric Equipment Electricity Energy, Monthly;\n")
-        f.write("OutputControl:Table:Style, Comma;\n")
-        f.write("Output:Table:SummaryReports, AllSummary;\n")
+        ppl_dens = z.get("peopleDensity", 0.1)
+        light_p = z.get("lightingPower", 10.0)
+        equip_p = z.get("equipmentPower", 15.0)
+        
+        if ppl_dens > 0:
+            idf.add_people(f"{z_id}_Ppl", z_id, op_sch, ppl_dens)
+        if light_p > 0:
+            idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, light_p)
+        if equip_p > 0:
+            idf.add_equipment(f"{z_id}_Eqp", z_id, op_sch, equip_p)
+        
+        idf.add_infiltration(f"{z_id}_Inf", z_id)
+
+    # 표면 지오메트리
+    for s in surfaces:
+        ep_type = "Wall"
+        t = s.get("type", "").lower()
+        if "roof" in t:
+            ep_type = "Roof"
+        elif "floor" in t or "slab" in t:
+            ep_type = "Floor"
+        
+        obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
+        if "interior" in t or s.get("adjacentZone"):
+            obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
+        
+        z_id = s['zone'].replace(" ", "_")
+        verts = s.get('vertices', [])
+        
+        idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id, obc, sun, wind, verts)
+        
+        wwr = s.get("wwr", 0)
+        if ep_type == "Wall" and wwr > 0:
+            win_verts = get_scaled_window_vertices(verts, wwr)
+            if win_verts:
+                idf.add_window(f"Win_{s['id']}", f"WinConst_{s['id']}", s['id'], win_verts)
+
+    # 출력 변수
+    idf.add_output_variables()
 
     # =========================================================
-    # 💡 3단계: 시뮬레이션 실행 (압축 해제)
+    # 💡 3단계: 시뮬레이션 실행 (IdfBuilder.run 패턴)
     # =========================================================
     ep_success = False
     try:
         print(f"\n▶️ EnergyPlus 경제성(LCC) 통합 시뮬레이션 가동 중... (지역: {location_key})")
-        ep_cmd = "energyplus"
-        
-        if shutil.which(ep_cmd) is None:
-            for p in ["/Applications/EnergyPlus-25-2-0/energyplus", "/usr/local/bin/energyplus"]:
-                if os.path.exists(p): 
-                    ep_cmd = p
-                    break
-
-        cmd = [ep_cmd, "-w", weather_file_abs, "-r", idf_path_abs]
-        process = subprocess.Popen(cmd, cwd=temp_dir_abs, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        
-        for line in process.stdout: 
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            
-        process.wait()
-        
-        err_path = os.path.join(temp_dir_abs, "eplusout.err")
-        fatal_error = False
-        
-        if os.path.exists(err_path):
-            with open(err_path, "r", encoding="utf-8", errors="ignore") as f_err:
-                if "Fatal" in f_err.read(): 
-                    fatal_error = True
-                    
-        if process.returncode == 0 and not fatal_error: 
-            ep_success = True
-            
-    except Exception as e: 
+        ep_success = idf.run(weather_file_abs, temp_dir_abs)
+    except Exception as e:
         print(f"⚠️ 엔진 에러: {e}")
-
-    # =========================================================
     # 💡 4단계: 에너지 공과금 및 공사원가 산출 (압축 해제)
     # =========================================================
     if ep_success and pd is not None:
