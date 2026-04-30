@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Calendar, Clock, Thermostat, Activity, Plus, X, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Plus, X, AlertCircle } from 'lucide-react';
 
 const KOREAN_HOLIDAYS = [
   { date: "01/01", name: "신정" },
