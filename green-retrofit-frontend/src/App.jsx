@@ -54,6 +54,8 @@ import {
   PiggyBank,
   Coins,
   Wallet,
+  Clock,
+  Calendar
 } from 'lucide-react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -556,6 +558,7 @@ export default function App() {
   const [step, setStep] = useState('upload');
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
 
   const [projectData, setProjectData] = useState({
     name: '신규 프로젝트',
@@ -1266,6 +1269,38 @@ export default function App() {
                           <Compass size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                         </div>
                       </div>
+
+                      <div
+                        className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.customSchedule.useCustom ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-500/30 bg-black/5'}`}
+                        onClick={() => setProjectData((prev) => ({ ...prev, customSchedule: { ...prev.customSchedule, useCustom: !prev.customSchedule.useCustom } }))}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${projectData.customSchedule.useCustom ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
+                            <Clock size={18} />
+                          </div>
+                          <div>
+                            <span className={`block font-black text-sm ${projectData.customSchedule.useCustom ? 'text-indigo-500' : theme.textSub}`}>
+                              사용자 스케줄 적용
+                            </span>
+                            <span className="text-[10px] opacity-60">용도별 스케줄 대신 직접 수정합니다.</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {projectData.customSchedule.useCustom && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setShowScheduleModal(true); }}
+                              className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+                            >
+                              스케줄 수정
+                            </button>
+                          )}
+                          {projectData.customSchedule.useCustom ? (
+                            <ToggleRight size={32} className="text-indigo-500" />
+                          ) : (
+                            <ToggleLeft size={32} className="text-slate-500" />
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1315,14 +1350,6 @@ export default function App() {
                         )}
                       </div>
                     </div>
-                  </div>
-
-                  {/* 프리미엄 스케줄 에디터 */}
-                  <div className="mt-8">
-                    <ScheduleEditor 
-                      value={projectData.customSchedule}
-                      onChange={(newSchedule) => setProjectData({...projectData, customSchedule: newSchedule})}
-                    />
                   </div>
                 </div>
               </div>
@@ -3075,6 +3102,32 @@ export default function App() {
                   >
                     {selectedMetric.desc}
                   </motion.p>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* 스케줄 수정 모달 */}
+          <AnimatePresence>
+            {showScheduleModal && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowScheduleModal(false)}></div>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem] shadow-2xl ${isDarkMode ? 'bg-slate-900' : 'bg-white'} border border-slate-700/50 p-6`}
+                >
+                  <button
+                    onClick={() => setShowScheduleModal(false)}
+                    className="absolute top-6 right-6 p-2 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors z-50"
+                  >
+                    <X size={20} className="text-slate-500" />
+                  </button>
+                  <ScheduleEditor 
+                    value={projectData.customSchedule}
+                    onChange={(newSchedule) => setProjectData({...projectData, customSchedule: newSchedule})}
+                  />
                 </motion.div>
               </div>
             )}

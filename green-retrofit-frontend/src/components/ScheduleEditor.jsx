@@ -185,7 +185,7 @@ export default function ScheduleEditor({ value, onChange }) {
 
       <div className="p-5 flex flex-col lg:flex-row gap-6">
         
-        {/* 왼쪽: 24시간 프로필 에디터 */}
+        {/* 24시간 프로필 에디터 */}
         <div className="flex-1">
           {/* Tabs */}
           <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg mb-6">
@@ -231,68 +231,6 @@ export default function ScheduleEditor({ value, onChange }) {
             min={0} max={1} unit="%" 
             colorClass="bg-emerald-400 hover:bg-emerald-500" 
           />
-        </div>
-
-        {/* 오른쪽: 공휴일 지정기 */}
-        <div className="w-full lg:w-72 bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700 h-fit">
-          <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2 mb-4">
-            <Calendar size={16} className="text-indigo-500" />
-            특별 휴일 지정
-          </h4>
-          
-          <div className="flex gap-2 mb-4">
-            <input 
-              type="text" 
-              placeholder="MM/DD (예: 08/15)" 
-              value={newHoliday}
-              onChange={(e) => setNewHoliday(e.target.value)}
-              className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
-              maxLength={5}
-            />
-            <button 
-              onClick={addHoliday}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg p-1.5 flex items-center justify-center transition-colors"
-            >
-              <Plus size={18} />
-            </button>
-          </div>
-
-          <button 
-            onClick={addKoreanHolidays}
-            className="w-full py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold mb-4 hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
-          >
-            🇰🇷 대한민국 기본 공휴일 일괄 추가
-          </button>
-
-          <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 max-h-64 overflow-y-auto">
-            {value.holidays.length === 0 ? (
-              <div className="p-4 text-center text-sm text-slate-400">
-                지정된 휴일이 없습니다.
-              </div>
-            ) : (
-              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                {value.holidays.map(date => {
-                  const koreanInfo = KOREAN_HOLIDAYS.find(h => h.date === date);
-                  return (
-                    <li key={date} className="flex justify-between items-center p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                      <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-                        <span className="text-indigo-500">{date}</span>
-                        {koreanInfo && <span className="text-xs font-normal text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">{koreanInfo.name}</span>}
-                      </div>
-                      <button onClick={() => removeHoliday(date)} className="text-slate-400 hover:text-red-500 transition-colors">
-                        <X size={16} />
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-          
-          <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-xs flex gap-2 items-start">
-            <AlertCircle size={14} className="shrink-0 mt-0.5" />
-            <p>지정된 휴일에는 시뮬레이션 시 <strong>[공휴일]</strong> 탭의 스케줄 프로필이 우선 적용됩니다.</p>
-          </div>
         </div>
       </div>
     </div>
