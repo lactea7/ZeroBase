@@ -118,6 +118,23 @@ def get_scaled_window_vertices(vertices, wwr):
         
     return win_verts
 
+def condense_daily_schedule(day_type_str: str, hourly_values: list) -> str:
+    """24시간 배열을 EnergyPlus Schedule:Compact의 하루치 문자열로 압축"""
+    if not hourly_values or len(hourly_values) != 24:
+        return ""
+    
+    parts = [f"For: {day_type_str}"]
+    current_val = hourly_values[0]
+    
+    for i in range(1, 25):
+        if i == 24 or hourly_values[i] != current_val:
+            parts.append(f"Until: {i:02d}:00")
+            parts.append(str(current_val))
+            if i < 24:
+                current_val = hourly_values[i]
+                
+    return ", ".join(parts)
+
 def generate_idf_and_simulate(payload: dict, temp_dir: str):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
@@ -253,6 +270,22 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     # 스케줄
     idf.add_standard_schedules()
     
+    custom_sch = project_data.get("customSchedule", {})
+    use_custom = custom_sch.get("useCustom", False)
+    
+    if use_custom:
+        holidays = custom_sch.get("holidays", [])
+        for i, h_date in enumerate(holidays):
+            idf.add_special_day(f"CustomHoliday_{i}", h_date)
+            
+        profiles = custom_sch.get("profiles", {})
+        
+        op_wd = condense_daily_schedule("Weekdays", profiles.get("weekday", {}).get("operation", [1]*24))
+        op_we = condense_daily_schedule("Weekends", profiles.get("weekend", {}).get("operation", [0]*24))
+        op_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("operation", [0]*24))
+        custom_op_text = f"Through: 12/31, {op_wd}, {op_we}, {op_ho}, For: AllOtherDays, Until: 24:00, 0.0"
+        idf.add_schedule_compact("CustomOpSch", "AnyNumber", custom_op_text)
+    
     # 존별 설정
     for z in zones:
         z_id = z['id'].replace(" ", "_")
@@ -266,22 +299,35 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         activity = z.get("activityId", 1105)
         
         # 용도별 운영 스케줄 결정
-        if activity in [1440, 1441, 1442, 1443, 1444, 1114, 1115, 1107, 1112, 1120, 1121, 1445]:
-            op_sch = "Sch_Res"
-            heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {heat_set}, Until: 18:00, 15.0, Until: 24:00, {heat_set}, For: AllOtherDays, Until: 24:00, {heat_set}"
-            cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {cool_set}, Until: 18:00, 30.0, Until: 24:00, {cool_set}, For: AllOtherDays, Until: 24:00, {cool_set}"
-        elif activity in [1108, 1109, 1117, 1118]:
-            op_sch = "Sch_Rest"
-            heat_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 15.0, Until: 21:00, {heat_set}, Until: 24:00, 15.0"
-            cool_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 30.0, Until: 21:00, {cool_set}, Until: 24:00, 30.0"
-        elif activity in [1447, 1448, 1449, 1104, 1457, 1458, 1452]:
-            op_sch = "Sch_Lab"
-            heat_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {heat_set}"
-            cool_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {cool_set}"
+        if use_custom:
+            op_sch = "CustomOpSch"
+            
+            heat_wd = condense_daily_schedule("Weekdays", profiles.get("weekday", {}).get("heating", [15]*24))
+            heat_we = condense_daily_schedule("Weekends", profiles.get("weekend", {}).get("heating", [15]*24))
+            heat_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("heating", [15]*24))
+            heat_sch_text = f"Through: 12/31, {heat_wd}, {heat_we}, {heat_ho}, For: AllOtherDays, Until: 24:00, 15.0"
+            
+            cool_wd = condense_daily_schedule("Weekdays", profiles.get("weekday", {}).get("cooling", [30]*24))
+            cool_we = condense_daily_schedule("Weekends", profiles.get("weekend", {}).get("cooling", [30]*24))
+            cool_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("cooling", [30]*24))
+            cool_sch_text = f"Through: 12/31, {cool_wd}, {cool_we}, {cool_ho}, For: AllOtherDays, Until: 24:00, 30.0"
         else:
-            op_sch = "Sch_Office"
-            heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 15.0, Until: 18:00, {heat_set}, Until: 24:00, 15.0, For: AllOtherDays, Until: 24:00, 15.0"
-            cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 30.0, Until: 18:00, {cool_set}, Until: 24:00, 30.0, For: AllOtherDays, Until: 24:00, 30.0"
+            if activity in [1440, 1441, 1442, 1443, 1444, 1114, 1115, 1107, 1112, 1120, 1121, 1445]:
+                op_sch = "Sch_Res"
+                heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {heat_set}, Until: 18:00, 15.0, Until: 24:00, {heat_set}, For: AllOtherDays, Until: 24:00, {heat_set}"
+                cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {cool_set}, Until: 18:00, 30.0, Until: 24:00, {cool_set}, For: AllOtherDays, Until: 24:00, {cool_set}"
+            elif activity in [1108, 1109, 1117, 1118]:
+                op_sch = "Sch_Rest"
+                heat_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 15.0, Until: 21:00, {heat_set}, Until: 24:00, 15.0"
+                cool_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 30.0, Until: 21:00, {cool_set}, Until: 24:00, 30.0"
+            elif activity in [1447, 1448, 1449, 1104, 1457, 1458, 1452]:
+                op_sch = "Sch_Lab"
+                heat_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {heat_set}"
+                cool_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {cool_set}"
+            else:
+                op_sch = "Sch_Office"
+                heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 15.0, Until: 18:00, {heat_set}, Until: 24:00, 15.0, For: AllOtherDays, Until: 24:00, 15.0"
+                cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 30.0, Until: 18:00, {cool_set}, Until: 24:00, 30.0, For: AllOtherDays, Until: 24:00, 30.0"
 
         if z.get("isConditioned", True):
             idf.add_ideal_hvac(z_id, op_sch)

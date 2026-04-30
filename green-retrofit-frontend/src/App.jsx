@@ -64,7 +64,7 @@ import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
 import { LOADING_MESSAGES, DIR_MAP, groupBy, formatWon } from './utils/format';
 import { getSurfaceGroupName, getZoneGroupName, getPanesCategory, getCoatingType } from './utils/surface';
-
+import ScheduleEditor from './components/ScheduleEditor';
 
 // --- [3D 뷰어 컴포넌트] ---
 const BuildingViewer = ({
@@ -564,6 +564,27 @@ export default function App() {
     pvCapacity: 0,
     geothermalApplied: false,
     orientation: 0,
+    customSchedule: {
+      useCustom: true,
+      holidays: ["01/01", "03/01", "05/05", "06/06", "08/15", "10/03", "10/09", "12/25"],
+      profiles: {
+        weekday: {
+          heating: Array(24).fill().map((_, i) => (i >= 8 && i <= 18) ? 20 : 15),
+          cooling: Array(24).fill().map((_, i) => (i >= 8 && i <= 18) ? 26 : 30),
+          operation: Array(24).fill().map((_, i) => (i >= 8 && i <= 18) ? 1.0 : 0.0),
+        },
+        weekend: {
+          heating: Array(24).fill(15),
+          cooling: Array(24).fill(30),
+          operation: Array(24).fill(0.0),
+        },
+        holiday: {
+          heating: Array(24).fill(15),
+          cooling: Array(24).fill(30),
+          operation: Array(24).fill(0.0),
+        }
+      }
+    }
   });
 
   const [surfaces, setSurfaces] = useState([]);
@@ -1294,6 +1315,14 @@ export default function App() {
                         )}
                       </div>
                     </div>
+                  </div>
+
+                  {/* 프리미엄 스케줄 에디터 */}
+                  <div className="mt-8">
+                    <ScheduleEditor 
+                      value={projectData.customSchedule}
+                      onChange={(newSchedule) => setProjectData({...projectData, customSchedule: newSchedule})}
+                    />
                   </div>
                 </div>
               </div>

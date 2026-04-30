@@ -106,6 +106,12 @@ class IdfBuilder:
             name, f"{u_value:.2f}", f"{shgc:.2f}", vt
         ])
 
+    def add_special_day(self, name: str, date: str):
+        """특정 날짜를 공휴일로 강제 지정하는 RunPeriodControl:SpecialDays 객체 추가"""
+        return self.add("RunPeriodControl:SpecialDays", [
+            name, date, 1, "Holiday"
+        ])
+
     def add_zone(self, name: str, floor_area: float, height: float = 3.0):
         """Zone 객체 추가"""
         volume = floor_area * height
