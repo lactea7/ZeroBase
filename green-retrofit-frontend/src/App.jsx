@@ -1465,7 +1465,7 @@ export default function App() {
           {/* STEP 3 & 4: Floor View + Side Editor Panel */}
           {step === 'floorView' && (
             <div className="flex-1 flex flex-col animate-in fade-in min-h-0 w-full h-full">
-              <div className="flex-shrink-0 p-4 border-b flex justify-between items-center bg-black/5 z-10 shadow-sm">
+              <div className="flex-shrink-0 p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/5 z-10 shadow-sm">
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => {
@@ -1502,35 +1502,35 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                <div className={`flex p-1 rounded-xl border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-200 border-slate-300'}`}>
+                <div className={`flex w-full md:w-auto p-1 rounded-xl border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-200 border-slate-300'}`}>
                   <button
                     onClick={() => handleModeSwitch('zone')}
-                    className={`px-6 py-2 rounded-lg font-black text-sm flex items-center gap-2 transition-all ${
+                    className={`flex-1 md:flex-none px-4 md:px-6 py-2 rounded-lg font-black text-xs md:text-sm flex items-center justify-center gap-2 transition-all ${
                       editMode === 'zone' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'
                     }`}
                   >
-                    <BoxIcon size={16} /> 구역(Zone) 설정
+                    <BoxIcon size={16} /> 구역(Zone)
                   </button>
                   <button
                     onClick={() => handleModeSwitch('surface')}
-                    className={`px-6 py-2 rounded-lg font-black text-sm flex items-center gap-2 transition-all ${
+                    className={`flex-1 md:flex-none px-4 md:px-6 py-2 rounded-lg font-black text-xs md:text-sm flex items-center justify-center gap-2 transition-all ${
                       editMode === 'surface' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'
                     }`}
                   >
-                    <Layers size={16} /> 외피(Surface) 설정
+                    <Layers size={16} /> 외피(Surface)
                   </button>
                 </div>
                 <button
                   onClick={handleSimulation}
-                  className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black shadow-xl shadow-emerald-500/30 flex items-center gap-2 transition-transform hover:scale-105"
+                  className="w-full md:w-auto px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black shadow-xl shadow-emerald-500/30 flex justify-center items-center gap-2 transition-transform hover:scale-105"
                 >
                   <Settings2 size={20} /> 시뮬레이션 가동
                 </button>
               </div>
 
-              <div className="flex-1 relative flex overflow-hidden w-full h-full">
+              <div className="flex-1 relative flex flex-col-reverse md:flex-row overflow-hidden w-full h-full">
                 <div
-                  className={`w-[320px] flex-shrink-0 h-full overflow-y-auto border-r z-20 shadow-[10px_0_30px_rgba(0,0,0,0.05)] flex flex-col ${
+                  className={`w-full md:w-[320px] flex-shrink-0 h-1/2 md:h-full overflow-y-auto border-t md:border-t-0 md:border-r z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] md:shadow-[10px_0_30px_rgba(0,0,0,0.05)] flex flex-col ${
                     isDarkMode ? 'bg-[#0F172A]/95 border-slate-700' : 'bg-[#F8FAFC]/95 border-slate-300'
                   }`}
                 >
@@ -1685,7 +1685,7 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 relative transition-all duration-300 w-full h-full flex flex-col bg-black/5 p-4">
-                  <div className="flex-1 relative min-h-[400px]">
+                  <div className="flex-1 relative min-h-[300px] md:min-h-[400px]">
                     <BuildingViewer
                       surfaces={surfaces}
                       zones={zones}
@@ -2405,9 +2405,9 @@ export default function App() {
                     사용자 맞춤 설정이 반영된 최종 건물 성능 및 경제성 리포트입니다.
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
                   <div
-                    className={`p-1 flex rounded-2xl border shadow-inner ${
+                    className={`p-1 flex flex-col sm:flex-row rounded-2xl border shadow-inner ${
                       isDarkMode ? 'bg-black/30 border-slate-800' : 'bg-slate-200 border-slate-300'
                     }`}
                   >
@@ -2448,7 +2448,7 @@ export default function App() {
               {/* 탭: ⚡ 에너지 성능 (기존) */}
               {activeResultTab === 'energy' && (
                 <div className="animate-in fade-in slide-in-from-bottom-4">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
                     {[
                       {
                         label: '요구량',
@@ -2621,7 +2621,7 @@ export default function App() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                    <div className={`mt-8 overflow-hidden rounded-2xl border ${theme.tableBorder}`}>
+                    <div className={`mt-8 overflow-x-auto rounded-2xl border ${theme.tableBorder}`}>
                       <table className="w-full text-[12px] text-center border-collapse">
                         <thead className={`${theme.tableHeader} border-b ${theme.tableBorder}`}>
                           <tr>
