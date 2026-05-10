@@ -63,6 +63,58 @@ class LCCAnalyzer:
                     continue
         return None
 
+    # ── 성능 등급 기반 창호 가격 보간 시스템 ──
+    # eco_materials.csv 규격 텍스트에서 키워드를 파싱하여 4단계 성능 등급으로 분류
+    WINDOW_TIERS = {
+        "premium": {
+            "label": "고성능 Low-E+Ar 복층",
+            "u_range": (0.0, 1.8),
+            "default_price": 350000,
+            "keywords_must": ["low-e", "로이"],
+            "keywords_boost": ["ar", "아르곤", "삼중", "trp", "triple", "krypton"]
+        },
+        "high": {
+            "label": "중성능 Low-E 복층",
+            "u_range": (1.8, 2.5),
+            "default_price": 250000,
+            "keywords_must": ["low-e", "로이"],
+            "keywords_boost": []
+        },
+        "standard": {
+            "label": "일반 복층유리",
+            "u_range": (2.5, 4.0),
+            "default_price": 180000,
+            "keywords_must": ["복층", "pair", "이중", "dbl"],
+            "keywords_boost": []
+        },
+        "basic": {
+            "label": "단층/일반유리",
+            "u_range": (4.0, 99.0),
+            "default_price": 120000,
+            "keywords_must": [],
+            "keywords_boost": []
+        }
+    }
+
+    @staticmethod
+    def _classify_window_tier(spec_text: str) -> str:
+        """규격 텍스트에서 키워드를 분석하여 성능 등급을 분류합니다."""
+        text = spec_text.lower()
+        has_lowe = any(kw in text for kw in ['low-e', 'loe', '로이', 'low_e'])
+        # 아르곤은 정확한 패턴만 매칭 (한글 '자재' 등에 ar이 포함되는 오탐 방지)
+        has_argon = bool(re.search(r'\bar\b|아르곤|argon|krypton|크립톤|\d+mm\s*ar\s*\+|\+\s*\d+mm\s*ar', text))
+        has_double = any(kw in text for kw in ['복층', 'pair', '이중', '22mm', '24mm', '26mm', '창세트'])
+        has_triple = any(kw in text for kw in ['삼중', 'triple', '3중'])
+
+        if has_lowe and (has_argon or has_triple):
+            return "premium"
+        elif has_lowe:
+            return "high"
+        elif has_double:
+            return "standard"
+        else:
+            return "basic"
+
     def _load_cost_db(self):
         cost_db_dict = {
             "status": {"eco_loaded": False, "nara_loaded": False, "items": 0},
@@ -72,8 +124,12 @@ class LCCAnalyzer:
                 "led": 30000,
                 "hvac_kw": 2000000
             },
-            "window_db": []
+            "window_db": [],
+            "window_tiers": {}  # 성능 등급별 {prices: [], avg: 0, count: 0}
         }
+
+        # 등급별 가격 수집용 임시 딕셔너리
+        tier_prices = {tier: [] for tier in self.WINDOW_TIERS}
         
         if os.path.exists(self.db_dir) and pd is not None:
             for f_name in os.listdir(self.db_dir):
@@ -92,29 +148,51 @@ class LCCAnalyzer:
                             df['price_num'] = df['공급가격'].apply(self._clean_price)
                             row_texts = df.fillna('').astype(str).apply(lambda x: ' '.join(x), axis=1)
                             
-                            window_items = df[row_texts.str.contains('창호|유리|복층|로이', na=False, case=False)]
+                            # 창호 및 유리공사 분류 아이템 필터링
+                            window_mask = row_texts.str.contains('창호 및 유리공사|창호|유리|복층|로이', na=False, case=False)
+                            window_items = df[window_mask]
+                            
                             for idx, row in window_items.iterrows():
                                 price = row.get('price_num', 0)
-                                if price > 0:
-                                    text_chunk = row_texts[idx]
-                                    u_match = re.search(r'U[-]?value.*?([\d.]+)', text_chunk, re.IGNORECASE)
-                                    shgc_match = re.search(r'SHGC.*?([\d.]+)', text_chunk, re.IGNORECASE)
+                                # ㎡ 단위 창호만 (접착제, 실링재 등 제외)
+                                unit_col = None
+                                for c in df.columns:
+                                    if '단위' in c:
+                                        unit_col = c
+                                        break
+                                
+                                item_unit = str(row.get(unit_col, '')) if unit_col else ''
+                                text_chunk = row_texts[idx]
+                                
+                                # 접착제, 실링재 등 비창호 자재 제외
+                                if any(excl in text_chunk for excl in ['접착제', '실링재', '코킹', '테이프', '부자재']):
+                                    continue
+                                
+                                if price > 10000 and '㎡' in item_unit:
+                                    tier = self._classify_window_tier(text_chunk)
+                                    tier_prices[tier].append(price)
                                     
-                                    u_val = float(u_match.group(1)) if u_match else None
-                                    shgc_val = float(shgc_match.group(1)) if shgc_match else None
-                                    
-                                    if len(row) > 10:
-                                        name_val = str(row.iloc[10])
-                                    else:
-                                        name_val = "친환경 창호"
+                                    # 제품명 추출
+                                    name_val = "친환경 창호"
+                                    for col_name in ['인증제품명', '품명']:
+                                        if col_name in df.columns:
+                                            candidate = str(row.get(col_name, ''))
+                                            if candidate and candidate != 'nan':
+                                                name_val = candidate
+                                                break
                                     
                                     cost_db_dict["window_db"].append({
-                                        "name": name_val, "u": u_val, "shgc": shgc_val, "price": price
+                                        "name": name_val, 
+                                        "tier": tier,
+                                        "price": price
                                     })
                             
+                            # LED 단가 수집
                             led_items = df[row_texts.str.contains('LED', na=False, case=False)]
                             if not led_items.empty: 
-                                cost_db_dict["avg_prices"]["led"] = led_items['price_num'].mean()
+                                led_valid = led_items[led_items['price_num'] > 0]
+                                if not led_valid.empty:
+                                    cost_db_dict["avg_prices"]["led"] = led_valid['price_num'].mean()
                                 
                             cost_db_dict["status"]["eco_loaded"] = True
                             cost_db_dict["status"]["items"] += len(df)
@@ -125,29 +203,63 @@ class LCCAnalyzer:
                             
                     except Exception as e:
                         print(f"Cost DB Error ({f_name}): {e}")
+
+        # 등급별 평균 단가 최종 산출
+        for tier_key, tier_info in self.WINDOW_TIERS.items():
+            prices = tier_prices[tier_key]
+            if prices:
+                avg_price = sum(prices) / len(prices)
+                cost_db_dict["window_tiers"][tier_key] = {
+                    "avg": int(avg_price),
+                    "count": len(prices),
+                    "label": tier_info["label"]
+                }
+                print(f"  📊 창호 [{tier_info['label']}] 등급: {len(prices)}건 → 평균 ₩{int(avg_price):,}/㎡")
+            else:
+                cost_db_dict["window_tiers"][tier_key] = {
+                    "avg": tier_info["default_price"],
+                    "count": 0,
+                    "label": tier_info["label"]
+                }
+
+        total_window_items = sum(len(tier_prices[t]) for t in tier_prices)
+        if total_window_items > 0:
+            print(f"  ✅ 창호 성능 등급별 단가 매핑 완료! (총 {total_window_items}건 분류)")
+
         return cost_db_dict
 
     def match_window_price(self, target_u: float, target_shgc: float) -> tuple:
+        """U-Value를 기반으로 가장 적합한 성능 등급의 평균 단가를 보간하여 반환합니다."""
+        # 기본값
         target_window_price = self.cost_db["avg_prices"]["window"]
         mapped_window_name = "기본 단가 반영 (DB 미매칭)"
         
-        if self.cost_db["window_db"] and target_u is not None:
-            best_match = None
-            min_diff = float('inf')
+        if not self.cost_db.get("window_tiers") or target_u is None:
+            return target_window_price, mapped_window_name
+
+        tiers = self.cost_db["window_tiers"]
+        
+        # U-Value 기반으로 성능 등급 판별
+        matched_tier = None
+        for tier_key, tier_info in self.WINDOW_TIERS.items():
+            u_min, u_max = tier_info["u_range"]
+            if u_min <= target_u < u_max:
+                matched_tier = tier_key
+                break
+        
+        if not matched_tier:
+            matched_tier = "basic"
+
+        tier_data = tiers.get(matched_tier, {})
+        if tier_data:
+            target_window_price = tier_data["avg"]
+            count = tier_data["count"]
+            label = tier_data["label"]
             
-            for w_item in self.cost_db["window_db"]:
-                if w_item["u"] is not None:
-                    diff = abs(w_item["u"] - target_u)
-                    if w_item["shgc"] is not None and target_shgc is not None:
-                        diff += abs(w_item["shgc"] - target_shgc)
-                        
-                    if diff < min_diff:
-                        min_diff = diff
-                        best_match = w_item
-                        
-            if best_match and min_diff < 1.5:
-                target_window_price = best_match["price"]
-                mapped_window_name = best_match["name"]
+            if count > 0:
+                mapped_window_name = f"{label} (친환경DB {count}건 평균단가)"
+            else:
+                mapped_window_name = f"{label} (기본 추정단가)"
                 
         return target_window_price, mapped_window_name
 
