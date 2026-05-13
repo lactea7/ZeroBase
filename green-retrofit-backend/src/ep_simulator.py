@@ -428,7 +428,18 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         idf.add_infiltration(f"{z_id}_Inf", z_id)
 
     # 표면 지오메트리
+    valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
+    skipped_count = 0
+    
     for s in surfaces:
+        z_id = s['zone'].replace(" ", "_")
+        
+        # 💡 Zone이 "Unknown"이거나 유효한 Zone 목록에 없으면 IDF에서 제외
+        # (gbXML에서 어떤 Space에도 속하지 않는 차양/지형면 등)
+        if z_id == "Unknown" or z_id not in valid_zone_ids:
+            skipped_count += 1
+            continue
+        
         ep_type = "Wall"
         t = s.get("type", "").lower()
         if "roof" in t:
@@ -440,7 +451,6 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         if "interior" in t or s.get("adjacentZone"):
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
         
-        z_id = s['zone'].replace(" ", "_")
         verts = s.get('vertices', [])
         
         idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id, obc, sun, wind, verts)
@@ -450,6 +460,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             win_verts = get_scaled_window_vertices(verts, wwr)
             if win_verts:
                 idf.add_window(f"Win_{s['id']}", f"WinConst_{s['id']}", s['id'], win_verts)
+    
+    if skipped_count > 0:
+        print(f"⏭️ Zone 미소속 Surface {skipped_count}개 제외 (차양/지형면)")
 
     # 출력 변수
     idf.add_output_variables()
