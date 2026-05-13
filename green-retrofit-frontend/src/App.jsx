@@ -982,7 +982,7 @@ export default function App() {
     <>
       <style>{`
         #root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; text-align: left !important; } 
-        body { margin: 0 !important; display: block !important; min-width: 100vw !important; min-height: 100vh !important; overflow: hidden !important; }
+        body { margin: 0 !important; display: block !important; min-width: 100vw !important; min-height: 100vh !important; ${step === 'landing' ? '' : 'overflow: hidden !important;'} }
 
         /* Custom Toggle Switch CSS */
         .toggle-switch {
