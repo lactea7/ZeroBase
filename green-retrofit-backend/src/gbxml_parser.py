@@ -1,6 +1,7 @@
 # src/gbxml_parser.py
 import defusedxml.ElementTree as ET
 import re
+import math
 
 def strip_ns_and_lower(tag):
     """XML 태그에서 네임스페이스와 접두사를 모두 제거하고 소문자로 변환합니다."""
@@ -19,8 +20,20 @@ def calculate_surface_area(vertices):
         nx += (v1[1] - v2[1]) * (v1[2] + v2[2])
         ny += (v1[2] - v2[2]) * (v1[0] + v2[0])
         nz += (v1[0] - v2[0]) * (v1[1] + v2[1])
-    import math
     return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
+
+def calculate_surface_normal(vertices):
+    """면의 법선벡터(면적 가중)를 계산합니다. 반환값은 (nx, ny, nz)."""
+    if len(vertices) < 3:
+        return (0.0, 0.0, 0.0)
+    nx, ny, nz = 0.0, 0.0, 0.0
+    for i in range(len(vertices)):
+        v1 = vertices[i]
+        v2 = vertices[(i + 1) % len(vertices)]
+        nx += (v1[1] - v2[1]) * (v1[2] + v2[2])
+        ny += (v1[2] - v2[2]) * (v1[0] + v2[0])
+        nz += (v1[0] - v2[0]) * (v1[1] + v2[1])
+    return (nx / 2.0, ny / 2.0, nz / 2.0)
 
 def get_attr(elem, attr_name):
     """대소문자 및 네임스페이스 구분 없이 속성 값을 안전하게 가져옵니다."""
@@ -54,6 +67,115 @@ def azimuth_to_direction(azimuth):
     elif 225 <= az < 315:
         return "West"
     return None
+
+
+def cluster_floor_levels(z_values, min_gap=1.5):
+    """Z좌표 리스트를 클러스터링하여 층 레벨을 자동 감지합니다.
+    
+    인접한 Z좌표의 차이가 min_gap 미만이면 같은 층으로 간주합니다.
+    반환값: 정렬된 층 레벨 리스트 (각 층의 바닥 Z좌표)
+    """
+    if not z_values:
+        return [0.0]
+    
+    sorted_z = sorted(set(round(z, 2) for z in z_values))
+    
+    levels = [sorted_z[0]]
+    for z in sorted_z[1:]:
+        if z - levels[-1] >= min_gap:
+            levels.append(z)
+    
+    return levels
+
+
+def assign_floor_by_levels(z_value, floor_levels):
+    """주어진 Z좌표가 어느 층에 속하는지 반환합니다 (1-indexed).
+    
+    각 층의 바닥 레벨에 가장 가까운 층을 찾습니다.
+    """
+    if not floor_levels:
+        return 1
+    
+    best_floor = 1
+    min_dist = float('inf')
+    
+    for i, level in enumerate(floor_levels):
+        # 다음 층 레벨이 있으면 그 사이의 중간점을 경계로 사용
+        if i + 1 < len(floor_levels):
+            upper_bound = (level + floor_levels[i + 1]) / 2
+        else:
+            upper_bound = level + 100  # 마지막 층은 위쪽으로 넓게
+        
+        if level - 0.5 <= z_value < upper_bound:
+            return i + 1
+    
+    # fallback: 가장 가까운 레벨
+    for i, level in enumerate(floor_levels):
+        dist = abs(z_value - level)
+        if dist < min_dist:
+            min_dist = dist
+            best_floor = i + 1
+    
+    return best_floor
+
+
+def detect_zone_gaps(surfaces_list):
+    """Zone별 면 폐합(closure) 검증 — 법선벡터 합 방식.
+    
+    닫힌 볼륨(closed volume)이면 모든 면의 법선벡터 합이 영벡터에 근접합니다.
+    법선벡터 합의 크기가 전체 면적 대비 임계값을 초과하면 경고를 생성합니다.
+    
+    반환값: warnings 리스트
+    """
+    DEVIATION_THRESHOLD = 0.05  # 5% 이상이면 경고
+    
+    zone_normals = {}  # zone_name -> [nx_sum, ny_sum, nz_sum]
+    zone_areas = {}    # zone_name -> total_area
+    
+    for s in surfaces_list:
+        zone = s.get("zone", "Unknown")
+        if zone == "Unknown":
+            continue
+        
+        verts = s.get("vertices", [])
+        if len(verts) < 3:
+            continue
+        
+        normal = calculate_surface_normal(verts)
+        area = calculate_surface_area(verts)
+        
+        if zone not in zone_normals:
+            zone_normals[zone] = [0.0, 0.0, 0.0]
+            zone_areas[zone] = 0.0
+        
+        zone_normals[zone][0] += normal[0]
+        zone_normals[zone][1] += normal[1]
+        zone_normals[zone][2] += normal[2]
+        zone_areas[zone] += area
+    
+    warnings = []
+    for zone, normal_sum in zone_normals.items():
+        total_area = zone_areas.get(zone, 0)
+        if total_area <= 0:
+            continue
+        
+        # 법선벡터 합의 크기
+        residual = math.sqrt(
+            normal_sum[0]**2 + normal_sum[1]**2 + normal_sum[2]**2
+        )
+        
+        # 전체 면적 대비 잔차 비율
+        deviation = residual / total_area
+        
+        if deviation > DEVIATION_THRESHOLD:
+            warnings.append({
+                "zone": zone,
+                "issue": "not_enclosed",
+                "deviation": round(deviation * 100, 1),  # 퍼센트
+                "message": f"Zone \"{zone}\"의 면이 완전히 닫혀있지 않습니다 (오차: {round(deviation * 100, 1)}%)"
+            })
+    
+    return warnings
 
 
 def parse_gbxml_to_json(filepath: str):
@@ -95,7 +217,7 @@ def parse_gbxml_to_json(filepath: str):
     offset_z = min(all_z) if all_z else 0
 
     # =====================================================
-    # 💡 [신규] Construction 데이터베이스 파싱
+    # 💡 Construction 데이터베이스 파싱
     # gbXML의 <Construction> 요소에서 U-value/R-value 추출
     # =====================================================
     construction_db = {}
@@ -175,11 +297,15 @@ def parse_gbxml_to_json(filepath: str):
         spaces[sp_id] = {
             "id": sp_id,
             "name": sp_name,
-            "floor": 1, # 일단 1층으로 두고 Surface 높이로 자동 보정
+            "floor": 1,
             "isConditioned": True
         }
         
-    # 4. 면(Surface) 추출 및 층(Floor) 동적 슬라이싱
+    # =====================================================
+    # 💡 [1차 패스] Surface 파싱 및 Zone별 Z좌표 수집
+    # =====================================================
+    zone_z_coords = {}  # space_id -> [z1, z2, z3, ...]  (모든 꼭짓점의 Z좌표)
+    
     all_surfaces = root.findall('.//surface')
     for surf in all_surfaces:
         surf_id = get_attr(surf, 'id')
@@ -212,30 +338,23 @@ def parse_gbxml_to_json(filepath: str):
         if len(vertices) < 3:
             continue
 
-        # 💡 핵심: 3D Z축(높이) 중심점을 기준으로 3m마다 1개 층으로 자동 계산
-        center_z = sum([v[2] for v in vertices]) / len(vertices)
-        assigned_floor = int(max(0, center_z) // 3.0) + 1
-
-        # 공간(Space)의 층수도 맞게 업데이트
-        if space_1 and spaces.get(space_1):
-            spaces[space_1]["floor"] = max(spaces[space_1]["floor"], assigned_floor)
-
-        # =====================================================
-        # 💡 [신규] U-value 결정 우선순위:
-        # 1순위: gbXML Construction에서 읽은 실제 U-value
-        # 2순위: 면 타입별 기본값 (fallback)
-        # =====================================================
+        # Zone별 Z좌표 수집 (높이 역산 및 층수 클러스터링용)
+        if space_1 and space_1 in spaces:
+            if space_1 not in zone_z_coords:
+                zone_z_coords[space_1] = []
+            for v in vertices:
+                zone_z_coords[space_1].append(v[2])
+        
+        # U-value 결정 (1순위: gbXML Construction, 2순위: 타입별 기본값)
         u_value = None
         u_source = "default"
         
-        # 1순위: constructionIdRef → Construction DB 조회
         if construction_ref and construction_ref in construction_db:
             constr_data = construction_db[construction_ref]
             if constr_data["uValue"] is not None:
                 u_value = constr_data["uValue"]
                 u_source = "gbxml"
         
-        # 2순위: 타입별 기본값 fallback
         if u_value is None:
             surf_type_lower = surf_type.lower().replace(" ", "")
             for key, default_u in DEFAULT_U_VALUES.items():
@@ -243,12 +362,9 @@ def parse_gbxml_to_json(filepath: str):
                     u_value = default_u
                     break
             if u_value is None:
-                u_value = 0.8  # 최종 fallback
+                u_value = 0.8
 
-        # =====================================================
-        # 💡 [신규] 방향(Azimuth) 파싱 → direction 필드 생성
-        # gbXML RectangularGeometry > Azimuth 태그에서 추출
-        # =====================================================
+        # 방향(Azimuth) 파싱
         direction = None
         azimuth_value = None
         
@@ -264,7 +380,6 @@ def parse_gbxml_to_json(filepath: str):
 
         mapped_type = surf_type
         surf_type_lower = surf_type.lower()
-        # 올바른 매핑 (포함 관계로 잘못 매핑되는 것 방지)
         if "exteriorwall" in surf_type_lower: mapped_type = "ExteriorWall"
         elif "interiorwall" in surf_type_lower or "internalwall" in surf_type_lower: mapped_type = "InteriorWall"
         elif "roof" in surf_type_lower: mapped_type = "Roof"
@@ -290,15 +405,16 @@ def parse_gbxml_to_json(filepath: str):
             "type": mapped_type,
             "zone": zone_name,
             "adjacentZone": adj_zone_name,
-            "floor": assigned_floor,
-            "direction": direction,        # 💡 [신규] 방향 (North/South/East/West/Roof/Floor)
-            "azimuth": azimuth_value,       # 💡 [신규] 원본 방위각 (0~360°)
+            "floor": 1,  # 임시값, 아래에서 클러스터링 후 재배정
+            "direction": direction,
+            "azimuth": azimuth_value,
             "vertices": vertices,
             "uValue": round(u_value, 4),
-            "uSource": u_source,            # 💡 [신규] U-value 출처 ("gbxml" 또는 "default")
-            "constructionRef": construction_ref,  # 💡 [신규] Construction 참조 ID
+            "uSource": u_source,
+            "constructionRef": construction_ref,
             "wwr": 0,
-            "openings": []
+            "openings": [],
+            "_space_id": space_1,  # 내부용: 층수 계산에 사용 후 삭제
         }
 
         surf_area = calculate_surface_area(vertices)
@@ -344,11 +460,74 @@ def parse_gbxml_to_json(filepath: str):
 
         surfaces_list.append(surface_data)
 
+    # =====================================================
+    # 💡 [2차 패스] Zone별 높이 자동역산 + Z클러스터링 층 배정
+    # =====================================================
+    
+    # Zone별 높이 계산: Z좌표 min/max 차이
+    zone_heights = {}  # space_id -> height (m)
+    zone_min_z = {}    # space_id -> min_z (바닥 Z좌표)
+    
+    for sp_id, z_coords in zone_z_coords.items():
+        if z_coords:
+            z_min = min(z_coords)
+            z_max = max(z_coords)
+            height = z_max - z_min
+            # 최소 2.0m, 비정상적이면 기본 3.0m
+            if height < 2.0:
+                height = 3.0
+            zone_heights[sp_id] = round(height, 2)
+            zone_min_z[sp_id] = z_min
+        else:
+            zone_heights[sp_id] = 3.0
+            zone_min_z[sp_id] = 0.0
+    
+    # Z클러스터링: Zone 바닥 Z좌표를 기반으로 층 레벨 자동 감지
+    all_floor_z = list(zone_min_z.values())
+    floor_levels = cluster_floor_levels(all_floor_z, min_gap=1.5)
+    
+    print(f"🏗️ 층 레벨 자동 감지: {len(floor_levels)}개 층 → {[round(z, 2) for z in floor_levels]}")
+    for sp_id, z_coords in zone_z_coords.items():
+        sp_name = spaces.get(sp_id, {}).get("name", sp_id)
+        h = zone_heights.get(sp_id, 3.0)
+        print(f"   Zone \"{sp_name}\": 높이={h}m, 바닥Z={round(zone_min_z.get(sp_id, 0), 2)}m")
+    
+    # Zone별 층 배정
+    zone_floor_map = {}  # space_id -> floor_number
+    for sp_id, min_z in zone_min_z.items():
+        zone_floor_map[sp_id] = assign_floor_by_levels(min_z, floor_levels)
+    
+    # spaces 딕셔너리에 높이와 층수 업데이트
+    for sp_id in spaces:
+        spaces[sp_id]["floor"] = zone_floor_map.get(sp_id, 1)
+        spaces[sp_id]["height"] = zone_heights.get(sp_id, 3.0)
+    
+    # Surface의 층수를 Zone 기반으로 재배정
+    for s in surfaces_list:
+        sp_id = s.pop("_space_id", None)  # 내부용 필드 제거
+        if sp_id and sp_id in zone_floor_map:
+            s["floor"] = zone_floor_map[sp_id]
+        else:
+            # Zone에 속하지 않는 Surface는 Z좌표로 직접 배정
+            center_z = sum(v[2] for v in s["vertices"]) / len(s["vertices"])
+            s["floor"] = assign_floor_by_levels(center_z, floor_levels)
+
+    # =====================================================
+    # 💡 면 갭(Gap) 검증 — 법선벡터 합 방식
+    # =====================================================
+    gap_warnings = detect_zone_gaps(surfaces_list)
+    
+    if gap_warnings:
+        print(f"⚠️ 면 폐합 검증 경고: {len(gap_warnings)}개 Zone에서 갭 감지됨")
+        for w in gap_warnings:
+            print(f"   {w['message']}")
+
     # 6. 존(Zone) 리스트 완성
     for sp_id, sp_data in spaces.items():
         zones_list.append({
             "id": sp_data["name"],
             "floor": sp_data["floor"],
+            "height": sp_data.get("height", 3.0),  # 💡 [신규] 역산된 높이
             "activityId": 1105,
             "isConditioned": True,
             "heatingSetpoint": 20.0,
@@ -362,8 +541,11 @@ def parse_gbxml_to_json(filepath: str):
     print(f"📊 파싱 완료 → Zone {len(zones_list)}개, Surface {len(surfaces_list)}개")
     print(f"   U-value: gbXML 원본 {u_from_gbxml}개 / 기본값 {u_from_default}개")
     print(f"   방향(Direction) 매핑: {dir_count}개")
+    print(f"   층 수: {len(floor_levels)}개 층")
 
     return {
         "zones": zones_list,
-        "surfaces": surfaces_list
+        "surfaces": surfaces_list,
+        "warnings": gap_warnings,  # 💡 [신규] 면 갭 경고
+        "floorLevels": len(floor_levels),  # 💡 [신규] 감지된 총 층수
     }

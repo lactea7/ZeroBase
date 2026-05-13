@@ -291,8 +291,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         z_id = z['id'].replace(" ", "_")
         z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and "floor" in s.get("type", "").lower()]
         z_area = sum(z_area_list) if sum(z_area_list) >= 1.0 else 100.0
+        z_height = z.get("height", 3.0)  # 💡 Zone별 자동역산 높이 사용
         
-        idf.add_zone(z_id, z_area)
+        idf.add_zone(z_id, z_area, z_height)
         
         heat_set = z.get("heatingSetpoint", 20.0)
         cool_set = z.get("coolingSetpoint", 26.0)

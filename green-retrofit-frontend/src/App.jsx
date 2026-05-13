@@ -615,6 +615,7 @@ export default function App() {
 
   const [lightCalc, setLightCalc] = useState({ active: false, w: 32, qty: 10, area: 100 });
   const [equipCalc, setEquipCalc] = useState({ active: false, w: 150, qty: 5, area: 100 });
+  const [gapWarnings, setGapWarnings] = useState([]);
 
   const availableFloors = Array.from(
     new Set([...surfaces.map((s) => s.floor || 1), ...zones.map((z) => z.floor || 1)])
@@ -749,6 +750,12 @@ export default function App() {
           equipmentPower: z.equipmentPower || 15.0,
         }));
         setZones(mappedZones);
+        
+        // 💡 면 갭 경고 처리
+        const warnings = response.data.warnings || [];
+        if (warnings.length > 0) {
+          setGapWarnings(warnings);
+        }
       }
       setStep('upload');
     } catch (error) {
@@ -1108,6 +1115,71 @@ export default function App() {
           animation-delay: .3s;
         }
       `}</style>
+
+      {/* 💡 면 갭(Gap) 경고 모달 */}
+      {gapWarnings.length > 0 && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className={`w-full max-w-lg mx-4 rounded-3xl shadow-2xl border p-8 ${isDarkMode ? 'bg-[#151B2B] border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 flex items-center justify-center">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>건물 모델 검증 경고</h3>
+                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>gbXML 기하학 분석 결과</p>
+              </div>
+            </div>
+
+            <p className={`text-sm mb-4 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+              다음 Zone에서 면과 면이 완전히 맞닿지 않는 부분이 감지되었습니다.
+              이는 CAD 모델링 시 발생하는 미세한 틈(Gap)일 수 있습니다.
+            </p>
+
+            <div className={`rounded-2xl border p-4 mb-6 max-h-48 overflow-y-auto ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              {gapWarnings.map((w, i) => (
+                <div key={i} className={`flex justify-between items-center py-2 ${i > 0 ? (isDarkMode ? 'border-t border-slate-700' : 'border-t border-slate-200') : ''}`}>
+                  <span className={`text-sm font-mono font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{w.zone}</span>
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                    w.deviation > 20 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-500'
+                  }`}>
+                    오차: {w.deviation}%
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <p className={`text-xs mb-6 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+              이 상태로 시뮬레이션을 진행할 수 있지만, 해당 Zone의 냉난방 부하 결과 정확도가 떨어질 수 있습니다.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setGapWarnings([]);
+                  setSurfaces([]);
+                  setZones([]);
+                  setUploadedFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                className={`flex-1 py-3 rounded-2xl text-sm font-bold border transition-all ${
+                  isDarkMode ? 'border-slate-600 text-slate-300 hover:bg-slate-800' : 'border-slate-300 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                수정하고 재업로드
+              </button>
+              <button
+                onClick={() => setGapWarnings([])}
+                className="flex-1 py-3 rounded-2xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-black transition-all shadow-lg shadow-amber-500/25"
+              >
+                그대로 진행
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className={`h-screen w-full transition-colors duration-300 ${theme.bg} font-sans flex flex-col overflow-hidden`}>
         <header className={`flex-shrink-0 px-8 py-4 border-b ${isDarkMode ? 'border-slate-800 bg-[#0B0F19]' : 'border-[#D5D2C9] bg-[#DFDCD5]'} flex justify-between items-center z-10 shadow-sm`}>
