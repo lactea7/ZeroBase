@@ -19,7 +19,7 @@ export default function Navigation({ onStart }) {
       </div>
       
       <div className="flex items-center gap-8">
-        {['가이드', 'LCC 분석', '문의'].map((item) => (
+        {['가이드'].map((item) => (
           <a key={item} href={`#${item}`} className="text-sm font-semibold text-slate-500 hover:text-brand-primary transition-colors">
             {item}
           </a>

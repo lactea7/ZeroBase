@@ -70,7 +70,6 @@ import ScheduleEditor from './components/ScheduleEditor';
 import Navigation from './components/landing/Navigation';
 import Hero from './components/landing/Hero';
 import Manual from './components/landing/Manual';
-import SimulationEngine from './components/landing/SimulationEngine';
 
 // --- [3D 뷰어 컴포넌트] ---
 const BuildingViewer = ({
@@ -1193,7 +1192,6 @@ export default function App() {
           <main>
             <Hero />
             <Manual onStart={() => setStep('upload')} />
-            <SimulationEngine onStart={() => setStep('upload')} />
           </main>
         </div>
       ) : (
