@@ -446,7 +446,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id, obc, sun, wind, verts)
         
         wwr = s.get("wwr", 0)
-        if ep_type == "Wall" and wwr > 0:
+        if ep_type == "Wall" and wwr > 0 and obc == "Outdoors":
             win_verts = get_scaled_window_vertices(verts, wwr)
             if win_verts:
                 idf.add_window(f"Win_{s['id']}", f"WinConst_{s['id']}", s['id'], win_verts)
