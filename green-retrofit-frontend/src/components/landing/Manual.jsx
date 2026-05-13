@@ -58,7 +58,7 @@ export default function Manual({ onStart }) {
               <div className="mt-8 relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-brand-primary to-brand-secondary rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
                 <video 
-                  src="https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-a-blueprint-of-a-house-4330-large.mp4" 
+                  src="/gbXML_manual.mp4" 
                   autoPlay 
                   loop 
                   muted 
