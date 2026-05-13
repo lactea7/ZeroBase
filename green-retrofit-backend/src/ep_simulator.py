@@ -101,21 +101,99 @@ def calculate_surface_area(vertices):
     return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
 
 def get_scaled_window_vertices(vertices, wwr):
+    """벽면 꼭짓점과 WWR로부터 창호 꼭짓점(최대 4개)을 생성합니다.
+    
+    EnergyPlus FenestrationSurface:Detailed는 최대 4개 꼭짓점만 허용하므로,
+    벽면이 5각형 이상이면 직사각형 근사로 창호를 생성합니다.
+    """
     if not vertices or wwr <= 0: 
         return []
+    
+    # 4개 이하면 기존 방식 (중심 축소)
+    if len(vertices) <= 4:
+        cx = sum(v[0] for v in vertices) / len(vertices)
+        cy = sum(v[1] for v in vertices) / len(vertices)
+        cz = sum(v[2] for v in vertices) / len(vertices)
+        scale = math.sqrt(wwr / 100.0)
         
+        win_verts = []
+        for v in vertices:
+            wx = cx + (v[0] - cx) * scale
+            wy = cy + (v[1] - cy) * scale
+            wz = cz + (v[2] - cz) * scale
+            win_verts.append([wx, wy, wz])
+        return win_verts
+    
+    # 5개 이상 꼭짓점 → 벽 평면 위에 직사각형 창호를 근사 생성
+    # 벽의 법선벡터 계산
+    v0 = vertices[0]
+    v1 = vertices[1]
+    v2 = vertices[2]
+    
+    edge1 = [v1[i] - v0[i] for i in range(3)]
+    edge2 = [v2[i] - v0[i] for i in range(3)]
+    
+    # 법선 = edge1 x edge2
+    normal = [
+        edge1[1]*edge2[2] - edge1[2]*edge2[1],
+        edge1[2]*edge2[0] - edge1[0]*edge2[2],
+        edge1[0]*edge2[1] - edge1[1]*edge2[0]
+    ]
+    n_len = math.sqrt(sum(n*n for n in normal))
+    if n_len < 1e-10:
+        return []
+    normal = [n/n_len for n in normal]
+    
+    # 벽 평면의 로컬 좌표계 구성 (U, V축)
+    # U축: 첫 번째 edge 방향
+    u_len = math.sqrt(sum(e*e for e in edge1))
+    if u_len < 1e-10:
+        return []
+    u_axis = [e/u_len for e in edge1]
+    
+    # V축: normal x U
+    v_axis = [
+        normal[1]*u_axis[2] - normal[2]*u_axis[1],
+        normal[2]*u_axis[0] - normal[0]*u_axis[2],
+        normal[0]*u_axis[1] - normal[1]*u_axis[0]
+    ]
+    
+    # 모든 꼭짓점을 로컬 좌표로 변환
     cx = sum(v[0] for v in vertices) / len(vertices)
     cy = sum(v[1] for v in vertices) / len(vertices)
     cz = sum(v[2] for v in vertices) / len(vertices)
+    
+    local_u = []
+    local_v = []
+    for v in vertices:
+        dx, dy, dz = v[0]-cx, v[1]-cy, v[2]-cz
+        local_u.append(dx*u_axis[0] + dy*u_axis[1] + dz*u_axis[2])
+        local_v.append(dx*v_axis[0] + dy*v_axis[1] + dz*v_axis[2])
+    
+    # 로컬 좌표 바운딩 박스
+    u_min, u_max = min(local_u), max(local_u)
+    v_min, v_max = min(local_v), max(local_v)
+    
+    # WWR 비율로 축소
     scale = math.sqrt(wwr / 100.0)
+    half_w = (u_max - u_min) / 2 * scale
+    half_h = (v_max - v_min) / 2 * scale
+    
+    # 4개 직사각형 꼭짓점 (중심 기준)
+    corners = [
+        (-half_w, -half_h),
+        ( half_w, -half_h),
+        ( half_w,  half_h),
+        (-half_w,  half_h),
+    ]
     
     win_verts = []
-    for v in vertices:
-        wx = cx + (v[0] - cx) * scale
-        wy = cy + (v[1] - cy) * scale
-        wz = cz + (v[2] - cz) * scale
+    for cu, cv in corners:
+        wx = cx + cu*u_axis[0] + cv*v_axis[0]
+        wy = cy + cu*u_axis[1] + cv*v_axis[1]
+        wz = cz + cu*u_axis[2] + cv*v_axis[2]
         win_verts.append([wx, wy, wz])
-        
+    
     return win_verts
 
 def condense_daily_schedule(day_type_str: str, hourly_values: list) -> str:
