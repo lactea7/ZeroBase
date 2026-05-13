@@ -34,6 +34,28 @@ def get_attr(elem, attr_name):
             return v
     return None
 
+def azimuth_to_direction(azimuth):
+    """방위각(Azimuth, 0~360°)을 방향 문자열로 변환합니다.
+    gbXML 기준: 0°=북, 90°=동, 180°=남, 270°=서
+    """
+    if azimuth is None:
+        return None
+    try:
+        az = float(azimuth) % 360
+    except (ValueError, TypeError):
+        return None
+    
+    if 315 <= az or az < 45:
+        return "North"
+    elif 45 <= az < 135:
+        return "East"
+    elif 135 <= az < 225:
+        return "South"
+    elif 225 <= az < 315:
+        return "West"
+    return None
+
+
 def parse_gbxml_to_json(filepath: str):
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -72,6 +94,75 @@ def parse_gbxml_to_json(filepath: str):
     offset_y = (min(all_y) + max(all_y)) / 2 if all_y else 0
     offset_z = min(all_z) if all_z else 0
 
+    # =====================================================
+    # 💡 [신규] Construction 데이터베이스 파싱
+    # gbXML의 <Construction> 요소에서 U-value/R-value 추출
+    # =====================================================
+    construction_db = {}
+    for constr in root.findall('.//construction'):
+        c_id = get_attr(constr, 'id')
+        if not c_id:
+            continue
+        
+        c_name_node = constr.find('.//name')
+        c_name = c_name_node.text if c_name_node is not None and c_name_node.text else c_id
+        
+        c_uvalue = None
+        c_rvalue = None
+        
+        # U-value 직접 탐색 (다양한 태그명 대응)
+        for tag_name in ['uvalue', 'u-value', 'ufactor', 'u-factor']:
+            uval_elem = constr.find(f'.//{tag_name}')
+            if uval_elem is not None and uval_elem.text:
+                try:
+                    c_uvalue = float(uval_elem.text)
+                except (ValueError, TypeError):
+                    pass
+                break
+        
+        # R-value 탐색 (U-value가 없는 경우 R-value → U-value 변환)
+        if c_uvalue is None:
+            for tag_name in ['rvalue', 'r-value']:
+                rval_elem = constr.find(f'.//{tag_name}')
+                if rval_elem is not None and rval_elem.text:
+                    try:
+                        c_rvalue = float(rval_elem.text)
+                        if c_rvalue > 0:
+                            c_uvalue = 1.0 / c_rvalue
+                    except (ValueError, TypeError):
+                        pass
+                    break
+        
+        # 단위 속성 확인 (IP 단위계일 경우 SI로 변환)
+        uval_unit = get_attr(constr, 'unit')
+        if c_uvalue and uval_unit and 'btu' in (uval_unit or '').lower():
+            c_uvalue = c_uvalue * 5.678  # BTU/(hr·ft²·°F) → W/(m²·K)
+        
+        construction_db[c_id] = {
+            "name": c_name,
+            "uValue": c_uvalue  # None이면 gbXML에 U-value 정보가 없음
+        }
+    
+    if construction_db:
+        found_count = sum(1 for v in construction_db.values() if v["uValue"] is not None)
+        print(f"📐 Construction DB 파싱 완료: {len(construction_db)}개 중 U-value 보유 {found_count}개")
+    
+    # 타입별 기본 U-value (gbXML에 정보가 없을 때 fallback)
+    DEFAULT_U_VALUES = {
+        "exteriorwall": 0.43,
+        "roof": 0.25,
+        "floor": 0.50,
+        "slab": 0.50,
+        "slabongrade": 0.50,
+        "undergroundslab": 0.50,
+        "undergroundwall": 0.70,
+        "interiorwall": 1.25,
+        "internalwall": 1.25,
+        "ceiling": 0.50,
+        "interiorfloor": 0.50,
+        "exteriorfloor": 0.50,
+    }
+
     # 3. 공간(Space) 임시 저장
     space_elements = root.findall('.//space')
     for space in space_elements:
@@ -93,6 +184,7 @@ def parse_gbxml_to_json(filepath: str):
     for surf in all_surfaces:
         surf_id = get_attr(surf, 'id')
         surf_type = get_attr(surf, 'surfacetype') or "Unknown"
+        construction_ref = get_attr(surf, 'constructionidref')
         adj_spaces = surf.findall('.//adjacentspaceid')
         space_1 = get_attr(adj_spaces[0], 'spaceidref') if len(adj_spaces) > 0 else None
         space_2 = get_attr(adj_spaces[1], 'spaceidref') if len(adj_spaces) > 1 else None
@@ -128,14 +220,50 @@ def parse_gbxml_to_json(filepath: str):
         if space_1 and spaces.get(space_1):
             spaces[space_1]["floor"] = max(spaces[space_1]["floor"], assigned_floor)
 
-        u_value = 0.8
-        surf_type_lower = surf_type.lower()
-        if "exteriorwall" in surf_type_lower: u_value = 0.43
-        elif "roof" in surf_type_lower: u_value = 0.25
-        elif "floor" in surf_type_lower or "slab" in surf_type_lower: u_value = 0.50
-        elif "interiorwall" in surf_type_lower or "internal" in surf_type_lower: u_value = 1.25
+        # =====================================================
+        # 💡 [신규] U-value 결정 우선순위:
+        # 1순위: gbXML Construction에서 읽은 실제 U-value
+        # 2순위: 면 타입별 기본값 (fallback)
+        # =====================================================
+        u_value = None
+        u_source = "default"
+        
+        # 1순위: constructionIdRef → Construction DB 조회
+        if construction_ref and construction_ref in construction_db:
+            constr_data = construction_db[construction_ref]
+            if constr_data["uValue"] is not None:
+                u_value = constr_data["uValue"]
+                u_source = "gbxml"
+        
+        # 2순위: 타입별 기본값 fallback
+        if u_value is None:
+            surf_type_lower = surf_type.lower().replace(" ", "")
+            for key, default_u in DEFAULT_U_VALUES.items():
+                if key in surf_type_lower:
+                    u_value = default_u
+                    break
+            if u_value is None:
+                u_value = 0.8  # 최종 fallback
+
+        # =====================================================
+        # 💡 [신규] 방향(Azimuth) 파싱 → direction 필드 생성
+        # gbXML RectangularGeometry > Azimuth 태그에서 추출
+        # =====================================================
+        direction = None
+        azimuth_value = None
+        
+        rect_geom = surf.find('.//rectangulargeometry')
+        if rect_geom is not None:
+            az_elem = rect_geom.find('.//azimuth')
+            if az_elem is not None and az_elem.text:
+                try:
+                    azimuth_value = float(az_elem.text)
+                    direction = azimuth_to_direction(azimuth_value)
+                except (ValueError, TypeError):
+                    pass
 
         mapped_type = surf_type
+        surf_type_lower = surf_type.lower()
         # 올바른 매핑 (포함 관계로 잘못 매핑되는 것 방지)
         if "exteriorwall" in surf_type_lower: mapped_type = "ExteriorWall"
         elif "interiorwall" in surf_type_lower or "internalwall" in surf_type_lower: mapped_type = "InteriorWall"
@@ -150,14 +278,25 @@ def parse_gbxml_to_json(filepath: str):
         elif "floor" in surf_type_lower: mapped_type = "Floor"
         elif "exterior" in surf_type_lower: mapped_type = "ExteriorWall"
         elif "interior" in surf_type_lower or "internal" in surf_type_lower: mapped_type = "InteriorWall"
+        
+        # Roof/Floor 타입에 방향 자동 배정
+        if mapped_type == "Roof":
+            direction = "Roof"
+        elif mapped_type in ("Floor", "SlabOnGrade", "UndergroundSlab", "ExteriorFloor", "InteriorFloor", "Ceiling"):
+            direction = "Floor"
+        
         surface_data = {
             "id": surf_id,
             "type": mapped_type,
             "zone": zone_name,
             "adjacentZone": adj_zone_name,
-            "floor": assigned_floor, # 프론트엔드로 층수 전달!
+            "floor": assigned_floor,
+            "direction": direction,        # 💡 [신규] 방향 (North/South/East/West/Roof/Floor)
+            "azimuth": azimuth_value,       # 💡 [신규] 원본 방위각 (0~360°)
             "vertices": vertices,
-            "uValue": u_value,
+            "uValue": round(u_value, 4),
+            "uSource": u_source,            # 💡 [신규] U-value 출처 ("gbxml" 또는 "default")
+            "constructionRef": construction_ref,  # 💡 [신규] Construction 참조 ID
             "wwr": 0,
             "openings": []
         }
@@ -215,6 +354,14 @@ def parse_gbxml_to_json(filepath: str):
             "heatingSetpoint": 20.0,
             "coolingSetpoint": 26.0
         })
+
+    # 7. 파싱 요약 출력
+    u_from_gbxml = sum(1 for s in surfaces_list if s.get("uSource") == "gbxml")
+    u_from_default = sum(1 for s in surfaces_list if s.get("uSource") == "default")
+    dir_count = sum(1 for s in surfaces_list if s.get("direction") is not None)
+    print(f"📊 파싱 완료 → Zone {len(zones_list)}개, Surface {len(surfaces_list)}개")
+    print(f"   U-value: gbXML 원본 {u_from_gbxml}개 / 기본값 {u_from_default}개")
+    print(f"   방향(Direction) 매핑: {dir_count}개")
 
     return {
         "zones": zones_list,
