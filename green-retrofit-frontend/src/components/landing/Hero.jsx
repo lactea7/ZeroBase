@@ -78,6 +78,24 @@ export default function Hero() {
             </div>
           </motion.div>
         </motion.div>
+
+        {/* Scroll Indicator (Inside the glass stage, bottom center) */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.5 }}
+          className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center gap-2 z-50 pointer-events-none"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Scroll</span>
+          <motion.div
+            animate={{ y: [0, 10, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+            className="w-10 h-10 rounded-full border border-white/40 flex items-center justify-center bg-white/20 backdrop-blur-md shadow-sm"
+          >
+             <ChevronDown className="w-5 h-5 text-slate-500" />
+          </motion.div>
+        </motion.div>
+
       </div>
 
       {/* Main Content */}
@@ -111,19 +129,6 @@ export default function Hero() {
           BIM 데이터로 손쉽게 에너지 분석 가능한 플랫폼입니다. <br />
           정확성 높은 데이터로 리모델링의 미래를 설계하세요!
         </motion.p>
-
-        {/* Scroll Indicator */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1, y: [0, 10, 0] }}
-          transition={{ opacity: { delay: 1 }, y: { duration: 2, repeat: Infinity, ease: "easeInOut" } }}
-          className="flex flex-col items-center justify-center gap-2 mt-8 text-slate-300"
-        >
-          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Scroll</span>
-          <div className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center bg-slate-50/50 backdrop-blur-sm shadow-sm">
-             <ChevronDown className="w-5 h-5 text-slate-400" />
-          </div>
-        </motion.div>
       </div>
     </section>
   );
