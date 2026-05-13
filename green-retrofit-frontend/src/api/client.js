@@ -6,6 +6,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 60000, // 60초 타임아웃 (대형 파일 파싱 대비)
 });
 
 export const uploadGbxml = async (file) => {

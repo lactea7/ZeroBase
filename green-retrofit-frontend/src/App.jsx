@@ -759,7 +759,9 @@ export default function App() {
       }
       setStep('upload');
     } catch (error) {
+      console.error('파싱 에러:', error);
       setUploadError('백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.');
+      setStep('upload');
     }
   };
 
