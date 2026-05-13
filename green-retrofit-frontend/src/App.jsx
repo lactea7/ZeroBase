@@ -1215,7 +1215,7 @@ export default function App() {
         <header className={`flex-shrink-0 px-8 py-4 border-b ${isDarkMode ? 'border-slate-800 bg-[#0B0F19]' : 'border-[#D5D2C9] bg-[#DFDCD5]'} flex justify-between items-center z-10 shadow-sm`}>
           <div 
             className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
-            onClick={() => setStep('upload')}
+            onClick={() => setStep('landing')}
           >
             <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center shadow-lg">
               <Layers className="text-white" size={18} />
@@ -1250,24 +1250,26 @@ export default function App() {
                 <p className={`text-lg ${theme.textSub}`}>BIM 형상 데이터를 분석하고 각 객체의 열역학적 속성과 신재생 설비를 튜닝하세요.</p>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* 툴팁 아이콘 - 두 컬럼 사이 중앙 상단에 위치 */}
+                <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 top-4 z-50">
+                  <div 
+                    className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm cursor-help relative group shadow-sm hover:scale-110 transition-transform"
+                    onMouseEnter={handleMouseEnterTooltip}
+                    onMouseLeave={handleMouseLeaveTooltip}
+                  >
+                    ?
+                    {showVideoTooltip && (
+                      <div className="absolute top-10 left-1/2 -translate-x-1/2 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 z-[100] animate-in fade-in zoom-in duration-200 cursor-default" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-xs font-bold mb-2 text-slate-800 dark:text-slate-200 px-1 text-center">Revit gbXML 추출 가이드</p>
+                        <video src="/gbXML_manual.mp4" autoPlay loop muted playsInline className="w-full rounded-lg" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* 왼쪽: 파일 업로드 */}
                 <div className="flex flex-col gap-4">
-                  <div className="flex justify-end">
-                    <div 
-                      className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm cursor-help relative group shadow-sm hover:scale-110 transition-transform"
-                      onMouseEnter={handleMouseEnterTooltip}
-                      onMouseLeave={handleMouseLeaveTooltip}
-                    >
-                      ?
-                      {showVideoTooltip && (
-                        <div className="absolute top-10 right-0 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 z-[100] animate-in fade-in zoom-in duration-200 cursor-default" onClick={(e) => e.stopPropagation()}>
-                          <p className="text-xs font-bold mb-2 text-slate-800 dark:text-slate-200 px-1 text-center">Revit gbXML 추출 가이드</p>
-                          <video src="/gbXML_manual.mp4" autoPlay loop muted playsInline className="w-full rounded-lg" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
                   {!uploadedFile || surfaces.length === 0 ? (
                     <>
                       <div
