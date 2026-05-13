@@ -12,13 +12,13 @@ RUN apt-get update && apt-get install -y \
 # 파이썬 기본 명령어 설정
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
-# EnergyPlus 24.1.0 다운로드 및 설치
+# EnergyPlus 25.2.0 다운로드 및 설치
 # (자동 Y 입력으로 라이선스 동의 및 기본 디렉토리 설치 진행)
-RUN wget https://github.com/NREL/EnergyPlus/releases/download/v24.1.0/EnergyPlus-24.1.0-9d7789a3ac-Linux-Ubuntu22.04-x86_64.tar.gz -O /tmp/ep.tar.gz \
-    && mkdir -p /usr/local/EnergyPlus-24-1-0 \
-    && tar -xzf /tmp/ep.tar.gz -C /usr/local/EnergyPlus-24-1-0 --strip-components=1 \
+RUN wget https://github.com/NREL/EnergyPlus/releases/download/v25.2.0/EnergyPlus-25.2.0-cf7368216c-Linux-Ubuntu22.04-x86_64.tar.gz -O /tmp/ep.tar.gz \
+    && mkdir -p /usr/local/EnergyPlus-25-2-0 \
+    && tar -xzf /tmp/ep.tar.gz -C /usr/local/EnergyPlus-25-2-0 --strip-components=1 \
     && rm /tmp/ep.tar.gz \
-    && ln -s /usr/local/EnergyPlus-24-1-0/energyplus /usr/local/bin/energyplus
+    && ln -s /usr/local/EnergyPlus-25-2-0/energyplus /usr/local/bin/energyplus
 
 # 작업 디렉토리 설정
 WORKDIR /app
@@ -32,7 +32,7 @@ COPY _data/ ./_data/
 COPY green-retrofit-backend/ ./green-retrofit-backend/
 
 # 컨테이너 내 EnergyPlus 버전 환경변수 설정 (시뮬레이터용)
-ENV EP_VERSION="24.1"
+ENV EP_VERSION="25.2"
 
 # 실행 디렉토리를 백엔드 소스코드로 변경
 WORKDIR /app/green-retrofit-backend

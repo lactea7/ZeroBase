@@ -294,8 +294,14 @@ class IdfBuilder:
         fatal_error = False
         if os.path.exists(err_path):
             with open(err_path, "r", encoding="utf-8", errors="ignore") as f_err:
-                if "Fatal" in f_err.read():
+                err_content = f_err.read()
+                if "Fatal" in err_content:
                     fatal_error = True
+                    print("\n" + "="*50)
+                    print("🚨 EnergyPlus 상세 에러 로그 (eplusout.err):")
+                    print("="*50)
+                    print(err_content)
+                    print("="*50 + "\n")
 
         success = process.returncode == 0 and not fatal_error
         
