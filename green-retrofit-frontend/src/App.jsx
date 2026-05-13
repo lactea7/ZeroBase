@@ -562,6 +562,22 @@ export default function App() {
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  
+  const [showVideoTooltip, setShowVideoTooltip] = useState(false);
+  const tooltipTimerRef = useRef(null);
+
+  const handleMouseEnterTooltip = () => {
+    tooltipTimerRef.current = setTimeout(() => {
+      setShowVideoTooltip(true);
+    }, 1000);
+  };
+
+  const handleMouseLeaveTooltip = () => {
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+    }
+    setShowVideoTooltip(false);
+  };
 
   const [projectData, setProjectData] = useState({
     name: '신규 프로젝트',
@@ -1237,6 +1253,21 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* 왼쪽: 파일 업로드 */}
                 <div className="flex flex-col gap-4">
+                  <div className="flex justify-end">
+                    <div 
+                      className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm cursor-help relative group shadow-sm hover:scale-110 transition-transform"
+                      onMouseEnter={handleMouseEnterTooltip}
+                      onMouseLeave={handleMouseLeaveTooltip}
+                    >
+                      ?
+                      {showVideoTooltip && (
+                        <div className="absolute top-10 right-0 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 z-[100] animate-in fade-in zoom-in duration-200 cursor-default" onClick={(e) => e.stopPropagation()}>
+                          <p className="text-xs font-bold mb-2 text-slate-800 dark:text-slate-200 px-1 text-center">Revit gbXML 추출 가이드</p>
+                          <video src="/gbXML_manual.mp4" autoPlay loop muted playsInline className="w-full rounded-lg" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   {!uploadedFile || surfaces.length === 0 ? (
                     <>
                       <div

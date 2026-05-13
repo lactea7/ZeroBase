@@ -1,8 +1,9 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { BookOpen, AlertCircle, Building2, Layout, Sliders, BarChart3 } from 'lucide-react';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { BookOpen, AlertCircle, Building2, Layout, Sliders, BarChart3, X } from 'lucide-react';
 
 export default function Manual({ onStart }) {
+  const [isVideoExpanded, setIsVideoExpanded] = useState(false);
   return (
     <section id="가이드" className="py-24 px-6 bg-white relative overflow-hidden">
       <div className="max-w-6xl mx-auto">
@@ -55,7 +56,7 @@ export default function Manual({ onStart }) {
                 </li>
               </ul>
               
-              <div className="mt-8 relative group">
+              <div className="mt-8 relative group cursor-pointer" onClick={() => setIsVideoExpanded(true)}>
                 <div className="absolute -inset-1 bg-gradient-to-r from-brand-primary to-brand-secondary rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
                 <video 
                   src="/gbXML_manual.mp4" 
@@ -65,6 +66,9 @@ export default function Manual({ onStart }) {
                   playsInline 
                   className="relative w-full rounded-xl shadow-2xl border border-slate-200/50"
                 />
+                <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center">
+                  <span className="px-4 py-2 bg-white/90 text-slate-800 text-sm font-bold rounded-full shadow-lg backdrop-blur-sm">크게 보기</span>
+                </div>
               </div>
             </div>
 
@@ -150,6 +154,40 @@ export default function Manual({ onStart }) {
           </button>
         </div>
       </div>
+
+      {/* Video Modal */}
+      <AnimatePresence>
+        {isVideoExpanded && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setIsVideoExpanded(false)}
+          >
+            <button 
+              className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              onClick={() => setIsVideoExpanded(false)}
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <motion.div 
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden shadow-2xl bg-black"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <video 
+                src="/gbXML_manual.mp4" 
+                controls
+                autoPlay 
+                className="w-full h-full object-contain"
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }

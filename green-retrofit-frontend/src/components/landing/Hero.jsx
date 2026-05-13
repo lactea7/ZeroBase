@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Zap } from 'lucide-react';
+import { Zap, ChevronDown } from 'lucide-react';
 
 export default function Hero() {
   return (
@@ -111,6 +111,19 @@ export default function Hero() {
           BIM 데이터로 손쉽게 에너지 분석 가능한 플랫폼입니다. <br />
           정확성 높은 데이터로 리모델링의 미래를 설계하세요!
         </motion.p>
+
+        {/* Scroll Indicator */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, y: [0, 10, 0] }}
+          transition={{ opacity: { delay: 1 }, y: { duration: 2, repeat: Infinity, ease: "easeInOut" } }}
+          className="flex flex-col items-center justify-center gap-2 mt-8 text-slate-300"
+        >
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Scroll</span>
+          <div className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center bg-slate-50/50 backdrop-blur-sm shadow-sm">
+             <ChevronDown className="w-5 h-5 text-slate-400" />
+          </div>
+        </motion.div>
       </div>
     </section>
   );
