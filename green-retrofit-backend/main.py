@@ -78,33 +78,52 @@ async def upload_gbxml(request: Request, background_tasks: BackgroundTasks, file
         raise HTTPException(status_code=500, detail=f"파싱 실패: {str(e)}")
 
 # ---------------------------------------------------------
-# API 2: 시뮬레이션 실행 (React에서 편집된 데이터 수신)
+# API 2: 시뮬레이션 실행 (비동기 폴링)
 # ---------------------------------------------------------
 class SimulationPayload(BaseModel):
     projectData: Dict[str, Any]
     zones: List[Dict[str, Any]]
     surfaces: List[Dict[str, Any]]
 
+# 전역 작업 저장소 (간이 비동기 큐용)
+simulation_tasks: Dict[str, Any] = {}
+
+def _run_simulation_task(task_id: str, payload_dict: Dict[str, Any], session_dir: str):
+    """백그라운드에서 시뮬레이션을 실행하고 결과를 simulation_tasks에 저장"""
+    try:
+        result = generate_idf_and_simulate(payload_dict, session_dir)
+        simulation_tasks[task_id] = {"status": "success", "result": result}
+    except Exception as e:
+        print(f"❌ 시뮬레이션 에러: {str(e)}")
+        simulation_tasks[task_id] = {"status": "failed", "error": str(e)}
+    finally:
+        # 시뮬레이션이 모두 끝난 뒤에 임시 폴더 삭제
+        cleanup_workspace(session_dir)
+
 @app.post("/api/simulate")
 @limiter.limit("5/minute")
 async def run_simulation(request: Request, background_tasks: BackgroundTasks, payload: SimulationPayload):
-    print("🚀 시뮬레이션 요청 수신됨")
+    print("🚀 시뮬레이션 비동기 요청 수신됨")
     
-    # 💡 시뮬레이션 환경 격리
-    session_id = str(uuid.uuid4())
-    session_dir = os.path.join(TEMP_DIR, session_id)
+    # 💡 시뮬레이션 환경 격리 및 Task ID 생성
+    task_id = str(uuid.uuid4())
+    session_dir = os.path.join(TEMP_DIR, task_id)
     os.makedirs(session_dir, exist_ok=True)
     
-    # 시뮬레이션 완료 후 임시 폴더 삭제 예약
-    background_tasks.add_task(cleanup_workspace, session_dir)
+    # 상태 초기화
+    simulation_tasks[task_id] = {"status": "running"}
     
-    try:
-        # 시뮬레이터 모듈 호출 (격리된 session_dir 전달)
-        result = generate_idf_and_simulate(payload.dict(), session_dir)
-        return {"status": "success", "result": result}
-    except Exception as e:
-        print(f"❌ 시뮬레이션 에러: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"시뮬레이션 실패: {str(e)}")
+    # 백그라운드 작업으로 등록하고 즉시 응답 (100초 타임아웃 방지)
+    background_tasks.add_task(_run_simulation_task, task_id, payload.dict(), session_dir)
+    
+    return {"status": "accepted", "task_id": task_id}
+
+@app.get("/api/simulate/{task_id}")
+async def get_simulation_status(task_id: str):
+    task = simulation_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
