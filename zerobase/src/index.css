@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -13,7 +12,7 @@
 
 @layer base {
   body {
-    @apply font-sans antialiased selection:bg-brand-primary/30;
+    @apply bg-[var(--color-brand-deep)] text-slate-900 font-sans antialiased selection:bg-brand-primary/30;
   }
 }
 
@@ -46,3 +45,5 @@
     backdrop-filter: blur(20px) saturate(180%);
   }
 }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');

@@ -67,6 +67,9 @@ import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
 import { LOADING_MESSAGES, DIR_MAP, groupBy, formatWon } from './utils/format';
 import { getSurfaceGroupName, getZoneGroupName, getPanesCategory, getCoatingType } from './utils/surface';
 import ScheduleEditor from './components/ScheduleEditor';
+import Navigation from './components/landing/Navigation';
+import Hero from './components/landing/Hero';
+import Manual from './components/landing/Manual';
 
 // --- [3D 뷰어 컴포넌트] ---
 const BuildingViewer = ({
@@ -555,7 +558,7 @@ const BuildingViewer = ({
 
 // --- [메인 애플리케이션] ---
 export default function App() {
-  const [step, setStep] = useState('upload');
+  const [step, setStep] = useState('landing');
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -1183,6 +1186,15 @@ export default function App() {
         </div>
       )}
 
+      {step === 'landing' ? (
+        <div className="min-h-screen selection:bg-brand-primary/30 bg-white overflow-y-auto">
+          <Navigation onStart={() => setStep('upload')} />
+          <main>
+            <Hero />
+            <Manual onStart={() => setStep('upload')} />
+          </main>
+        </div>
+      ) : (
       <div className={`h-screen w-full transition-colors duration-300 ${theme.bg} font-sans flex flex-col overflow-hidden`}>
         <header className={`flex-shrink-0 px-8 py-4 border-b ${isDarkMode ? 'border-slate-800 bg-[#0B0F19]' : 'border-[#D5D2C9] bg-[#DFDCD5]'} flex justify-between items-center z-10 shadow-sm`}>
           <div 
@@ -3226,6 +3238,7 @@ export default function App() {
           </AnimatePresence>
         </main>
       </div>
+      )}
     </>
   );
 }
