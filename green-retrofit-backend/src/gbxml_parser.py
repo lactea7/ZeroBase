@@ -497,6 +497,61 @@ def parse_gbxml_to_json(filepath: str):
     for sp_id, min_z in zone_min_z.items():
         zone_floor_map[sp_id] = assign_floor_by_levels(min_z, floor_levels)
     
+    # =====================================================
+    # 💡 [신규] 높이 이상치 감지 → 별도 가상 층으로 분리
+    # 같은 층에 배정된 Zone들 중 높이가 현저히 다른 Zone을
+    # 자동으로 별도 층(max_floor + 1, +2, ...)으로 올려줍니다.
+    # 이를 통해 엘리베이터 샤프트, 창고, 다층 공간 등을 분리합니다.
+    # =====================================================
+    
+    # 각 floor_level 그룹별로 Zone 높이 목록 수집
+    floor_height_groups = {}  # floor_number -> [(sp_id, height)]
+    for sp_id, floor_num in zone_floor_map.items():
+        h = zone_heights.get(sp_id, 3.0)
+        if floor_num not in floor_height_groups:
+            floor_height_groups[floor_num] = []
+        floor_height_groups[floor_num].append((sp_id, h))
+    
+    HEIGHT_OUTLIER_RATIO = 1.5  # 중앙값의 1.5배 초과 시 아웃라이어로 판단
+    
+    virtual_floor_counter = max(floor_height_groups.keys()) if floor_height_groups else 1
+    virtual_floor_map = {}  # 아웃라이어 sp_id -> 새 가상 층 번호
+    
+    for floor_num, sp_heights in floor_height_groups.items():
+        if len(sp_heights) < 2:
+            # 그 층에 Zone이 하나뿐이면 비교 불가, 건너뜀
+            continue
+        
+        heights = [h for _, h in sp_heights]
+        # 중앙값 계산
+        sorted_h = sorted(heights)
+        n = len(sorted_h)
+        median_h = (sorted_h[n // 2] + sorted_h[(n - 1) // 2]) / 2
+        
+        for sp_id, h in sp_heights:
+            if median_h > 0 and h / median_h > HEIGHT_OUTLIER_RATIO:
+                # 아웃라이어: 이미 같은 높이로 분리된 가상 층이 있으면 재사용
+                matched_virtual = None
+                for v_sp_id, v_floor in virtual_floor_map.items():
+                    if abs(zone_heights.get(v_sp_id, 0) - h) < 0.5:
+                        matched_virtual = v_floor
+                        break
+                
+                if matched_virtual is None:
+                    virtual_floor_counter += 1
+                    matched_virtual = virtual_floor_counter
+                
+                virtual_floor_map[sp_id] = matched_virtual
+                sp_name = spaces.get(sp_id, {}).get("name", sp_id)
+                print(f"   ⚡ Zone \"{sp_name}\" 높이 이상치 감지 (높이={h}m, 중앙값={median_h:.1f}m) → 가상 {matched_virtual}층으로 분리")
+    
+    # 가상 층 배정 적용
+    for sp_id, v_floor in virtual_floor_map.items():
+        zone_floor_map[sp_id] = v_floor
+    
+    if virtual_floor_map:
+        print(f"   ✅ 높이 이상치 {len(virtual_floor_map)}개 Zone 가상 층 분리 완료")
+
     # spaces 딕셔너리에 높이와 층수 업데이트
     for sp_id in spaces:
         spaces[sp_id]["floor"] = zone_floor_map.get(sp_id, 1)

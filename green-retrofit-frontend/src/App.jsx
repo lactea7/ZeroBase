@@ -57,8 +57,6 @@ import {
   Clock,
   Calendar
 } from 'lucide-react';
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // --- 분리된 모듈 import ---
 import { uploadGbxml, runSimulation } from './api/client';
@@ -70,491 +68,12 @@ import ScheduleEditor from './components/ScheduleEditor';
 import Navigation from './components/landing/Navigation';
 import Hero from './components/landing/Hero';
 import Manual from './components/landing/Manual';
+import { REGION_LATITUDES } from './utils/solarHelper';
+import * as THREE from 'three';
 
-// --- [3D 뷰어 컴포넌트] ---
-const BuildingViewer = ({
-  surfaces,
-  zones,
-  activeFloor,
-  editMode,
-  onSurfaceClick,
-  onZoneClick,
-  selectedId,
-  hoveredId,
-  draftState,
-  readOnly = false,
-  isDarkMode = true,
-}) => {
-  const mountRef = useRef(null);
-  const ctx = useRef({});
+// --- 분리된 3D 뷰어 컴포넌트 ---
+import BuildingViewer from './components/viewer/BuildingViewer';
 
-  useEffect(() => {
-    if (!mountRef.current) return;
-
-    while (mountRef.current.firstChild) {
-      mountRef.current.removeChild(mountRef.current.firstChild);
-    }
-
-    const width = mountRef.current.clientWidth || 500;
-    const height = mountRef.current.clientHeight || 500;
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 20000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.domElement.style.width = '100%';
-    renderer.domElement.style.height = '100%';
-    renderer.domElement.style.display = 'block';
-
-    mountRef.current.appendChild(renderer.domElement);
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(20, 50, 30);
-    scene.add(dirLight);
-
-    const group = new THREE.Group();
-    scene.add(group);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.autoRotate = readOnly;
-    controls.autoRotateSpeed = 1.0;
-
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    ctx.current = { scene, camera, renderer, group, controls, raycaster, mouse, reqId: null, ro: null };
-
-    const animate = () => {
-      ctx.current.reqId = requestAnimationFrame(animate);
-      if (ctx.current.controls) {
-        ctx.current.controls.update();
-      }
-      if (ctx.current.renderer && ctx.current.scene && ctx.current.camera) {
-        ctx.current.renderer.render(ctx.current.scene, ctx.current.camera);
-      }
-    };
-    animate();
-
-    const ro = new ResizeObserver(() => {
-      if (!mountRef.current || !ctx.current.camera || !ctx.current.renderer) return;
-      const w = mountRef.current.clientWidth;
-      const h = mountRef.current.clientHeight;
-      if (w === 0 || h === 0) return;
-      ctx.current.camera.aspect = w / h;
-      ctx.current.camera.updateProjectionMatrix();
-      ctx.current.renderer.setSize(w, h);
-    });
-    ro.observe(mountRef.current);
-    ctx.current.ro = ro;
-
-    return () => {
-      if (ctx.current.reqId) cancelAnimationFrame(ctx.current.reqId);
-      if (ctx.current.ro) ctx.current.ro.disconnect();
-      if (ctx.current.controls) ctx.current.controls.dispose();
-      if (ctx.current.renderer) {
-        ctx.current.renderer.dispose();
-        if (mountRef.current && ctx.current.renderer.domElement) {
-          try {
-            mountRef.current.removeChild(ctx.current.renderer.domElement);
-          } catch (e) {}
-        }
-      }
-      ctx.current = {};
-    };
-  }, []);
-
-  useEffect(() => {
-    ctx.current.onSurfaceClick = onSurfaceClick;
-    ctx.current.onZoneClick = onZoneClick;
-    ctx.current.editMode = editMode;
-  }, [onSurfaceClick, onZoneClick, editMode]);
-
-  useEffect(() => {
-    if (readOnly || !ctx.current.camera) return;
-    const onClick = (e) => {
-      if (!mountRef.current || !ctx.current.camera || !ctx.current.group) return;
-      const rect = mountRef.current.getBoundingClientRect();
-      ctx.current.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      ctx.current.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      ctx.current.raycaster.setFromCamera(ctx.current.mouse, ctx.current.camera);
-
-      const meshes = ctx.current.group.children.filter((c) => c.type === 'Mesh' && c.userData?.id);
-      const intersects = ctx.current.raycaster.intersectObjects(meshes);
-
-      if (intersects.length > 0) {
-        const clickedData = intersects[0].object.userData;
-        if (ctx.current.editMode === 'surface' && ctx.current.onSurfaceClick) {
-          ctx.current.onSurfaceClick(clickedData);
-        } else if (ctx.current.editMode === 'zone' && ctx.current.onZoneClick) {
-          ctx.current.onZoneClick(clickedData.zone);
-        }
-      }
-    };
-    const el = mountRef.current;
-    if (el) el.addEventListener('click', onClick);
-    return () => {
-      if (el) el.removeEventListener('click', onClick);
-    };
-  }, [readOnly]);
-
-  useEffect(() => {
-    const { scene, group, camera, controls } = ctx.current;
-    if (!scene || !group || !camera || !controls) return;
-
-    scene.background = new THREE.Color(isDarkMode ? '#0f172a' : '#e2e8f0');
-
-    while (group.children.length > 0) {
-      const obj = group.children[0];
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach((m) => m.dispose());
-        } else {
-          obj.material.dispose();
-        }
-      }
-      group.remove(obj);
-    }
-
-    const visibleSurfaces =
-      activeFloor === 'all' ? surfaces : surfaces.filter((s) => s.floor === parseInt(activeFloor));
-    let minX = Infinity,
-      maxX = -Infinity,
-      minY = Infinity,
-      maxY = -Infinity,
-      minZ = Infinity,
-      maxZ = -Infinity;
-
-    visibleSurfaces.forEach((surf) => {
-      const isHovered =
-        (editMode === 'surface' && surf.id === hoveredId) || (editMode === 'zone' && surf.zone === hoveredId);
-      const isSelected =
-        (editMode === 'surface' && surf.id === selectedId) || (editMode === 'zone' && surf.zone === selectedId);
-
-      if (surf.width && surf.height && surf.pos && surf.rot) {
-        const geometry = new THREE.PlaneGeometry(surf.width, surf.height);
-        let baseColor = 0x3b82f6;
-
-        if (editMode === 'zone' && !readOnly) {
-          const liveZoneData =
-            selectedId === surf.zone && draftState ? draftState : zones.find((z) => z.id === surf.zone);
-          if (liveZoneData) {
-            if (!liveZoneData.isConditioned) {
-              baseColor = 0x475569;
-            } else {
-              const act = ACTIVITIES.find((a) => a.id === liveZoneData.activityId);
-              baseColor = act ? act.color : 0x3b82f6;
-            }
-          }
-        } else {
-          if (surf.type === 'Roof') {
-            baseColor = 0xef4444;
-          } else if (surf.type === 'InternalSlab' || surf.type === 'SlabOnGrade' || surf.type === 'UndergroundSlab' || surf.type === 'InteriorFloor' || surf.type === 'Ceiling' || surf.type === 'Floor' || surf.type === 'ExteriorFloor') {
-            baseColor = 0x8b5cf6;
-          } else if (surf.type === 'GroundFloor') {
-            baseColor = 0x78716c;
-          } else if (surf.type === 'InternalWall' || surf.type === 'InteriorWall') {
-            baseColor = 0xf59e0b;
-          } else {
-            baseColor = 0x3b82f6;
-          }
-        }
-
-        let finalOpacity = 0.15;
-        let finalEmissive = 0x000000;
-        let finalEmissiveIntensity = 0;
-        let lineColor = baseColor;
-        let isXRayMode = false;
-
-        if (isSelected) {
-          finalOpacity = 0.95;
-          finalEmissive = baseColor;
-          finalEmissiveIntensity = 0.6;
-          lineColor = 0xffffff;
-          isXRayMode = true;
-        } else if (isHovered) {
-          finalOpacity = 0.85;
-          finalEmissive = 0xfacc15;
-          finalEmissiveIntensity = 0.6;
-          lineColor = 0xfacc15;
-          isXRayMode = true;
-        } else if (!selectedId && !hoveredId) {
-          finalOpacity =
-            editMode === 'zone' && !readOnly
-              ? 0.6
-              : surf.type === 'InternalWall' || surf.type === 'InteriorWall'
-              ? 0.25
-              : 0.4;
-        } else {
-          finalOpacity = 0.05;
-        }
-
-        const material = new THREE.MeshStandardMaterial({
-          color: baseColor,
-          transparent: true,
-          opacity: finalOpacity,
-          emissive: finalEmissive,
-          emissiveIntensity: finalEmissiveIntensity,
-          side: THREE.DoubleSide,
-          depthWrite: true,
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(surf.pos.x, surf.pos.y, surf.pos.z);
-        mesh.rotation.set(surf.rot.x, surf.rot.y, surf.rot.z);
-
-        if (surf.pos.x < minX) minX = surf.pos.x;
-        if (surf.pos.x > maxX) maxX = surf.pos.x;
-        if (surf.pos.y < minY) minY = surf.pos.y;
-        if (surf.pos.y > maxY) maxY = surf.pos.y;
-        if (surf.pos.z < minZ) minZ = surf.pos.z;
-        if (surf.pos.z > maxZ) maxZ = surf.pos.z;
-
-        surf.baseColor = baseColor;
-        mesh.userData = surf;
-
-        const edges = new THREE.EdgesGeometry(geometry);
-        const lineMat = new THREE.LineBasicMaterial({
-          color: lineColor,
-          linewidth: isXRayMode ? 2 : 1,
-          depthTest: !isXRayMode,
-        });
-        const line = new THREE.LineSegments(edges, lineMat);
-
-        if (isXRayMode) {
-          line.renderOrder = 999;
-        }
-        mesh.add(line);
-
-        const liveWwr = editMode === 'surface' && selectedId === surf.id && draftState ? draftState.wwr : surf.wwr;
-        const safeWwr = isNaN(liveWwr) ? 0 : Math.max(0, Math.min(90, liveWwr));
-
-        if ((surf.type === 'Wall' || surf.type === 'ExteriorWall') && safeWwr > 0) {
-          const winRatio = Math.sqrt(safeWwr / 100);
-          const winGeom = new THREE.PlaneGeometry(surf.width * winRatio, surf.height * winRatio);
-          const winMat = new THREE.MeshStandardMaterial({
-            color: 0x06b6d4,
-            transparent: true,
-            opacity: editMode === 'zone' && !readOnly ? 0.4 : 0.8,
-            side: THREE.DoubleSide,
-            polygonOffset: true,
-            polygonOffsetFactor: -1,
-            polygonOffsetUnits: -1,
-          });
-          const winMesh = new THREE.Mesh(winGeom, winMat);
-          winMesh.position.z = 0.01;
-          mesh.add(winMesh);
-        }
-        group.add(mesh);
-      } else if (surf.vertices && surf.vertices.length >= 3) {
-        const geometry = new THREE.BufferGeometry();
-        const verticesArray = [];
-        const v0 = surf.vertices[0];
-
-        for (let i = 1; i < surf.vertices.length - 1; i++) {
-          const v1 = surf.vertices[i];
-          const v2 = surf.vertices[i + 1];
-          verticesArray.push(v0[0], v0[2], -v0[1]);
-          verticesArray.push(v1[0], v1[2], -v1[1]);
-          verticesArray.push(v2[0], v2[2], -v2[1]);
-        }
-
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(verticesArray, 3));
-        geometry.computeVertexNormals();
-
-        let baseColor = 0x3b82f6;
-        if (editMode === 'zone' && !readOnly) {
-          const liveZoneData =
-            selectedId === surf.zone && draftState ? draftState : zones.find((z) => z.id === surf.zone);
-          if (liveZoneData) {
-            if (!liveZoneData.isConditioned) {
-              baseColor = 0x475569;
-            } else {
-              const act = ACTIVITIES.find((a) => a.id === liveZoneData.activityId);
-              baseColor = act ? act.color : 0x3b82f6;
-            }
-          }
-        } else {
-          if (surf.type === 'Roof') {
-            baseColor = 0xef4444;
-          } else if (surf.type === 'InternalSlab' || surf.type === 'SlabOnGrade' || surf.type === 'UndergroundSlab' || surf.type === 'InteriorFloor' || surf.type === 'Ceiling' || surf.type === 'Floor' || surf.type === 'ExteriorFloor') {
-            baseColor = 0x8b5cf6;
-          } else if (surf.type === 'GroundFloor') {
-            baseColor = 0x78716c;
-          } else if (surf.type === 'InternalWall' || surf.type === 'InteriorWall') {
-            baseColor = 0xf59e0b;
-          } else {
-            baseColor = 0x3b82f6;
-          }
-        }
-
-        let finalOpacity = 0.15;
-        let finalEmissive = 0x000000;
-        let finalEmissiveIntensity = 0;
-        let lineColor = baseColor;
-        let isXRayMode = false;
-
-        if (isSelected) {
-          finalOpacity = 0.95;
-          finalEmissive = baseColor;
-          finalEmissiveIntensity = 0.6;
-          lineColor = 0xffffff;
-          isXRayMode = true;
-        } else if (isHovered) {
-          finalOpacity = 0.85;
-          finalEmissive = 0xfacc15;
-          finalEmissiveIntensity = 0.6;
-          lineColor = 0xfacc15;
-          isXRayMode = true;
-        } else if (!selectedId && !hoveredId) {
-          finalOpacity =
-            editMode === 'zone' && !readOnly
-              ? 0.6
-              : surf.type === 'InternalWall' || surf.type === 'InteriorWall'
-              ? 0.25
-              : 0.4;
-        } else {
-          finalOpacity = 0.05;
-        }
-
-        const material = new THREE.MeshStandardMaterial({
-          color: baseColor,
-          transparent: true,
-          opacity: finalOpacity,
-          emissive: finalEmissive,
-          emissiveIntensity: finalEmissiveIntensity,
-          side: THREE.DoubleSide,
-          depthWrite: true,
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-
-        surf.vertices.forEach((v) => {
-          const vx = v[0],
-            vy = v[2],
-            vz = -v[1];
-          if (vx < minX) minX = vx;
-          if (vx > maxX) maxX = vx;
-          if (vy < minY) minY = vy;
-          if (vy > maxY) maxY = vy;
-          if (vz < minZ) minZ = vz;
-          if (vz > maxZ) maxZ = vz;
-        });
-
-        surf.baseColor = baseColor;
-        mesh.userData = surf;
-
-        const lineGeom = new THREE.BufferGeometry();
-        const lineVerts = [];
-
-        surf.vertices.forEach((v) => {
-          lineVerts.push(v[0], v[2], -v[1]);
-        });
-
-        if (surf.vertices.length > 0) {
-          lineVerts.push(surf.vertices[0][0], surf.vertices[0][2], -surf.vertices[0][1]);
-        }
-
-        lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(lineVerts, 3));
-        const lineMat = new THREE.LineBasicMaterial({
-          color: lineColor,
-          linewidth: isXRayMode ? 2 : 1,
-          depthTest: !isXRayMode,
-        });
-
-        const line = new THREE.Line(lineGeom, lineMat);
-        if (isXRayMode) {
-          line.renderOrder = 999;
-        }
-        mesh.add(line);
-
-        if (surf.openings && surf.openings.length > 0) {
-          surf.openings.forEach((op) => {
-            if (op.vertices && op.vertices.length >= 3) {
-              const opGeom = new THREE.BufferGeometry();
-              const opVerts = [];
-              const ov0 = op.vertices[0];
-
-              for (let i = 1; i < op.vertices.length - 1; i++) {
-                const ov1 = op.vertices[i];
-                const ov2 = op.vertices[i + 1];
-                opVerts.push(ov0[0], ov0[2], -ov0[1]);
-                opVerts.push(ov1[0], ov1[2], -ov1[1]);
-                opVerts.push(ov2[0], ov2[2], -ov2[1]);
-              }
-
-              opGeom.setAttribute('position', new THREE.Float32BufferAttribute(opVerts, 3));
-              opGeom.computeVertexNormals();
-
-              const opMat = new THREE.MeshStandardMaterial({
-                color: 0x06b6d4,
-                transparent: true,
-                opacity: 0.8,
-                side: THREE.DoubleSide,
-                polygonOffset: true,
-                polygonOffsetFactor: -1,
-                polygonOffsetUnits: -1,
-              });
-
-              const opMesh = new THREE.Mesh(opGeom, opMat);
-              mesh.add(opMesh);
-            }
-          });
-        }
-        group.add(mesh);
-      }
-    });
-
-    let camDistance = 50;
-    if (
-      visibleSurfaces.length > 0 &&
-      Number.isFinite(minX) &&
-      Number.isFinite(maxX) &&
-      Number.isFinite(minY) &&
-      Number.isFinite(maxY) &&
-      Number.isFinite(minZ) &&
-      Number.isFinite(maxZ)
-    ) {
-      const centerX = (maxX + minX) / 2;
-      const centerY = (maxY + minY) / 2;
-      const centerZ = (maxZ + minZ) / 2;
-
-      group.position.set(-centerX, -centerY, -centerZ);
-      const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
-
-      camera.far = Math.max(10000, maxDim * 20);
-      camera.updateProjectionMatrix();
-
-      camDistance = maxDim === 0 ? 50 : maxDim * 1.5;
-    } else {
-      group.position.set(0, 0, 0);
-    }
-
-    if (!Number.isFinite(camDistance) || camDistance === 0) camDistance = 50;
-
-    if (camera.position.x === 0 && camera.position.y === 0 && camera.position.z === 0) {
-      camera.position.set(camDistance, camDistance * 0.8, camDistance);
-      camera.lookAt(0, 0, 0);
-      controls.target.set(0, 0, 0);
-      controls.update();
-    }
-  }, [surfaces, zones, activeFloor, editMode, selectedId, hoveredId, draftState, readOnly, isDarkMode]);
-
-  return (
-    <div className="relative w-full h-full min-h-[500px] overflow-hidden rounded-xl bg-slate-900 shadow-inner border border-slate-700">
-      <div
-        ref={mountRef}
-        className="absolute inset-0 z-10 w-full h-full cursor-pointer"
-        style={{ mixBlendMode: 'normal' }}
-      />
-    </div>
-  );
-};
 
 // --- [메인 애플리케이션] ---
 export default function App() {
@@ -628,6 +147,10 @@ export default function App() {
   // 💡 [수정] 결과를 볼 때 '에너지 성능(energy)' 탭이 무조건 먼저 나오도록 기본값 설정
   const [activeResultTab, setActiveResultTab] = useState('energy');
 
+  const [viewMode, setViewMode] = useState('default'); // 'default' | 'sunpath' | 'thermal' | 'airflow'
+  const [sunMonth, setSunMonth] = useState(6);
+  const [sunHour, setSunHour] = useState(12);
+
   const fileInputRef = useRef(null);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadError, setUploadError] = useState(null);
@@ -635,11 +158,84 @@ export default function App() {
   const [lightCalc, setLightCalc] = useState({ active: false, w: 32, qty: 10, area: 100 });
   const [equipCalc, setEquipCalc] = useState({ active: false, w: 150, qty: 5, area: 100 });
   const [gapWarnings, setGapWarnings] = useState([]);
+  const [realFloorCount, setRealFloorCount] = useState(0); // 파서가 감지한 실제 층수 (가상 층 제외)
 
   const availableFloors = Array.from(
     new Set([...surfaces.map((s) => s.floor || 1), ...zones.map((z) => z.floor || 1)])
   ).sort((a, b) => a - b);
   const displayFloors = availableFloors.length > 0 ? availableFloors : [1, 2, 3];
+
+  const selectedRegion = KOREA_REGIONS.flatMap(g => g.options).find(opt => opt.id === projectData.location) || { name: '서울특별시 (Seoul)' };
+  const latitude = REGION_LATITUDES[projectData.location] || 37.56;
+  // 가상 층 판별: floor 번호가 실제 층 수보다 크면 특수 공간(창고, 샤프트 등)
+  const isVirtualFloor = (f) => realFloorCount > 0 && f > realFloorCount;
+
+  /**
+   * 콘센트 수 → 전기 부하 밀도 (W/m²) 변환
+   * 근거: NREL/TP-7A40-54466 (2012), ASHRAE RP-1742 (2014), IEC 60364-8-1
+   *  - 다양성계수(diversity factor) 0.5 : NREL 권장
+   *  - 이용률(utilization rate)   0.7 : IEC 60364-8-1 ku 평균
+   *  - 용도별 콘센트당 정격W         : NREL 실측치 기반
+   */
+  const OUTLET_W_PER_ACTIVITY = {
+    // [activityId]: W/콘센트
+    office:      150,  // 사무소 (일반)
+    residential:  80,  // 주거
+    lab:         200,  // 실험실/연구실
+    warehouse:    50,  // 창고
+    restaurant:  120,  // 식음료
+    default:     100,  // 기타
+  };
+
+  const getActivityCategory = (activityId) => {
+    const id = Number(activityId);
+    if ([1105,1106,1103,1113,1116,1119,1122].includes(id)) return 'office';
+    if ([1440,1441,1442,1443,1444,1114,1115,1107,1112,1120,1121,1445].includes(id)) return 'residential';
+    if ([1447,1448,1449,1104,1457,1458,1452].includes(id)) return 'lab';
+    if ([1108,1109,1117,1118].includes(id)) return 'restaurant';
+    return 'default';
+  };
+
+  const calculateSurfaceArea = (vertices) => {
+    if (!vertices || vertices.length < 3) return 0;
+    let area = 0;
+    const v0 = vertices[0];
+    for (let i = 1; i < vertices.length - 1; i++) {
+      const v1 = vertices[i];
+      const v2 = vertices[i + 1];
+      const ux = v1[0] - v0[0];
+      const uy = v1[1] - v0[1];
+      const uz = v1[2] - v0[2];
+      const vx = v2[0] - v0[0];
+      const vy = v2[1] - v0[1];
+      const vz = v2[2] - v0[2];
+      const cx = uy * vz - uz * vy;
+      const cy = uz * vx - ux * vz;
+      const cz = ux * vy - uy * vx;
+      area += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
+    }
+    return area;
+  };
+
+  const getZoneFloorArea = (zoneId) => {
+    const zoneSurfaces = surfaces.filter(
+      (s) => s.zone === zoneId && s.type && (s.type.toLowerCase().includes('floor') || s.type.toLowerCase().includes('slab'))
+    );
+    const areaSum = zoneSurfaces.reduce((acc, s) => acc + calculateSurfaceArea(s.vertices), 0);
+    return areaSum >= 1.0 ? areaSum : 100.0;
+  };
+
+  const calcOutletPower = (zone, floorArea) => {
+    const count = Number(zone?.outletCount || 0);
+    if (count <= 0) return 0;
+    const category = getActivityCategory(zone?.activityId);
+    const wPerOutlet = OUTLET_W_PER_ACTIVITY[category] ?? OUTLET_W_PER_ACTIVITY.default;
+    const DIVERSITY = 0.5;    // NREL/TP-7A40-54466 권장
+    const UTILIZATION = 0.7;  // IEC 60364-8-1 ku 평균
+    const area = floorArea > 0 ? floorArea : 1;
+    const density = (count * wPerOutlet * DIVERSITY * UTILIZATION) / area;
+    return Math.min(parseFloat(density.toFixed(2)), 25); // ASHRAE 90.1 상한 25 W/m²
+  };
 
   const getSampleVerts = (w, h, pos, rot) => {
     const pts = [
@@ -693,6 +289,8 @@ export default function App() {
           peopleDensity: 0.1,
           lightingPower: 10.0,
           equipmentPower: 15.0,
+          outletCount: 0,
+          outletLoadType: 'sum',
         });
 
         const faces = [
@@ -767,6 +365,8 @@ export default function App() {
           peopleDensity: z.peopleDensity || 0.1,
           lightingPower: z.lightingPower || 10.0,
           equipmentPower: z.equipmentPower || 15.0,
+          outletCount: z.outletCount || 0,
+          outletLoadType: z.outletLoadType || 'sum',
         }));
         setZones(mappedZones);
         
@@ -774,6 +374,10 @@ export default function App() {
         const warnings = response.data.warnings || [];
         if (warnings.length > 0) {
           setGapWarnings(warnings);
+        }
+        // 💡 실제 층수 저장 (가상 층 구분용)
+        if (response.data.floorLevels) {
+          setRealFloorCount(response.data.floorLevels);
         }
       }
       setStep('upload');
@@ -880,6 +484,7 @@ export default function App() {
       { id: 'hotwater', name: '급탕', color: '#FB923C' },
       { id: 'lighting', name: '조명', color: '#FACC15' },
       { id: 'ventilation', name: '환기', color: '#4ADE80' },
+      { id: 'equipment', name: '기기', color: '#A78BFA' },
       { id: 'renewable', name: '신재생', color: '#2DD4BF' },
     ];
 
@@ -898,13 +503,16 @@ export default function App() {
       },
       {
         name: '등급용 1차',
-        ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.con || 0) * 2.1 }), {}),
+        ...categoriesList.reduce((acc, c) => ({
+          ...acc,
+          [c.name]: c.id === 'equipment' ? 0 : Number(m[c.id]?.con || 0) * 2.1
+        }), {}),
       },
     ];
   };
 
-  const categories = ['신재생', '난방', '냉방', '급탕', '조명', '환기'];
-  const colors = ['#2DD4BF', '#F87171', '#60A5FA', '#FB923C', '#FACC15', '#4ADE80'];
+  const categories = ['신재생', '난방', '냉방', '급탕', '조명', '환기', '기기'];
+  const colors = ['#2DD4BF', '#F87171', '#60A5FA', '#FB923C', '#FACC15', '#4ADE80', '#A78BFA'];
 
   const theme = {
     bg: isDarkMode ? 'bg-[#0B0F19] text-slate-200' : 'bg-[#DFDCD5] text-slate-800',
@@ -1558,9 +1166,14 @@ export default function App() {
                         setStep('floorView');
                         setSelectedId(null);
                       }}
-                      className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-black hover:bg-emerald-500 transition-colors shadow-md min-w-[3.5rem]"
+                      className={`px-4 py-2 rounded-xl text-white font-black hover:opacity-90 transition-all shadow-md min-w-[3.5rem] flex flex-col items-center gap-0.5 ${
+                        isVirtualFloor(f)
+                          ? 'bg-amber-600 hover:bg-amber-500'
+                          : 'bg-emerald-600 hover:bg-emerald-500'
+                      }`}
                     >
-                      {f}F
+                      <span>{isVirtualFloor(f) ? '⚡' : ''}{f}F</span>
+                      {isVirtualFloor(f) && <span className="text-[9px] font-medium opacity-80 leading-none">특수공간</span>}
                     </button>
                   ))}
                 </div>
@@ -1575,6 +1188,15 @@ export default function App() {
                     onSurfaceClick={() => {}}
                     onZoneClick={() => {}}
                     isDarkMode={isDarkMode}
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                    sunMonth={sunMonth}
+                    setSunMonth={setSunMonth}
+                    sunHour={sunHour}
+                    setSunHour={setSunHour}
+                    res={res}
+                    latitude={latitude}
+                    locationName={selectedRegion.name}
                   />
                 </div>
               </div>
@@ -1599,7 +1221,7 @@ export default function App() {
                     <h2 className="text-xl font-black flex items-center gap-2">
                       <HardHat className="text-emerald-500" /> 층간 빠른 이동
                     </h2>
-                    <div className="flex bg-black/20 p-1.5 rounded-xl border border-white/5 shadow-inner">
+                    <div className={`flex p-1.5 rounded-xl border shadow-inner ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-slate-300/60 border-slate-400/30'}`}>
                       {displayFloors.map((f) => (
                         <button
                           key={f}
@@ -1609,13 +1231,18 @@ export default function App() {
                             setSelectedId(null);
                             setHoveredId(null);
                           }}
-                          className={`px-5 py-2 text-sm font-black rounded-lg transition-all ${
+                          className={`px-4 py-1.5 text-sm font-black rounded-lg transition-all flex flex-col items-center ${
                             activeFloor === f
-                              ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.5)]'
-                              : 'text-slate-400 hover:text-white hover:bg-white/10'
+                              ? isVirtualFloor(f)
+                                ? 'bg-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.5)]'
+                                : 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.5)]'
+                              : isDarkMode
+                                ? 'text-slate-400 hover:text-white hover:bg-white/10'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/80'
                           }`}
                         >
-                          {f}F
+                          <span>{isVirtualFloor(f) ? '⚡' : ''}{f}F</span>
+                          {isVirtualFloor(f) && <span className="text-[8px] font-medium opacity-75 leading-none">특수</span>}
                         </button>
                       ))}
                     </div>
@@ -1816,6 +1443,15 @@ export default function App() {
                       hoveredId={hoveredId}
                       draftState={editState}
                       isDarkMode={isDarkMode}
+                      viewMode={viewMode}
+                      setViewMode={setViewMode}
+                      sunMonth={sunMonth}
+                      setSunMonth={setSunMonth}
+                      sunHour={sunHour}
+                      setSunHour={setSunHour}
+                      res={res}
+                      latitude={latitude}
+                      locationName={selectedRegion.name}
                     />
                   </div>
                   <div className="absolute bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full bg-black/80 backdrop-blur-md text-white text-xs font-bold pointer-events-none shadow-lg z-20">
@@ -2119,6 +1755,105 @@ export default function App() {
                                   </div>
                                 </div>
                               )}
+
+                              <div className={`border-t ${isDarkMode ? 'border-white/5' : 'border-slate-300/60'} pt-4 mt-4 space-y-4 text-left`}>
+                                <div className="flex items-center justify-between">
+                                  <label className={`text-xs font-black flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                    🔌 콘센트 (소켓) 수
+                                  </label>
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={editState.outletCount || 0}
+                                      onChange={(e) =>
+                                        setEditState((prev) => ({
+                                          ...prev,
+                                          outletCount: parseInt(e.target.value) || 0,
+                                        }))
+                                      }
+                                      className={`w-24 p-2 rounded-lg font-black text-right outline-none border ${theme.input} focus:border-emerald-500`}
+                                      placeholder="개수 입력"
+                                    />
+                                    <span className={`text-[10px] font-bold w-12 ${theme.textSub}`}>개</span>
+                                  </div>
+                                </div>
+
+                                {(editState.outletCount || 0) > 0 && (
+                                  <div className={`space-y-3 p-3 rounded-xl border ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-slate-300/40 border-slate-300/80'} animate-in fade-in duration-200`}>
+                                    <div className="flex items-center justify-between text-[11px] font-bold">
+                                      <span className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>구역 면적:</span>
+                                      <span className={isDarkMode ? 'text-slate-200' : 'text-slate-800'}>{getZoneFloorArea(editState.id).toFixed(1)} m²</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[11px] font-bold">
+                                      <span className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>용도별 콘센트당 정격:</span>
+                                      <span className={isDarkMode ? 'text-slate-200' : 'text-slate-800'}>
+                                        {OUTLET_W_PER_ACTIVITY[getActivityCategory(editState.activityId)] || OUTLET_W_PER_ACTIVITY.default} W
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[11px] font-bold">
+                                      <span className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>산정 방식 (NREL 2012 / IEC):</span>
+                                      <span className={`text-right ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                                        개수({editState.outletCount}) × 정격 × 0.5(다양성) × 0.7(사용률)
+                                      </span>
+                                    </div>
+                                    <div className={`flex items-center justify-between text-[11px] font-black border-t pt-2 ${isDarkMode ? 'text-emerald-400 border-white/5' : 'text-emerald-700 border-slate-300/60'}`}>
+                                      <span>🔌 예상 콘센트 부하:</span>
+                                      <span className={isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}>
+                                        {calcOutletPower(editState, getZoneFloorArea(editState.id)).toFixed(2)} W/m²
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between pt-1">
+                                      <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>부하 합산 방식:</span>
+                                      <div className={`flex ${isDarkMode ? 'bg-black/30 border-white/5' : 'bg-slate-300/60 border-slate-300/80'} p-0.5 rounded-lg border`}>
+                                        <button
+                                          onClick={() =>
+                                            setEditState((prev) => ({
+                                              ...prev,
+                                              outletLoadType: 'sum',
+                                            }))
+                                          }
+                                          className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
+                                            (editState.outletLoadType || 'sum') === 'sum'
+                                              ? 'bg-emerald-600 text-white shadow-sm'
+                                              : `${isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-800'}`
+                                          }`}
+                                        >
+                                          합산 (Sum)
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            setEditState((prev) => ({
+                                              ...prev,
+                                              outletLoadType: 'max',
+                                            }))
+                                          }
+                                          className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
+                                            (editState.outletLoadType || 'sum') === 'max'
+                                              ? 'bg-emerald-600 text-white shadow-sm'
+                                              : `${isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-800'}`
+                                          }`}
+                                        >
+                                          최댓값 (Max)
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className={`text-[11px] font-bold flex justify-between items-center bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 mt-1 ${isDarkMode ? 'text-slate-300' : 'text-emerald-950'}`}>
+                                      <span>⚡ 시뮬레이션 반영 기기 부하:</span>
+                                      <span className={`font-black ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                                        {((editState.outletLoadType || 'sum') === 'sum'
+                                          ? (editState.equipmentPower || 0) + calcOutletPower(editState, getZoneFloorArea(editState.id))
+                                          : Math.max(editState.equipmentPower || 0, calcOutletPower(editState, getZoneFloorArea(editState.id)))
+                                        ).toFixed(2)}{' '}
+                                        W/m²
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
                             </div>
                           </div>
 
@@ -2290,6 +2025,89 @@ export default function App() {
                                 : ''}
                             </p>
                           </div>
+
+                          {/* 시뮬레이션 표면 열해석 결과 오버레이 */}
+                          {res && (res.surfaceThermal || res.result?.surfaceThermal) && (
+                            <div className="p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 shadow-sm space-y-2">
+                              <h4 className="text-xs font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1.5 justify-center">
+                                🌡️ EnergyPlus 표면 열해석 ({sunMonth}월)
+                              </h4>
+                              <div className="grid grid-cols-2 gap-3 text-left">
+                                <div className="text-center">
+                                  <span className="text-[10px] text-slate-500 font-bold block">외피 표면 온도</span>
+                                  <span className="text-sm font-black text-emerald-400">
+                                    {(res.surfaceThermal?.[selectedSurfaceData.id]?.temperature?.[sunMonth - 1] ?? 
+                                      res.result?.surfaceThermal?.[selectedSurfaceData.id]?.temperature?.[sunMonth - 1] ?? 20.0).toFixed(1)} °C
+                                  </span>
+                                </div>
+                                <div className="text-center">
+                                  <span className="text-[10px] text-slate-500 font-bold block">일사 도달량</span>
+                                  <span className="text-sm font-black text-emerald-400">
+                                    {(res.surfaceThermal?.[selectedSurfaceData.id]?.radiation?.[sunMonth - 1] ?? 
+                                      res.result?.surfaceThermal?.[selectedSurfaceData.id]?.radiation?.[sunMonth - 1] ?? 0.0).toFixed(1)} W/㎡
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 시뮬레이션 표면 환기량 결과 오버레이 */}
+                          {res && (res.surfaceAirflow || res.result?.surfaceAirflow) && (
+                            <div className="p-4 rounded-2xl border border-sky-500/30 bg-sky-500/5 shadow-sm space-y-2">
+                              <h4 className="text-xs font-black uppercase text-sky-500 tracking-wider flex items-center gap-1.5 justify-center">
+                                💨 EnergyPlus 개구부 환기/풍량 ({sunMonth}월)
+                              </h4>
+                              {(() => {
+                                const afData = res.surfaceAirflow?.[selectedSurfaceData.id] || res.result?.surfaceAirflow?.[selectedSurfaceData.id];
+                                if (afData && (afData.inflow || afData.outflow)) {
+                                  const inf = afData.inflow?.[sunMonth - 1] ?? 0.0;
+                                  const outf = afData.outflow?.[sunMonth - 1] ?? 0.0;
+                                  const chartData = Array.from({ length: 12 }, (_, i) => ({
+                                    name: `${i + 1}월`,
+                                    inflow: afData.inflow?.[i] ?? 0,
+                                    outflow: afData.outflow?.[i] ?? 0,
+                                  }));
+
+                                  return (
+                                    <div className="space-y-3">
+                                      <div className="grid grid-cols-2 gap-3 text-left">
+                                        <div className="text-center">
+                                          <span className="text-[10px] text-slate-500 font-bold block">유입량 (Inflow)</span>
+                                          <span className="text-sm font-black text-sky-400">
+                                            {inf.toFixed(2)} L/s
+                                          </span>
+                                        </div>
+                                        <div className="text-center">
+                                          <span className="text-[10px] text-slate-500 font-bold block">유출량 (Outflow)</span>
+                                          <span className="text-sm font-black text-orange-400">
+                                            {outf.toFixed(2)} L/s
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="h-24 w-full mt-2">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                          <BarChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
+                                            <XAxis dataKey="name" stroke="#64748b" fontSize={9} tickLine={false} />
+                                            <YAxis stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} unit="L" />
+                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', fontSize: 10 }} />
+                                            <Bar dataKey="inflow" fill="#0ea5e9" radius={[2, 2, 0, 0]} name="유입" />
+                                            <Bar dataKey="outflow" fill="#f97316" radius={[2, 2, 0, 0]} name="유출" />
+                                          </BarChart>
+                                        </ResponsiveContainer>
+                                      </div>
+                                    </div>
+                                  );
+                                } else {
+                                  return (
+                                    <p className="text-[10px] text-center text-slate-500 font-bold py-2">
+                                      이 벽면에는 개구부가 없거나 환기량이 발생하지 않았습니다.
+                                    </p>
+                                  );
+                                }
+                              })()}
+                            </div>
+                          )}
 
                           {(selectedSurfaceData.type === 'InternalWall' ||
                             selectedSurfaceData.type === 'InteriorWall') && (
@@ -2686,6 +2504,15 @@ export default function App() {
                           editMode="surface"
                           readOnly={true}
                           isDarkMode={isDarkMode}
+                          viewMode={viewMode}
+                          setViewMode={setViewMode}
+                          sunMonth={sunMonth}
+                          setSunMonth={setSunMonth}
+                          sunHour={sunHour}
+                          setSunHour={setSunHour}
+                          res={res}
+                          latitude={latitude}
+                          locationName={selectedRegion.name}
                         />
                       </div>
                       <p className={`mt-4 text-[11px] text-center font-bold ${theme.textSub}`}>
@@ -2817,7 +2644,7 @@ export default function App() {
                               stackId="a"
                               fill={colors[i]}
                               barSize={32}
-                              radius={i === 0 ? [6, 0, 0, 6] : i === 5 ? [0, 6, 6, 0] : 0}
+                              radius={i === 0 ? [6, 0, 0, 6] : i === categories.length - 1 ? [0, 6, 6, 0] : 0}
                             />
                           ))}
                         </BarChart>
@@ -2852,10 +2679,13 @@ export default function App() {
                               if (row.id === 'con') return Number(base?.con || 0);
                               if (row.id === 'pri') return Number(base?.con || 0) * 2.75;
                               if (row.id === 'co2') return Number(base?.con || 0) * 0.466;
-                              if (row.id === 'grd') return Number(base?.con || 0) * 2.1;
+                              if (row.id === 'grd') {
+                                if (catId === 'equipment') return 0;
+                                return Number(base?.con || 0) * 2.1;
+                              }
                               return 0;
                             };
-                            const rowDataValues = ['renewable', 'heating', 'cooling', 'hotwater', 'lighting', 'ventilation'].map((id) =>
+                            const rowDataValues = ['renewable', 'heating', 'cooling', 'hotwater', 'lighting', 'ventilation', 'equipment'].map((id) =>
                               getVal(id)
                             );
                             const totalValue = rowDataValues.reduce((a, b) => a + b, 0);

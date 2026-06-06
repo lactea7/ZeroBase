@@ -266,7 +266,7 @@ class LCCAnalyzer:
     def calculate(self, eplus_csv_path: str, zones: list, total_area: float, 
                   total_window_area: float, total_wall_area: float, 
                   target_u: float, target_shgc: float, pv_capacity_kw: float, 
-                  is_geothermal: bool, act_main: int):
+                  is_geothermal: bool, act_main: int, surfaces: list = None):
         
         if pd is None:
             return self._fallback_data()
@@ -275,17 +275,24 @@ class LCCAnalyzer:
             df = pd.read_csv(eplus_csv_path).fillna(0)
             df.columns = [c.strip() for c in df.columns]
             
-            h_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Heating' in c and '[J]' in c]
-            c_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Cooling' in c and '[J]' in c]
-            l_cols = [c for c in df.columns if 'Lights' in c and 'Electricity' in c and '[J]' in c]
-            e_cols = [c for c in df.columns if 'Electric Equipment' in c and 'Electricity' in c and '[J]' in c]
+            h_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Heating Energy' in c and '[J]' in c]
+            c_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Cooling Energy' in c and '[J]' in c]
+            h_rate_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Heating Rate' in c and '[W]' in c]
+            c_rate_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Cooling Rate' in c and '[W]' in c]
+            l_cols = [c for c in df.columns if 'Lights' in c and 'Electricity Energy' in c and '[J]' in c]
+            e_cols = [c for c in df.columns if 'Electric Equipment' in c and 'Electricity Energy' in c and '[J]' in c]
+            dhw_col = next((c for c in df.columns if 'Water Use Equipment Heating Energy' in c), None)
+            vent_cols = [c for c in df.columns if 'Mechanical Ventilation Mass Flow Rate' in c and '[kg/s]' in c]
+            demand_col = next((c for c in df.columns if 'Facility Total Electric Demand Rate' in c), None)
 
             monthly_data = []
-            a_h_req = a_c_req = a_h_con = a_c_con = a_l_con = a_e_con = 0.0
-            annual_elec_bill = annual_heat_bill = peak_elec_kwh = 0
+            a_h_req = a_c_req = a_h_con = a_c_con = a_l_con = a_e_con = a_dhw_req = a_dhw_con = a_vent_req = a_vent_con = 0.0
+            annual_elec_bill = annual_heat_bill = peak_elec_kw = 0
             
             for m in range(min(12, len(df))):
-                m_h_req = m_c_req = m_h_con = m_c_con = m_l_con = m_e_con = 0.0
+                m_h_req = m_c_req = m_h_con = m_c_con = m_l_con = m_e_con = m_h_rate = m_c_rate = m_v_flow = 0.0
+                m_dhw_j = float(df.iloc[m][dhw_col]) if dhw_col else 0.0
+                m_dhw_kwh = m_dhw_j / 3600000.0
                 
                 for z in zones:
                     z_id = z['id'].replace(" ", "_").upper()
@@ -295,10 +302,15 @@ class LCCAnalyzer:
                     zl_kwh = sum(float(df.iloc[m][c]) for c in l_cols if z_id in c.upper()) / 3600000.0
                     ze_kwh = sum(float(df.iloc[m][c]) for c in e_cols if z_id in c.upper()) / 3600000.0
                     
+                    zh_rate = sum(float(df.iloc[m][c]) for c in h_rate_cols if z_id in c.upper())
+                    zc_rate = sum(float(df.iloc[m][c]) for c in c_rate_cols if z_id in c.upper())
+                    zv_flow = sum(float(df.iloc[m][c]) for c in vent_cols if z_id in c.upper())
+                    
                     m_h_req += zh_kwh
                     m_c_req += zc_kwh
                     m_l_con += zl_kwh
                     m_e_con += ze_kwh
+                    m_v_flow += zv_flow
                     
                     if not z.get("isConditioned", True): 
                         continue
@@ -315,6 +327,8 @@ class LCCAnalyzer:
                         
                     m_h_con += zh_kwh / h_cop
                     m_c_con += zc_kwh / c_cop
+                    m_h_rate += zh_rate / h_cop
+                    m_c_rate += zc_rate / c_cop
                 
                 a_h_req += m_h_req
                 a_c_req += m_c_req
@@ -323,12 +337,25 @@ class LCCAnalyzer:
                 a_l_con += m_l_con
                 a_e_con += m_e_con
                 
-                month_num = m + 1
-                month_elec_kwh = m_c_con + m_l_con + m_e_con
-                month_heat_kwh = m_h_con
+                m_dhw_req = m_dhw_kwh
+                m_dhw_con = m_dhw_kwh * 1.1  # 시스템 열손실 반영
+                a_dhw_req += m_dhw_req
+                a_dhw_con += m_dhw_con
                 
-                if month_elec_kwh > peak_elec_kwh: 
-                    peak_elec_kwh = month_elec_kwh
+                m_vent_m3_s = m_v_flow / 1.2  # kg/s -> m3/s 변환 (대략적 밀도)
+                m_vent_kw = m_vent_m3_s * 0.8  # Fan 전력 (예: 0.8 kW per m3/s)
+                m_vent_kwh = m_vent_kw * 730   # 월 730시간
+                a_vent_req += m_vent_kwh
+                a_vent_con += m_vent_kwh
+                
+                month_num = m + 1
+                month_elec_kwh = m_c_con + m_l_con + m_e_con + m_vent_kwh
+                month_heat_kwh = m_h_con + m_dhw_con
+                
+                m_base_demand = float(df.iloc[m][demand_col]) if demand_col else 0.0
+                m_peak_kw = (m_base_demand + m_c_rate + m_h_rate + (m_vent_kw * 1000.0)) / 1000.0
+                if m_peak_kw > peak_elec_kw:
+                    peak_elec_kw = m_peak_kw
                 
                 if month_num in [6, 7, 8]: 
                     elec_rate = self.ELEC_RATE_SUMMER
@@ -348,17 +375,7 @@ class LCCAnalyzer:
 
             pv_gen = ((pv_capacity_kw * 1300) / total_area) if pv_capacity_kw and total_area > 0 else 0.0
                 
-            if act_main in [1440, 1114]: hw_base = 25.0
-            elif act_main in [1108, 1109]: hw_base = 15.0
-            else: hw_base = 5.0
-                
-            if act_main in [1447, 1448]: vent_base = 12.0
-            else: vent_base = 8.0
-                
-            annual_elec_bill += (vent_base * total_area) * self.ELEC_RATE_SPRING
-            annual_heat_bill += ((hw_base * 1.1) * total_area) * self.HEAT_RATE_KWH
-            
-            peak_kw_estimate = peak_elec_kwh / 200 if peak_elec_kwh else total_area * 0.1
+            peak_kw_estimate = peak_elec_kw if peak_elec_kw > 0 else total_area * 0.1
             annual_elec_bill += peak_kw_estimate * self.ELEC_BASE_CHARGE * 12
             
             target_window_price, mapped_window_name = self.match_window_price(target_u, target_shgc)
@@ -370,23 +387,49 @@ class LCCAnalyzer:
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
 
+            # LCC NPV (30년) 계산 (순현재가치 반영)
+            discount_rate = 0.035
+            years = 30
+            cumulative_lcc_30y = []
+            current_npv = total_capital_cost
+            
+            for y in range(1, years + 1):
+                yearly_op_cost = annual_elec_bill + annual_heat_bill
+                maint_cost = (hvac_cost * 0.02) + (led_cost * 0.01)
+                
+                replacement_cost = 0
+                if y % 15 == 0:
+                    replacement_cost += hvac_cost
+                if y % 10 == 0:
+                    replacement_cost += led_cost
+                    
+                total_year_cost = yearly_op_cost + maint_cost + replacement_cost
+                discounted_cost = total_year_cost / ((1 + discount_rate) ** y)
+                current_npv += discounted_cost
+                cumulative_lcc_30y.append(int(current_npv))
+
             matrix = {
                 "heating": {"req": round(a_h_req/total_area, 1), "con": round(a_h_con/total_area, 1)},
                 "cooling": {"req": round(a_c_req/total_area, 1), "con": round(a_c_con/total_area, 1)},
-                "hotwater": {"req": hw_base, "con": hw_base * 1.1},
+                "hotwater": {"req": round(a_dhw_req/total_area, 1), "con": round(a_dhw_con/total_area, 1)},
                 "lighting": {"req": round(a_l_con/total_area, 1), "con": round(a_l_con/total_area, 1)},
-                "ventilation": {"req": vent_base, "con": vent_base},
+                "ventilation": {"req": round(a_vent_req/total_area, 1), "con": round(a_vent_con/total_area, 1)},
+                "equipment": {"req": round(a_e_con/total_area, 1), "con": round(a_e_con/total_area, 1)},
                 "renewable": {"req": -round(pv_gen, 1), "con": -round(pv_gen, 1)}
             }
             
-            total_con = sum(v["con"] for k,v in matrix.items() if k != "renewable")
-            independence_val = min(100, (abs(matrix["renewable"]["con"]) / total_con * 100)) if total_con > 0 else 0
+            # ZEB 등급 평가용 5대 에너지 기준 소요량 (신재생, 기기부하 제외)
+            total_con_zeb = sum(v["con"] for k,v in matrix.items() if k not in ["renewable", "equipment"])
+            independence_val = min(100, (abs(matrix["renewable"]["con"]) / total_con_zeb * 100)) if total_con_zeb > 0 else 0
+            
+            # 실제 전체 에너지 소요량 (LCC 및 탄소배출, 요금제용)
+            total_con_actual = sum(v["con"] for k,v in matrix.items() if k != "renewable")
             
             summary = {
                 "demand_per_m2": sum(v["req"] for k,v in matrix.items() if k != "renewable"), 
-                "consume_per_m2": total_con, 
-                "primary_per_m2": total_con * 2.75, 
-                "co2_per_m2": total_con * 0.466, 
+                "consume_per_m2": total_con_actual, 
+                "primary_per_m2": total_con_zeb * 2.75, 
+                "co2_per_m2": total_con_actual * 0.466, 
                 "independence": independence_val
             }
             
@@ -402,14 +445,71 @@ class LCCAnalyzer:
                     "hvac": int(hvac_cost)
                 },
                 "mapped_window_name": mapped_window_name,
-                "csv_db_loaded": self.cost_db["status"]
+                "csv_db_loaded": self.cost_db["status"],
+                "cumulative_lcc_30y": cumulative_lcc_30y
             }
             
+            surface_thermal = {}
+            if surfaces:
+                for s in surfaces:
+                    s_id = s['id'].upper()
+                    temp_col = None
+                    rad_col = None
+                    for col in df.columns:
+                        col_upper = col.upper()
+                        if col_upper.startswith(s_id + ":") or col_upper.startswith(s_id + "_MIRROR:"):
+                            if 'SURFACE OUTSIDE FACE TEMPERATURE' in col_upper:
+                                temp_col = col
+                            elif 'SURFACE OUTSIDE FACE INCIDENT SOLAR' in col_upper:
+                                rad_col = col
+                    
+                    temp_months = []
+                    rad_months = []
+                    for m in range(min(12, len(df))):
+                        t_val = float(df.iloc[m][temp_col]) if temp_col else 20.0
+                        r_val = float(df.iloc[m][rad_col]) if rad_col else 100.0
+                        temp_months.append(round(t_val, 2))
+                        rad_months.append(round(r_val, 2))
+                        
+                    surface_thermal[s['id']] = {
+                        "temperature": temp_months,
+                        "radiation": rad_months
+                    }
+
+            surface_airflow = {}
+            if surfaces:
+                for s in surfaces:
+                    win_id = f"WIN_{s['id']}".upper()
+                    flow1_col = None
+                    flow2_col = None
+                    for col in df.columns:
+                        col_upper = col.upper()
+                        if col_upper.startswith(win_id + ":"):
+                            if 'NODE 1 TO NODE 2 VOLUME FLOW RATE' in col_upper:
+                                flow1_col = col
+                            elif 'NODE 2 TO NODE 1 VOLUME FLOW RATE' in col_upper:
+                                flow2_col = col
+                    
+                    inflow_months = []
+                    outflow_months = []
+                    for m in range(min(12, len(df))):
+                        f1_val = float(df.iloc[m][flow1_col]) if flow1_col else 0.0
+                        f2_val = float(df.iloc[m][flow2_col]) if flow2_col else 0.0
+                        inflow_months.append(round(f1_val * 1000.0, 2))
+                        outflow_months.append(round(f2_val * 1000.0, 2))
+                        
+                    surface_airflow[s['id']] = {
+                        "inflow": inflow_months,
+                        "outflow": outflow_months
+                    }
+
             final_data = { 
                 "summary": summary, 
                 "monthly": monthly_data, 
                 "matrix": matrix, 
-                "financial": financial 
+                "financial": financial,
+                "surfaceThermal": surface_thermal,
+                "surfaceAirflow": surface_airflow
             }
             
             return { **final_data, "result": final_data }
@@ -422,7 +522,15 @@ class LCCAnalyzer:
         fallback_data = {
             "summary": {"demand_per_m2": 50, "consume_per_m2": 30, "primary_per_m2": 80, "co2_per_m2": 15, "independence": 10}, 
             "monthly": [{"name": f"{i}월", "heating": 5, "cooling": 5} for i in range(1, 13)], 
-            "matrix": {},
+            "matrix": {
+                "heating": {"req": 10, "con": 8},
+                "cooling": {"req": 12, "con": 10},
+                "hotwater": {"req": 5, "con": 5.5},
+                "lighting": {"req": 8, "con": 8},
+                "ventilation": {"req": 5, "con": 5},
+                "equipment": {"req": 10, "con": 10},
+                "renewable": {"req": -5, "con": -5}
+            },
             "financial": {
                 "mapped_window_name": "기본 단가 반영 (DB 미매칭)", 
                 "annual_elec_bill": 0, 
@@ -430,6 +538,8 @@ class LCCAnalyzer:
                 "capital_cost": 0, 
                 "cost_details": {"window": 0, "insulation": 0, "led": 0, "hvac": 0},
                 "csv_db_loaded": {"eco_loaded": False, "nara_loaded": False, "items": 0}
-            }
+            },
+            "surfaceThermal": {},
+            "surfaceAirflow": {}
         }
         return { **fallback_data, "result": fallback_data }

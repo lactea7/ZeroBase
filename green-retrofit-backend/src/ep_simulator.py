@@ -100,6 +100,47 @@ def calculate_surface_area(vertices):
         
     return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
 
+def calc_outlet_power_density(zone, floor_area):
+    """콘센트 수 기반 전기 부하 밀도 산정 (NREL 2012 기준)"""
+    outlet_count = zone.get("outletCount", 0)
+    if outlet_count <= 0:
+        return 0.0
+    
+    activity = zone.get("activityId", 1105)
+    # 용도별 콘센트당 정격 전력 (W)
+    W_PER_OUTLET = {
+        "office": 150,
+        "residential": 80,
+        "lab": 200,
+        "restaurant": 120,
+        "warehouse": 50,
+        "default": 100
+    }
+    
+    def get_activity_type(act_id):
+        try:
+            act_id = int(act_id)
+        except (ValueError, TypeError):
+            return "default"
+        if act_id in [1105, 1106, 1103, 1113, 1116, 1119, 1122]:
+            return "office"
+        elif act_id in [1440, 1441, 1442, 1443, 1444, 1114, 1115, 1107, 1112, 1120, 1121, 1445]:
+            return "residential"
+        elif act_id in [1447, 1448, 1449, 1104, 1457, 1458, 1452]:
+            return "lab"
+        elif act_id in [1108, 1109, 1117, 1118]:
+            return "restaurant"
+        return "default"
+        
+    category = get_activity_type(activity)
+    w_per = W_PER_OUTLET.get(category, 100)
+    diversity = 0.5   # NREL 권장
+    utilization = 0.7 # IEC 60364-8-1 ku 평균
+    
+    outlet_load_w = outlet_count * w_per * diversity * utilization
+    power_density = outlet_load_w / max(floor_area, 1.0)
+    return min(power_density, 25.0)  # ASHRAE 90.1 상한
+
 def get_scaled_window_vertices(vertices, wwr):
     """벽면 꼭짓점과 WWR로부터 창호 꼭짓점(최대 4개)을 생성합니다.
     
@@ -364,14 +405,45 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         custom_op_text = f"Through: 12/31, {op_wd}, {op_we}, {op_ho}, For: AllOtherDays, Until: 24:00, 0.0"
         idf.add_schedule_compact("CustomOpSch", "AnyNumber", custom_op_text)
     
+    # AirflowNetwork 기본 설정 기동
+    idf.setup_airflow_network()
+
+    # Zone별 실제 Outdoors 표면 개수 사전 계산 (AFN 최소 표면 제약 조건 해결)
+    valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
+    outdoor_counts = {}
+    for s in surfaces:
+        z_id = s.get('zone', '').replace(" ", "_")
+        if z_id == "Unknown" or z_id not in valid_zone_ids:
+            continue
+        
+        t = s.get("type", "").lower()
+        adj_zone_raw = s.get("adjacentZone")
+        adj_zone_id = adj_zone_raw.replace(" ", "_") if adj_zone_raw else None
+        
+        if adj_zone_id and adj_zone_id in valid_zone_ids:
+            continue
+        else:
+            if not ("interior" in t or adj_zone_raw):
+                z = s.get("zone")
+                if z:
+                    outdoor_counts[z] = outdoor_counts.get(z, 0) + 1
+    
+    valid_afn_zones = set(z for z, count in outdoor_counts.items() if count >= 2)
+
     # 존별 설정
     for z in zones:
         z_id = z['id'].replace(" ", "_")
-        z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and "floor" in s.get("type", "").lower()]
+        z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and ("floor" in s.get("type", "").lower() or "slab" in s.get("type", "").lower())]
         z_area = sum(z_area_list) if sum(z_area_list) >= 1.0 else 100.0
         z_height = z.get("height", 3.0)  # 💡 Zone별 자동역산 높이 사용
         
         idf.add_zone(z_id, z_area, z_height)
+        
+        # AirflowNetwork Zone 등록 (외기 접촉면이 2개 이상인 Zone만 등록)
+        if z['id'] in valid_afn_zones:
+            idf.add("AirflowNetwork:MultiZone:Zone", [
+                z_id, "Temperature", f"{z_id}_CoolSch", 0.0, 0.0, 100.0, 0.0, 300000.0, "AlwaysOn"
+            ])
         
         heat_set = z.get("heatingSetpoint", 20.0)
         cool_set = z.get("coolingSetpoint", 26.0)
@@ -416,10 +488,26 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
 
         ppl_dens = z.get("peopleDensity", 0.1)
         light_p = z.get("lightingPower", 10.0)
-        equip_p = z.get("equipmentPower", 15.0)
+        
+        base_equip_p = z.get("equipmentPower", 15.0)
+        outlet_p = calc_outlet_power_density(z, z_area)
+        load_type = z.get("outletLoadType", "sum")
+        if load_type == "max":
+            equip_p = max(base_equip_p, outlet_p)
+        else:
+            equip_p = base_equip_p + outlet_p
+            
+        if outlet_p > 0:
+            print(f"   Zone \"{z['id']}\" 콘센트 부하 계산: 개수={z.get('outletCount')}, 면적={z_area:.1f}m², 부하량={outlet_p:.2f} W/m² (방식={load_type}) → 최종 기기부하={equip_p:.2f} W/m²")
         
         if ppl_dens > 0:
             idf.add_people(f"{z_id}_Ppl", z_id, op_sch, ppl_dens)
+            # 동적 급탕(DHW) 모델링 (재실자 기반)
+            # 가정: 1인당 일일 온수 사용량 30L(0.03m3), 피크 유량은 시간당 집중 가정
+            people_count = z_area * ppl_dens
+            if people_count > 0:
+                peak_dhw_flow = people_count * (0.03 / 3600)  # m3/s
+                idf.add_dhw(f"{z_id}_DHW", z_id, op_sch, peak_dhw_flow)
         if light_p > 0:
             idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, light_p)
         if equip_p > 0:
@@ -430,12 +518,12 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     # 표면 지오메트리
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
     skipped_count = 0
-    
+    zone_to_zone_count = 0
+
     for s in surfaces:
         z_id = s['zone'].replace(" ", "_")
-        
+
         # 💡 Zone이 "Unknown"이거나 유효한 Zone 목록에 없으면 IDF에서 제외
-        # (gbXML에서 어떤 Space에도 속하지 않는 차양/지형면 등)
         if z_id == "Unknown" or z_id not in valid_zone_ids:
             skipped_count += 1
             continue
@@ -446,23 +534,73 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             ep_type = "Roof"
         elif "floor" in t or "slab" in t:
             ep_type = "Floor"
-        
-        obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
-        if "interior" in t or s.get("adjacentZone"):
-            obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
-        
+
         verts = s.get('vertices', [])
-        
-        idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id, obc, sun, wind, verts)
-        
-        wwr = s.get("wwr", 0)
-        if ep_type == "Wall" and wwr > 0 and obc == "Outdoors":
-            win_verts = get_scaled_window_vertices(verts, wwr)
-            if win_verts:
-                idf.add_window(f"Win_{s['id']}", f"WinConst_{s['id']}", s['id'], win_verts)
-    
+        adj_zone_raw = s.get("adjacentZone")
+        adj_zone_id = adj_zone_raw.replace(" ", "_") if adj_zone_raw else None
+
+        # =========================================================
+        # 💡 인접존 처리: Zone-to-Zone 양방향 Surface 쌍 생성
+        #
+        # gbXML은 공유면을 하나만 정의하지만, EnergyPlus는
+        # 각 Zone이 독립적으로 해당 면을 정의하고 서로 참조해야 함.
+        #
+        #  원본  su5        → Zone A, boundary=Surface, obj=su5_mirror
+        #  미러  su5_mirror → Zone B, boundary=Surface, obj=su5
+        #                    (정점 역순 = 법선 반전)
+        # =========================================================
+        if adj_zone_id and adj_zone_id in valid_zone_ids:
+            mirror_id = f"{s['id']}_mirror"
+            mirror_verts = list(reversed(verts))  # 법선벡터 반전
+
+            # 원본: Zone A (gbXML에서 직접 연결된 Zone)
+            idf.add_surface(
+                s['id'], ep_type, f"Const_{s['id']}", z_id,
+                "Surface", "NoSun", "NoWind", verts,
+                adj_surface_id=mirror_id
+            )
+
+            # 미러: Zone B (인접 Zone) — 동일 Construction 재사용
+            idf.add_surface(
+                mirror_id, ep_type, f"Const_{s['id']}", adj_zone_id,
+                "Surface", "NoSun", "NoWind", mirror_verts,
+                adj_surface_id=s['id']
+            )
+            zone_to_zone_count += 1
+
+        else:
+            # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직
+            if "interior" in t or adj_zone_raw:
+                # adjacentZone이 있지만 유효하지 않은 Zone → Adiabatic fallback
+                obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
+            else:
+                obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
+
+            idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
+                            obc, sun, wind, verts)
+
+            wwr = s.get("wwr", 0)
+            if ep_type == "Wall" and wwr > 0 and obc == "Outdoors":
+                win_verts = get_scaled_window_vertices(verts, wwr)
+                if win_verts:
+                    idf.add_window(f"Win_{s['id']}", f"WinConst_{s['id']}", s['id'], win_verts)
+
+            # AirflowNetwork Surface 및 개구부(Window) 등록
+            if obc == "Outdoors" and s.get("zone") in valid_afn_zones:
+                idf.add("AirflowNetwork:MultiZone:Surface", [
+                    s['id'], "WallCrack", "", 1.0
+                ])
+                if ep_type == "Wall" and wwr > 0:
+                    win_id = f"Win_{s['id']}"
+                    idf.add("AirflowNetwork:MultiZone:Surface", [
+                        win_id, "WindowOpening", "", 1.0,
+                        "NoVent", "", 0.0, 0.0, 100.0, 0.0, 300000.0, "AlwaysOn"
+                    ])
+
     if skipped_count > 0:
         print(f"⏭️ Zone 미소속 Surface {skipped_count}개 제외 (차양/지형면)")
+    if zone_to_zone_count > 0:
+        print(f"🔗 Zone-to-Zone 경계 Surface {zone_to_zone_count}개 양방향 쌍 생성 완료")
 
     # 출력 변수
     idf.add_output_variables()
@@ -494,7 +632,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             target_shgc=target_shgc,
             pv_capacity_kw=pv_capacity_kw,
             is_geothermal=is_geothermal,
-            act_main=act_main
+            act_main=act_main,
+            surfaces=surfaces
         )
         return result_data
 

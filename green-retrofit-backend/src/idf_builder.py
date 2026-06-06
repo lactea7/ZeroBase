@@ -121,11 +121,15 @@ class IdfBuilder:
 
     def add_surface(self, surface_id: str, ep_type: str, construction: str,
                     zone_id: str, boundary: str, sun: str, wind: str,
-                    vertices: list):
-        """BuildingSurface:Detailed 객체 추가 (정점 자동 직렬화)"""
+                    vertices: list, adj_surface_id: str = ""):
+        """BuildingSurface:Detailed 객체 추가 (정점 자동 직렬화)
+        
+        adj_surface_id: Zone-to-Zone 경계 시 상대 Surface ID (Outside Boundary Condition Object)
+                        Outdoors/Adiabatic 경계일 때는 빈 문자열.
+        """
         fields = [
             surface_id, ep_type, construction, zone_id, "",
-            boundary, "", sun, wind, "Autocalculate", len(vertices)
+            boundary, adj_surface_id, sun, wind, "Autocalculate", len(vertices)
         ]
         # 정점 좌표를 필드에 풀어서 추가
         for v in vertices:
@@ -170,6 +174,13 @@ class IdfBuilder:
             1.0, 0.0, 0.0, 0.0
         ])
 
+    def add_dhw(self, name: str, zone: str, schedule: str, peak_flow_rate_m3_s: float):
+        """WaterUse:Equipment 객체를 통해 동적 급탕(DHW) 추가 (온수 사용량)"""
+        self.add("WaterUse:Equipment", [
+            name, "DHW_Equip", peak_flow_rate_m3_s, schedule, "DHW_Target_Temp", "DHW_Hot_Temp", "DHW_Cold_Temp", zone
+        ])
+        return self
+
     def add_ideal_hvac(self, zone_id: str, oa_schedule: str = "AlwaysOn"):
         """IdealLoadsAirSystem + 연관 객체 일괄 추가"""
         self.add("ZoneHVAC:EquipmentConnections", [
@@ -206,10 +217,45 @@ class IdfBuilder:
         """표준 출력 변수 세트 추가"""
         self.add("Output:Variable", ["*", "Zone Ideal Loads Supply Air Total Heating Energy", "Monthly"])
         self.add("Output:Variable", ["*", "Zone Ideal Loads Supply Air Total Cooling Energy", "Monthly"])
+        # HVAC 피크 산출용 Rate 출력 (W) -> Monthly 보고 시 1달 동안의 Average 값만 나오지만 트렌드 파악은 가능 (정확한 Peak는 미터나 별도 처리 필요)
+        self.add("Output:Variable", ["*", "Zone Ideal Loads Supply Air Total Heating Rate", "Monthly"])
+        self.add("Output:Variable", ["*", "Zone Ideal Loads Supply Air Total Cooling Rate", "Monthly"])
+        self.add("Output:Variable", ["*", "Facility Total Electric Demand Rate", "Monthly"])
         self.add("Output:Variable", ["*", "Lights Electricity Energy", "Monthly"])
         self.add("Output:Variable", ["*", "Electric Equipment Electricity Energy", "Monthly"])
+        self.add("Output:Variable", ["*", "Surface Outside Face Temperature", "Monthly"])
+        self.add("Output:Variable", ["*", "Surface Outside Face Incident Solar Radiation Rate per Area", "Monthly"])
+        self.add("Output:Variable", ["*", "AFN Linkage Node 1 to Node 2 Volume Flow Rate", "Monthly"])
+        self.add("Output:Variable", ["*", "AFN Linkage Node 2 to Node 1 Volume Flow Rate", "Monthly"])
+        self.add("Output:Variable", ["*", "Water Use Equipment Heating Energy", "Monthly"])
+        self.add("Output:Variable", ["*", "Zone Mechanical Ventilation Mass Flow Rate", "Monthly"])
         self.add("OutputControl:Table:Style", ["Comma"])
         self.add("Output:Table:SummaryReports", ["AllSummary"])
+        return self
+
+    def setup_airflow_network(self):
+        """기본 자연환기 AirflowNetwork 컴포넌트 등록"""
+        self.add("AirflowNetwork:SimulationControl", [
+            "AFNControl", 
+            "MultizoneWithoutDistribution",
+            "SurfaceAverageCalculation",
+            "OpeningHeight",
+            "LowRise",
+            500,
+            "ZeroNodePressures",
+            0.0001,
+            1e-6,
+            -0.5
+        ])
+        self.add("AirflowNetwork:MultiZone:ReferenceCrackConditions", [
+            "RefCrackCond", 20.0, 101325, 0.0
+        ])
+        self.add("AirflowNetwork:MultiZone:Surface:Crack", [
+            "WallCrack", 0.01, 0.65
+        ])
+        self.add("AirflowNetwork:MultiZone:Component:SimpleOpening", [
+            "WindowOpening", 0.001, 0.65, 0.3, 0.6
+        ])
         return self
 
     # -------------------------------------------------------
@@ -233,6 +279,12 @@ class IdfBuilder:
             "Through: 12/31, For: AllDays, Until: 24:00, 120.0")
         self.add_schedule_compact("DualZoneControlSch", "ControlType",
             "Through: 12/31, For: AllDays, Until: 24:00, 4")
+        self.add_schedule_compact("DHW_Target_Temp", "AnyNumber",
+            "Through: 12/31, For: AllDays, Until: 24:00, 40.0")
+        self.add_schedule_compact("DHW_Hot_Temp", "AnyNumber",
+            "Through: 12/31, For: AllDays, Until: 24:00, 45.0")
+        self.add_schedule_compact("DHW_Cold_Temp", "AnyNumber",
+            "Through: 12/31, For: AllDays, Until: 24:00, 15.0")
         self.add_schedule_compact("Sch_Office", "Fraction",
             "Through: 12/31, For: Weekdays, Until: 08:00, 0.0, Until: 18:00, 1.0, Until: 24:00, 0.0, For: AllOtherDays, Until: 24:00, 0.0")
         self.add_schedule_compact("Sch_Res", "Fraction",
