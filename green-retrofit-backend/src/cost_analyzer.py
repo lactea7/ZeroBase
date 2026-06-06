@@ -401,7 +401,8 @@ class LCCAnalyzer:
                 if y % 15 == 0:
                     replacement_cost += hvac_cost
                 if y % 10 == 0:
-                    replacement_cost += led_cost
+                    # LED 교체는 등기구 전체가 아닌 램프/안정기 교체로 가정 (초기 비용의 40%)
+                    replacement_cost += led_cost * 0.4
                     
                 total_year_cost = yearly_op_cost + maint_cost + replacement_cost
                 discounted_cost = total_year_cost / ((1 + discount_rate) ** y)
