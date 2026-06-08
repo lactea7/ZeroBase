@@ -121,7 +121,7 @@ class LCCAnalyzer:
             "avg_prices": {
                 "window": 250000,
                 "insulation": 45000,
-                "led": 30000,
+                "led": 12000,
                 "hvac_kw": 2000000
             },
             "window_db": [],
@@ -382,7 +382,30 @@ class LCCAnalyzer:
             
             window_cost = total_window_area * target_window_price
             insulation_cost = total_wall_area * self.cost_db["avg_prices"]["insulation"]
-            led_cost = total_area * self.cost_db["avg_prices"]["led"]
+            
+            # LED 공사 면적 산출: 비거주 구역(계단실, 기계실, 창고, 엘리베이터 등)은
+            # 조명 밀도가 낮으므로 해당 면적의 30%만 LED 공사 대상으로 반영
+            NON_HABITABLE_KEYWORDS = [
+                'stair', 'chase', 'shaft', 'lift', 'elevator', 'store', 'storage',
+                'parking', 'garage', 'vent', 'mechanical', 'duct', 'pipe',
+                '계단', '엘리베이터', '창고', '주차', '기계', '덕트'
+            ]
+            habitable_area = 0.0
+            non_habitable_area = 0.0
+            for z in zones:
+                z_name = z.get('name', '').lower()
+                z_area = z.get('area', 0)
+                if not z_area:
+                    z_area = total_area / max(len(zones), 1)
+                if any(kw in z_name for kw in NON_HABITABLE_KEYWORDS):
+                    non_habitable_area += z_area
+                else:
+                    habitable_area += z_area
+            led_effective_area = habitable_area + (non_habitable_area * 0.3)
+            # 안전장치: 면적이 0이면 전체 면적의 70%를 기본값으로 사용
+            if led_effective_area < 1.0:
+                led_effective_area = total_area * 0.7
+            led_cost = led_effective_area * self.cost_db["avg_prices"]["led"]
             hvac_cost = peak_kw_estimate * self.cost_db["avg_prices"]["hvac_kw"]
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
