@@ -96,6 +96,35 @@ class LCCAnalyzer:
         }
     }
 
+    # ── 열전도율 기반 단열재 성능 등급 분류 시스템 ──
+    # gbXML Material의 conductivity(λ) 값으로 4단계 등급 판별
+    INSULATION_TIERS = {
+        "premium": {
+            "label": "고성능 (경질우레탄, 진공단열)",
+            "lambda_range": (0.0, 0.030),
+            "default_price": 50000,
+            "keywords": ["우레탄", "진공", "PIR", "PUR", "phenol", "페놀"]
+        },
+        "high": {
+            "label": "중성능 (XPS, 글라스울)",
+            "lambda_range": (0.030, 0.045),
+            "default_price": 25000,
+            "keywords": ["압출", "XPS", "글라스울", "glass wool"]
+        },
+        "standard": {
+            "label": "일반 (EPS, 미네랄울)",
+            "lambda_range": (0.045, 0.070),
+            "default_price": 15000,
+            "keywords": ["비드", "EPS", "미네랄울", "mineral", "광물"]
+        },
+        "basic": {
+            "label": "저성능 (펄라이트, 셀룰로오스)",
+            "lambda_range": (0.070, 0.200),
+            "default_price": 8000,
+            "keywords": ["펄라이트", "셀룰로", "perlite", "cellulose"]
+        }
+    }
+
     @staticmethod
     def _classify_window_tier(spec_text: str) -> str:
         """규격 텍스트에서 키워드를 분석하여 성능 등급을 분류합니다."""
@@ -125,11 +154,13 @@ class LCCAnalyzer:
                 "hvac_kw": 2000000
             },
             "window_db": [],
-            "window_tiers": {}  # 성능 등급별 {prices: [], avg: 0, count: 0}
+            "window_tiers": {},  # 성능 등급별 {prices: [], avg: 0, count: 0}
+            "insulation_tiers": {}  # 단열재 등급별 {avg: 0, count: 0, label: ""}
         }
 
         # 등급별 가격 수집용 임시 딕셔너리
         tier_prices = {tier: [] for tier in self.WINDOW_TIERS}
+        insul_tier_prices = {tier: [] for tier in self.INSULATION_TIERS}
         
         if os.path.exists(self.db_dir) and pd is not None:
             for f_name in os.listdir(self.db_dir):
@@ -193,7 +224,46 @@ class LCCAnalyzer:
                                 led_valid = led_items[led_items['price_num'] > 0]
                                 if not led_valid.empty:
                                     cost_db_dict["avg_prices"]["led"] = led_valid['price_num'].mean()
+                            
+                            # 단열재 단가 수집 (EL243.보온·단열재 카테고리)
+                            insul_mask = row_texts.str.contains('EL243|보온.*단열재', na=False, case=False)
+                            insul_items = df[insul_mask]
+                            if not insul_items.empty:
+                                # 단위 컬럼 찾기 (㎡ 단위만 필터)
+                                unit_col = None
+                                for c in df.columns:
+                                    if '단위' in str(c):
+                                        unit_col = c
+                                        break
+                                if unit_col is None:
+                                    # Unnamed 컬럼 중 '㎡', '포', '대' 등이 포함된 컬럼 탐색
+                                    for c in df.columns:
+                                        sample = df[c].astype(str).head(20)
+                                        if sample.str.contains('㎡|포|매', na=False).any():
+                                            unit_col = c
+                                            break
                                 
+                                if unit_col:
+                                    m2_insul = insul_items[insul_items[unit_col].astype(str).str.contains('㎡', na=False)]
+                                else:
+                                    m2_insul = insul_items
+                                
+                                m2_valid = m2_insul[m2_insul['price_num'] > 0]
+                                if not m2_valid.empty:
+                                    cost_db_dict["avg_prices"]["insulation"] = int(m2_valid['price_num'].mean())
+                                    # 키워드 기반 등급 분류
+                                    for _, row in m2_valid.iterrows():
+                                        text_chunk = ' '.join(str(v) for v in row.values if str(v) != 'nan')
+                                        price = row.get('price_num', 0)
+                                        if price <= 0:
+                                            continue
+                                        for tier_key, tier_info in self.INSULATION_TIERS.items():
+                                            if any(kw.lower() in text_chunk.lower() for kw in tier_info["keywords"]):
+                                                insul_tier_prices[tier_key].append(price)
+                                                break
+                                    
+                                    print(f"  📊 단열재 DB: ㎡ 단위 {len(m2_valid)}건, 평균 ₩{int(m2_valid['price_num'].mean()):,}/㎡")
+                            
                             cost_db_dict["status"]["eco_loaded"] = True
                             cost_db_dict["status"]["items"] += len(df)
                         
@@ -225,6 +295,23 @@ class LCCAnalyzer:
         total_window_items = sum(len(tier_prices[t]) for t in tier_prices)
         if total_window_items > 0:
             print(f"  ✅ 창호 성능 등급별 단가 매핑 완료! (총 {total_window_items}건 분류)")
+
+        # 단열재 등급별 평균 단가 최종 산출
+        for tier_key, tier_info in self.INSULATION_TIERS.items():
+            prices = insul_tier_prices[tier_key]
+            if prices:
+                avg_price = sum(prices) / len(prices)
+                cost_db_dict["insulation_tiers"][tier_key] = {
+                    "avg": int(avg_price),
+                    "count": len(prices),
+                    "label": tier_info["label"]
+                }
+            else:
+                cost_db_dict["insulation_tiers"][tier_key] = {
+                    "avg": tier_info["default_price"],
+                    "count": 0,
+                    "label": tier_info["label"]
+                }
 
         return cost_db_dict
 
@@ -263,10 +350,45 @@ class LCCAnalyzer:
                 
         return target_window_price, mapped_window_name
 
+    def match_insulation_price(self, conductivity: float) -> tuple:
+        """열전도율(conductivity)을 기반으로 가장 적합한 단열재 등급의 평균 단가를 반환합니다."""
+        target_price = self.cost_db["avg_prices"]["insulation"]
+        mapped_name = "기본 단열재 단가 (DB 미매칭)"
+        
+        if not self.cost_db.get("insulation_tiers") or conductivity is None:
+            return target_price, mapped_name
+            
+        matched_tier = None
+        for tier_key, tier_info in self.INSULATION_TIERS.items():
+            l_min, l_max = tier_info["lambda_range"]
+            if l_min <= conductivity < l_max:
+                matched_tier = tier_key
+                break
+                
+        if not matched_tier:
+            # fallback
+            if conductivity <= 0.030: matched_tier = "premium"
+            elif conductivity <= 0.045: matched_tier = "high"
+            elif conductivity <= 0.070: matched_tier = "standard"
+            else: matched_tier = "basic"
+            
+        tier_data = self.cost_db["insulation_tiers"].get(matched_tier, {})
+        if tier_data:
+            target_price = tier_data["avg"]
+            count = tier_data["count"]
+            label = tier_data["label"]
+            if count > 0:
+                mapped_name = f"{label} (친환경DB {count}건 평균단가)"
+            else:
+                mapped_name = f"{label} (기본 추정단가)"
+                
+        return target_price, mapped_name
+
     def calculate(self, eplus_csv_path: str, zones: list, total_area: float, 
                   total_window_area: float, total_wall_area: float, 
                   target_u: float, target_shgc: float, pv_capacity_kw: float, 
-                  is_geothermal: bool, act_main: int, surfaces: list = None):
+                  is_geothermal: bool, act_main: int, surfaces: list = None,
+                  materials: dict = None, insulation_overrides: dict = None):
         
         if pd is None:
             return self._fallback_data()
@@ -381,7 +503,69 @@ class LCCAnalyzer:
             target_window_price, mapped_window_name = self.match_window_price(target_u, target_shgc)
             
             window_cost = total_window_area * target_window_price
-            insulation_cost = total_wall_area * self.cost_db["avg_prices"]["insulation"]
+            
+            # 단열 공사비 계산
+            insulation_cost = 0.0
+            detailed_insulation_costs = []
+            
+            if materials and "constructions" in materials:
+                constructions = materials["constructions"]
+                insulation_overrides_dict = insulation_overrides or {}
+                
+                # 각 Construction 별로 단열 공사비 계산
+                for c in constructions:
+                    c_id = c["id"]
+                    c_area = c.get("totalArea", 0.0)
+                    if c_area <= 0:
+                        continue
+                        
+                    # 오버라이드 확인
+                    override = insulation_overrides_dict.get(c_id)
+                    
+                    has_insulation = False
+                    conductivity = None
+                    
+                    if override:
+                        new_thickness = float(override.get("thickness", 0.0))
+                        new_tier = override.get("tier")
+                        if new_thickness > 0 and new_tier:
+                            has_insulation = True
+                            # 티어별 대표 전도율
+                            TIER_CONDUCTIVITY = {
+                                "premium": 0.025,
+                                "high": 0.035,
+                                "standard": 0.055,
+                                "basic": 0.085
+                            }
+                            conductivity = TIER_CONDUCTIVITY.get(new_tier, 0.04)
+                    else:
+                        # 원본 레이어 중 단열재 탐색
+                        for layer in c.get("layers", []):
+                            if layer.get("isInsulation"):
+                                has_insulation = True
+                                conductivity = layer.get("conductivity", 0.04)
+                                break
+                                
+                    if has_insulation and conductivity is not None:
+                        price, tier_label = self.match_insulation_price(conductivity)
+                        cost = c_area * price
+                        insulation_cost += cost
+                        detailed_insulation_costs.append({
+                            "constructionId": c_id,
+                            "constructionName": c.get("name", c_id),
+                            "area": c_area,
+                            "price": price,
+                            "cost": int(cost),
+                            "tier": tier_label
+                        })
+                
+                # 만약 단열재가 있는 외벽 면적이 전체 외벽 면적보다 많이 작거나 단열 공사비가 0이고 외벽 면적이 있는 경우,
+                # 기본 단열재로 처리할지 결정 (fallback)
+                if insulation_cost == 0.0 and total_wall_area > 0:
+                    insulation_cost = total_wall_area * self.cost_db["avg_prices"]["insulation"]
+            else:
+                # materials 정보가 없으면 기본 U-value 혹은 전체 외벽 면적 기반 fallback
+                insulation_cost = total_wall_area * self.cost_db["avg_prices"]["insulation"]
             
             # LED 공사 면적 산출: 비거주 구역(계단실, 기계실, 창고, 엘리베이터 등)은
             # 조명 밀도가 낮으므로 해당 면적의 30%만 LED 공사 대상으로 반영
@@ -469,6 +653,7 @@ class LCCAnalyzer:
                     "hvac": int(hvac_cost)
                 },
                 "mapped_window_name": mapped_window_name,
+                "insulation_details": detailed_insulation_costs if 'detailed_insulation_costs' in locals() else [],
                 "csv_db_loaded": self.cost_db["status"],
                 "cumulative_lcc_30y": cumulative_lcc_30y
             }
@@ -561,6 +746,7 @@ class LCCAnalyzer:
                 "annual_heat_bill": 0, 
                 "capital_cost": 0, 
                 "cost_details": {"window": 0, "insulation": 0, "led": 0, "hvac": 0},
+                "insulation_details": [],
                 "csv_db_loaded": {"eco_loaded": False, "nara_loaded": False, "items": 0}
             },
             "surfaceThermal": {},

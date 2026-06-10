@@ -159,6 +159,73 @@ export default function App() {
   const [equipCalc, setEquipCalc] = useState({ active: false, w: 150, qty: 5, area: 100 });
   const [gapWarnings, setGapWarnings] = useState([]);
   const [realFloorCount, setRealFloorCount] = useState(0); // 파서가 감지한 실제 층수 (가상 층 제외)
+  
+  // 💡 단열재 및 구조체 속성 튜닝을 위한 State
+  const [materials, setMaterials] = useState(null);
+  const [insulationOverrides, setInsulationOverrides] = useState({});
+
+  const calculateUpdatedUValue = (constr, override) => {
+    if (!constr) return null;
+    const origU = constr.uValue;
+    if (!origU || origU <= 0) return origU;
+    if (!override) return origU;
+
+    // 원본 단열 레이어 찾기
+    const origInsul = constr.layers?.find(l => l.isInsulation);
+    const d_orig = origInsul ? origInsul.thickness : 0.0;
+    const lambda_orig = origInsul ? origInsul.conductivity : 0.04;
+
+    const r_total = 1.0 / origU;
+    const r_insul_orig = lambda_orig && lambda_orig > 0 ? (d_orig / 1000.0) / lambda_orig : 0.0;
+    const r_other = Math.max(0.01, r_total - r_insul_orig);
+
+    const lambda_new = {
+      premium: 0.025,
+      high: 0.035,
+      standard: 0.055,
+      basic: 0.085
+    }[override.tier] || 0.04;
+
+    const r_insul_new = (override.thickness / 1000.0) / lambda_new;
+    const r_total_new = r_other + r_insul_new;
+    return parseFloat((1.0 / r_total_new).toFixed(4));
+  };
+
+  const handleInsulationOverrideChange = (constructionId, tier, thickness) => {
+    const newOverrides = {
+      ...insulationOverrides,
+      [constructionId]: { tier, thickness: parseFloat(thickness) || 0 }
+    };
+    setInsulationOverrides(newOverrides);
+
+    // 해당 구조체(Construction)를 사용하는 모든 외피(Surface)의 U-value 동적 재계산 반영
+    const constr = materials?.constructions?.find(c => c.id === constructionId);
+    if (constr) {
+      const newU = calculateUpdatedUValue(constr, { tier, thickness: parseFloat(thickness) || 0 });
+      setSurfaces(prevSurfaces =>
+        prevSurfaces.map(s =>
+          s.constructionRef === constructionId ? { ...s, uValue: newU } : s
+        )
+      );
+    }
+  };
+
+  const handleResetInsulationOverride = (constructionId) => {
+    const newOverrides = { ...insulationOverrides };
+    delete newOverrides[constructionId];
+    setInsulationOverrides(newOverrides);
+
+    // 원본 U-value 복원
+    const constr = materials?.constructions?.find(c => c.id === constructionId);
+    if (constr) {
+      const origU = constr.uValue;
+      setSurfaces(prevSurfaces =>
+        prevSurfaces.map(s =>
+          s.constructionRef === constructionId ? { ...s, uValue: origU } : s
+        )
+      );
+    }
+  };
 
   const availableFloors = Array.from(
     new Set([...surfaces.map((s) => s.floor || 1), ...zones.map((z) => z.floor || 1)])
@@ -356,10 +423,15 @@ export default function App() {
     setUploadError(null);
     setStep('parsing');
 
+    setMaterials(null);
+    setInsulationOverrides({});
     try {
       const response = await uploadGbxml(file);
       if (response && response.data) {
         setSurfaces(response.data.surfaces || []);
+        if (response.data.materials) {
+          setMaterials(response.data.materials);
+        }
         const mappedZones = (response.data.zones || []).map((z) => ({
           ...z,
           peopleDensity: z.peopleDensity || 0.1,
@@ -448,9 +520,14 @@ export default function App() {
     const interval = setInterval(() => {
       setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
     }, 1500);
-
     try {
-      const payload = { projectData: projectData, zones: zones, surfaces: surfaces };
+      const payload = { 
+        projectData: projectData, 
+        zones: zones, 
+        surfaces: surfaces,
+        materials: materials,
+        insulationOverrides: insulationOverrides
+      };
       const response = await runSimulation(payload);
 
       clearInterval(interval);
@@ -790,6 +867,8 @@ export default function App() {
                   setGapWarnings([]);
                   setSurfaces([]);
                   setZones([]);
+                  setMaterials(null);
+                  setInsulationOverrides({});
                   setUploadedFile(null);
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
@@ -927,6 +1006,8 @@ export default function App() {
                           setUploadedFile(null);
                           setSurfaces([]);
                           setZones([]);
+                          setMaterials(null);
+                          setInsulationOverrides({});
                         }}
                         className={`mt-8 text-xs font-bold transition-colors underline ${isDarkMode ? 'text-slate-500 hover:text-red-400' : 'text-slate-400 hover:text-red-500'}`}
                       >
@@ -1178,7 +1259,8 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <div className="flex-1 relative w-full h-full p-4 flex flex-col">
+              <div className="flex-1 relative flex flex-col md:flex-row overflow-hidden w-full h-full gap-4 p-4">
+                {/* 3D 모델 시각화 영역 */}
                 <div className="flex-1 relative min-h-[400px]">
                   <BuildingViewer
                     surfaces={surfaces}
@@ -1199,6 +1281,103 @@ export default function App() {
                     locationName={selectedRegion.name}
                   />
                 </div>
+
+                {/* 우측 전체 구조체 및 단열재 리스트 */}
+                {materials && (
+                  <div className={`w-full md:w-[380px] flex-shrink-0 rounded-[1.5rem] border ${theme.card} shadow-sm overflow-hidden flex flex-col`}>
+                    <div className="p-4 border-b border-slate-700/30 flex justify-between items-center bg-black/10">
+                      <div>
+                        <h3 className="text-sm font-black flex items-center gap-2">
+                          <Layers size={16} className="text-emerald-500" /> 건물 구조체 & 단열 튜닝
+                        </h3>
+                        <p className="text-[10px] opacity-60">gbXML 구조체 리스트 및 일괄 튜닝</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                      {materials.constructions && materials.constructions.length > 0 ? (
+                        materials.constructions.map((c) => {
+                          const originalInsul = c.layers?.find(l => l.isInsulation);
+                          const activeOverride = insulationOverrides[c.id];
+                          const activeTier = activeOverride ? activeOverride.tier : (originalInsul ? (() => {
+                            const cond = originalInsul.conductivity;
+                            if (cond <= 0.030) return 'premium';
+                            if (cond <= 0.045) return 'high';
+                            if (cond <= 0.070) return 'standard';
+                            return 'basic';
+                          })() : 'standard');
+                          const activeThickness = activeOverride ? activeOverride.thickness : (originalInsul ? originalInsul.thickness : 0);
+                          const currentU = calculateUpdatedUValue(c, activeOverride);
+
+                          return (
+                            <div key={c.id} className="p-4 rounded-xl bg-black/15 border border-slate-700/20 space-y-3">
+                              <div className="flex justify-between items-start">
+                                <div className="max-w-[70%]">
+                                  <h4 className="text-xs font-black text-blue-400 truncate">{c.name}</h4>
+                                  <span className="text-[9px] font-mono opacity-50 block">{c.id}</span>
+                                </div>
+                                <span className="text-[10px] font-bold bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full flex-shrink-0">
+                                  면적: {c.totalArea}㎡
+                                </span>
+                              </div>
+                              
+                              <div className="text-[10px] opacity-75 space-y-1">
+                                <p>열관류율 (U-value): <span className={`font-bold ${activeOverride ? 'text-emerald-400' : 'text-slate-400'}`}>{currentU} W/m²K</span> {activeOverride && <span className="line-through text-slate-500 text-[9px] ml-1">({c.uValue})</span>}</p>
+                                <p className="truncate">레이어: {c.layers?.map(l => `${l.name}(${l.thickness}mm)`).join(' → ') || '없음'}</p>
+                              </div>
+
+                              <div className="p-3 rounded-lg bg-black/20 border border-white/5 space-y-2.5">
+                                <div className="flex justify-between items-center text-[10px] font-bold">
+                                  <span className="text-orange-400 flex items-center gap-1">🛠️ 단열 성능 조정</span>
+                                  {activeOverride && (
+                                    <button 
+                                      onClick={() => handleResetInsulationOverride(c.id)}
+                                      className="text-red-400 hover:text-red-300 underline font-black text-[9px]"
+                                    >
+                                      튜닝 취소
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[8px] font-black opacity-50 block mb-0.5">단열 성능 등급</label>
+                                    <select
+                                      value={activeTier}
+                                      onChange={(e) => handleInsulationOverrideChange(c.id, e.target.value, activeThickness || 100)}
+                                      className={`w-full p-2 text-[10px] font-black rounded-lg border outline-none ${theme.input} focus:border-orange-500`}
+                                    >
+                                      <option value="premium">고성능 (λ≤0.030)</option>
+                                      <option value="high">중성능 (λ≤0.045)</option>
+                                      <option value="standard">일반 (λ≤0.070)</option>
+                                      <option value="basic">저성능 (λ>0.070)</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="text-[8px] font-black opacity-50 block mb-0.5">단열 두께 (mm)</label>
+                                    <div className="relative">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="500"
+                                        step="5"
+                                        value={activeThickness}
+                                        onChange={(e) => handleInsulationOverrideChange(c.id, activeTier, parseFloat(e.target.value) || 0)}
+                                        className={`w-full p-1.5 pl-2 pr-6 text-[10px] font-black rounded-lg border outline-none ${theme.input} focus:border-orange-500 text-center`}
+                                      />
+                                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] opacity-45">mm</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p className="text-xs text-center opacity-50 py-8">분석된 구조체가 없습니다.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2259,6 +2438,105 @@ export default function App() {
                             </>
                           )}
 
+                          {/* 💡 단열재 및 레이어 상세 정보 · 튜닝 편집기 */}
+                          {materials && selectedSurfaceData?.constructionRef && (() => {
+                            const construction = materials.constructions?.find(c => c.id === selectedSurfaceData.constructionRef);
+                            if (!construction) return null;
+
+                            const originalInsul = construction.layers?.find(l => l.isInsulation);
+                            const activeOverride = insulationOverrides[construction.id];
+                            const activeTier = activeOverride ? activeOverride.tier : (originalInsul ? (() => {
+                              const cond = originalInsul.conductivity;
+                              if (cond <= 0.030) return 'premium';
+                              if (cond <= 0.045) return 'high';
+                              if (cond <= 0.070) return 'standard';
+                              return 'basic';
+                            })() : 'standard');
+                            const activeThickness = activeOverride ? activeOverride.thickness : (originalInsul ? originalInsul.thickness : 0);
+
+                            return (
+                              <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm space-y-4`}>
+                                <div className="flex justify-between items-center border-b pb-2 mb-2 opacity-90 border-slate-700/30">
+                                  <label className="text-sm font-black flex items-center gap-2">
+                                    <Layers size={16} className="text-orange-500" /> 단열재 및 레이어 정보
+                                  </label>
+                                  <span className="text-[10px] font-mono opacity-50">{construction.id}</span>
+                                </div>
+                                
+                                <div className="space-y-1.5">
+                                  <p className="text-xs font-bold">구조체명: <span className="text-blue-500">{construction.name}</span></p>
+                                  <div className="text-[11px] opacity-80 space-y-1 bg-black/10 p-3 rounded-xl">
+                                    <p className="font-bold border-b border-white/5 pb-1 mb-1">구성 레이어 (바깥쪽 → 안쪽):</p>
+                                    {construction.layers && construction.layers.length > 0 ? (
+                                      construction.layers.map((l, idx) => (
+                                        <div key={idx} className="flex justify-between items-center py-0.5">
+                                          <span>{l.name} <span className="opacity-50">({l.thickness}mm)</span></span>
+                                          {l.isInsulation ? (
+                                            <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/25 px-1.5 py-0.2 rounded text-[9px] font-bold">단열재</span>
+                                          ) : (
+                                            <span className="opacity-40 text-[9px]">구조체 레이어</span>
+                                          )}
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <p className="opacity-50">레이어 정보가 없습니다.</p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="p-4 rounded-xl border border-orange-500/10 bg-orange-500/5 space-y-3">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-xs font-black text-orange-500">단열 레이어 튜닝</span>
+                                    {activeOverride && (
+                                      <button 
+                                        onClick={() => handleResetInsulationOverride(construction.id)}
+                                        className="text-[10px] text-red-400 hover:text-red-300 underline font-bold"
+                                      >
+                                        원본 복원
+                                      </button>
+                                    )}
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="text-[9px] font-black opacity-60 block mb-1">단열 등급</label>
+                                      <select
+                                        value={activeTier}
+                                        onChange={(e) => handleInsulationOverrideChange(construction.id, e.target.value, activeThickness || 100)}
+                                        className={`w-full p-2.5 text-[11px] font-bold rounded-lg border outline-none ${theme.input} focus:border-orange-500`}
+                                      >
+                                        <option value="premium">고성능 (λ≤0.030)</option>
+                                        <option value="high">중성능 (λ≤0.045)</option>
+                                        <option value="standard">일반 (λ≤0.070)</option>
+                                        <option value="basic">저성능 (λ>0.070)</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="text-[9px] font-black opacity-60 block mb-1">두께 (mm)</label>
+                                      <div className="relative">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="500"
+                                          step="5"
+                                          value={activeThickness}
+                                          onChange={(e) => handleInsulationOverrideChange(construction.id, activeTier, parseFloat(e.target.value) || 0)}
+                                          className={`w-full p-2 pl-3 pr-8 text-[11px] font-bold rounded-lg border outline-none ${theme.input} focus:border-orange-500 text-center`}
+                                        />
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] opacity-40">mm</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {activeOverride && (
+                                    <p className="text-[9px] text-emerald-400 font-bold text-center mt-1">
+                                      * 튜닝 적용됨! U-value가 {construction.uValue} → {calculateUpdatedUValue(construction, activeOverride)} W/m²K로 조정됩니다.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
                           <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm`}>
                             <div className="flex justify-between items-end mb-4">
                               <label className="text-sm font-black flex items-center gap-2">
@@ -2849,6 +3127,20 @@ export default function App() {
                             {res.financial.mapped_window_name}
                           </span>
                         </div>
+                        {/* 💡 [신규] 백엔드에서 매칭된 단열재 실제 등급 및 U-Value 연동 단가 표시 */}
+                        {res.financial.insulation_details && res.financial.insulation_details.length > 0 && (
+                          <div className="flex flex-col border-t border-white/5 pt-2 mt-1 gap-1.5">
+                            <span className={`text-xs font-bold opacity-60 ${theme.textMain}`}>적용된 구조체별 단열 공사비 상세 (친환경DB 연동)</span>
+                            <div className="space-y-1 max-h-[120px] overflow-y-auto custom-scrollbar pr-1">
+                              {res.financial.insulation_details.map((d, idx) => (
+                                <div key={idx} className="flex justify-between items-center text-[10px] font-bold">
+                                  <span className="text-slate-400 truncate max-w-[180px]">{d.constructionName} ({d.area.toFixed(1)}㎡)</span>
+                                  <span className="text-orange-400">{d.tier.split(' ')[0]} (₩{d.price.toLocaleString()}/㎡)</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 

@@ -6,3 +6,5 @@ class SimulationPayload(BaseModel):
     projectData: Dict[str, Any]
     zones: List[Dict[str, Any]]
     surfaces: List[Dict[str, Any]]
+    materials: Dict[str, Any] = {}
+    insulationOverrides: Dict[str, Any] = {}

@@ -217,8 +217,104 @@ def parse_gbxml_to_json(filepath: str):
     offset_z = min(all_z) if all_z else 0
 
     # =====================================================
+    # 💡 Material 데이터베이스 파싱
+    # gbXML의 <Material> 요소에서 두께/열전도율/밀도/비열 추출
+    # =====================================================
+    INSULATION_CONDUCTIVITY_THRESHOLD = 0.1  # W/m·K 이하 → 단열재로 분류
+    
+    material_db = {}  # mat_id → {name, thickness, conductivity, density, specificHeat, isInsulation}
+    for mat_elem in root.findall('.//material'):
+        mat_id = get_attr(mat_elem, 'id')
+        if not mat_id:
+            continue
+        
+        mat_name_node = mat_elem.find('.//name')
+        mat_name = mat_name_node.text if mat_name_node is not None and mat_name_node.text else mat_id
+        # id에서 "mat-" 접두사 제거하여 가독성 향상
+        if mat_name == mat_id and mat_id.startswith('mat-'):
+            mat_name = mat_id[4:]
+        
+        thickness = 0.0
+        conductivity = None
+        density = None
+        specific_heat = None
+        
+        t_elem = mat_elem.find('.//thickness')
+        if t_elem is not None and t_elem.text:
+            try:
+                thickness = float(t_elem.text)
+                # Meters → mm 변환 (gbXML 표준 단위는 Meters)
+                t_unit = get_attr(t_elem, 'unit')
+                if t_unit and 'meter' in t_unit.lower():
+                    thickness = thickness * 1000  # m → mm
+                elif thickness < 1.0 and thickness > 0:
+                    # 단위 명시 없지만 값이 매우 작으면 m 단위로 추정
+                    thickness = thickness * 1000
+            except (ValueError, TypeError):
+                pass
+        
+        c_elem = mat_elem.find('.//conductivity')
+        if c_elem is not None and c_elem.text:
+            try:
+                conductivity = float(c_elem.text)
+            except (ValueError, TypeError):
+                pass
+        
+        d_elem = mat_elem.find('.//density')
+        if d_elem is not None and d_elem.text:
+            try:
+                density = float(d_elem.text)
+            except (ValueError, TypeError):
+                pass
+        
+        sh_elem = mat_elem.find('.//specificheat')
+        if sh_elem is not None and sh_elem.text:
+            try:
+                specific_heat = float(sh_elem.text)
+            except (ValueError, TypeError):
+                pass
+        
+        is_insulation = False
+        if conductivity is not None and conductivity > 0 and thickness >= 20:
+            # 열전도율이 낮고 두께가 20mm 이상인 경우 단열재 후보
+            is_insulation = conductivity <= INSULATION_CONDUCTIVITY_THRESHOLD
+            # 이름 기반 제외 (카펫, 마감재 등은 단열재가 아님)
+            NON_INSULATION_NAMES = ['카펫', 'carpet', '마감', '타일', '석고', 'gypsum']
+            if is_insulation and any(kw in mat_name.lower() for kw in NON_INSULATION_NAMES):
+                is_insulation = False
+        
+        material_db[mat_id] = {
+            "name": mat_name,
+            "thickness": round(thickness, 1),       # mm
+            "conductivity": conductivity,            # W/m·K
+            "density": density,                      # kg/m³
+            "specificHeat": specific_heat,            # J/kg·K
+            "isInsulation": is_insulation
+        }
+    
+    insul_count = sum(1 for m in material_db.values() if m["isInsulation"])
+    if material_db:
+        print(f"🧱 Material DB 파싱 완료: {len(material_db)}개 (단열재 {insul_count}개)")
+    
+    # =====================================================
+    # 💡 Layer 데이터베이스 파싱
+    # gbXML의 <Layer> 요소에서 MaterialId 참조 목록 추출
+    # =====================================================
+    layer_db = {}  # layer_id → [material_id_1, material_id_2, ...]
+    for layer_elem in root.findall('.//layer'):
+        lay_id = get_attr(layer_elem, 'id')
+        if not lay_id:
+            continue
+        mat_refs = []
+        for mat_id_elem in layer_elem.findall('.//materialid'):
+            mat_ref = get_attr(mat_id_elem, 'materialidref')
+            if mat_ref:
+                mat_refs.append(mat_ref)
+        layer_db[lay_id] = mat_refs
+
+    # =====================================================
     # 💡 Construction 데이터베이스 파싱
-    # gbXML의 <Construction> 요소에서 U-value/R-value 추출
+    # gbXML의 <Construction> 요소에서 U-value/R-value 및 레이어 구성 추출
     # =====================================================
     construction_db = {}
     for constr in root.findall('.//construction'):
@@ -228,6 +324,9 @@ def parse_gbxml_to_json(filepath: str):
         
         c_name_node = constr.find('.//name')
         c_name = c_name_node.text if c_name_node is not None and c_name_node.text else c_id
+        # id에서 "con-" 접두사 제거
+        if c_name == c_id and c_id.startswith('con-'):
+            c_name = c_id[4:]
         
         c_uvalue = None
         c_rvalue = None
@@ -260,9 +359,20 @@ def parse_gbxml_to_json(filepath: str):
         if c_uvalue and uval_unit and 'btu' in (uval_unit or '').lower():
             c_uvalue = c_uvalue * 5.678  # BTU/(hr·ft²·°F) → W/(m²·K)
         
+        # Layer → Material 연결
+        layers_info = []
+        layer_id_elem = constr.find('.//layerid')
+        if layer_id_elem is not None:
+            lay_ref = get_attr(layer_id_elem, 'layeridref')
+            if lay_ref and lay_ref in layer_db:
+                for mat_ref in layer_db[lay_ref]:
+                    if mat_ref in material_db:
+                        layers_info.append(material_db[mat_ref])
+        
         construction_db[c_id] = {
             "name": c_name,
-            "uValue": c_uvalue  # None이면 gbXML에 U-value 정보가 없음
+            "uValue": c_uvalue,  # None이면 gbXML에 U-value 정보가 없음
+            "layers": layers_info
         }
     
     if construction_db:
@@ -598,9 +708,71 @@ def parse_gbxml_to_json(filepath: str):
     print(f"   방향(Direction) 매핑: {dir_count}개")
     print(f"   층 수: {len(floor_levels)}개 층")
 
+    # =====================================================
+    # 💡 Construction별 사용 면적 · 단열재 요약 정보 생성
+    # =====================================================
+    # Construction별 적용 Surface 수 및 면적 합산
+    constr_usage = {}  # c_id → {"count": int, "area": float, "types": set()}
+    for s in surfaces_list:
+        c_ref = s.get("constructionRef")
+        if c_ref:
+            if c_ref not in constr_usage:
+                constr_usage[c_ref] = {"count": 0, "area": 0.0, "types": set()}
+            constr_usage[c_ref]["count"] += 1
+            constr_usage[c_ref]["area"] += calculate_surface_area(s.get("vertices", []))
+            constr_usage[c_ref]["types"].add(s.get("type", "Unknown"))
+    
+    # Construction 목록 (레이어 구성 + 사용 현황)
+    constructions_info = []
+    for c_id, c_data in construction_db.items():
+        usage = constr_usage.get(c_id, {"count": 0, "area": 0.0, "types": set()})
+        if usage["count"] == 0:
+            continue  # 사용되지 않는 Construction은 제외
+        constructions_info.append({
+            "id": c_id,
+            "name": c_data["name"],
+            "uValue": c_data.get("uValue"),
+            "layers": c_data.get("layers", []),
+            "surfaceCount": usage["count"],
+            "totalArea": round(usage["area"], 1),
+            "surfaceTypes": list(usage["types"])
+        })
+    
+    # 단열재 요약 (중복 제거)
+    insulation_summary = []
+    seen_insulation = set()
+    for c_info in constructions_info:
+        for layer in c_info.get("layers", []):
+            if layer.get("isInsulation") and layer["name"] not in seen_insulation:
+                seen_insulation.add(layer["name"])
+                # 이 단열재가 사용된 Construction 목록
+                used_in = [ci["name"] for ci in constructions_info 
+                          if any(l.get("name") == layer["name"] and l.get("isInsulation") 
+                                for l in ci.get("layers", []))]
+                total_area = sum(ci["totalArea"] for ci in constructions_info 
+                               if any(l.get("name") == layer["name"] and l.get("isInsulation") 
+                                     for l in ci.get("layers", [])))
+                insulation_summary.append({
+                    "name": layer["name"],
+                    "conductivity": layer.get("conductivity"),
+                    "thickness": layer.get("thickness"),
+                    "density": layer.get("density"),
+                    "usedIn": used_in,
+                    "totalArea": round(total_area, 1)
+                })
+    
+    if insulation_summary:
+        print(f"   🧊 단열재 {len(insulation_summary)}종 감지:")
+        for ins in insulation_summary:
+            print(f"      - {ins['name']}: λ={ins['conductivity']} W/m·K, 두께={ins['thickness']}mm, 면적={ins['totalArea']}㎡")
+
     return {
         "zones": zones_list,
         "surfaces": surfaces_list,
-        "warnings": gap_warnings,  # 💡 [신규] 면 갭 경고
-        "floorLevels": len(floor_levels),  # 💡 [신규] 감지된 총 층수
+        "warnings": gap_warnings,
+        "floorLevels": len(floor_levels),
+        "materials": {
+            "constructions": constructions_info,
+            "insulationSummary": insulation_summary
+        }
     }

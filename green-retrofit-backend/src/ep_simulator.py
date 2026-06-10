@@ -258,6 +258,54 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
     surfaces = payload.get("surfaces", [])
+    insulation_overrides = payload.get("insulationOverrides", {})
+    materials_data = payload.get("materials", {})
+    
+    # 💡 단열재 오버라이드 및 U-value 재계산 반영
+    if insulation_overrides and materials_data:
+        constr_map = {c["id"]: c for c in materials_data.get("constructions", [])}
+        for s in surfaces:
+            c_ref = s.get("constructionRef")
+            if c_ref and c_ref in insulation_overrides:
+                override = insulation_overrides[c_ref]
+                c_info = constr_map.get(c_ref)
+                if c_info:
+                    orig_insul = None
+                    for layer in c_info.get("layers", []):
+                        if layer.get("isInsulation"):
+                            orig_insul = layer
+                            break
+                    orig_u = c_info.get("uValue")
+                    if orig_u is None:
+                        orig_u = s.get("uValue", 0.8)
+                    
+                    if orig_u > 0:
+                        r_total = 1.0 / orig_u
+                        if orig_insul:
+                            d_orig = orig_insul.get("thickness", 0.0) # mm
+                            lambda_orig = orig_insul.get("conductivity", 0.04)
+                            r_insul_orig = (d_orig / 1000.0) / (lambda_orig if lambda_orig else 0.04)
+                        else:
+                            r_insul_orig = 0.0
+                            
+                        r_other = max(0.01, r_total - r_insul_orig)
+                        
+                        new_tier = override.get("tier")
+                        new_thickness = float(override.get("thickness", 0.0)) # mm
+                        
+                        TIER_CONDUCTIVITY = {
+                            "premium": 0.025,
+                            "high": 0.035,
+                            "standard": 0.055,
+                            "basic": 0.085
+                        }
+                        lambda_new = TIER_CONDUCTIVITY.get(new_tier, 0.04)
+                        r_insul_new = (new_thickness / 1000.0) / lambda_new
+                        r_total_new = r_other + r_insul_new
+                        new_u = 1.0 / r_total_new
+                        
+                        s["uValue"] = round(new_u, 4)
+                        print(f"🔄 [Simulation] Construction '{c_ref}' insulation override: {new_tier} ({new_thickness}mm) -> U-value {orig_u:.4f} -> {new_u:.4f}")
     
     pv_capacity_kw = project_data.get("pvCapacity", 0)
     is_geothermal = project_data.get("geothermalApplied", False)
@@ -633,7 +681,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             pv_capacity_kw=pv_capacity_kw,
             is_geothermal=is_geothermal,
             act_main=act_main,
-            surfaces=surfaces
+            surfaces=surfaces,
+            materials=materials_data,
+            insulation_overrides=insulation_overrides
         )
         return result_data
 
