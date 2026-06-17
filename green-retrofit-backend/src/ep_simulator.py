@@ -761,9 +761,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         act_main = project_data.get('activityId', 1105)
         target_budget = float(project_data.get('targetBudget', 0.0)) * 10000.0
         led_reduction_active = project_data.get('ledReductionActive', False)
-        hvac_upgrade_active = payload.get('hvacUpgradeActive', False)
-        
-        lcc_parameters = payload.get('lccParameters', {})
+        # 💡 hvacUpgradeActive / lccParameters는 projectData 안에 있다.
+        # (payload 최상위로 보내도 SimulationPayload 모델에 없어 Pydantic이 떨궈 항상 기본값이 됨)
+        hvac_upgrade_active = project_data.get('hvacUpgradeActive', False)
+
+        lcc_parameters = project_data.get('lccParameters', {})
         
         result_data = analyzer.calculate(
             eplus_csv_path=csv_path,

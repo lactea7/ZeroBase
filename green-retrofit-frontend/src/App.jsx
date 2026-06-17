@@ -747,14 +747,14 @@ export default function App() {
       setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
     }, 1500);
     try {
-      const payload = { 
-        projectData: projectData, 
-        zones: zones, 
+      const payload = {
+        projectData: projectData,
+        zones: zones,
         surfaces: surfaces,
         materials: materials,
         constructionOverrides: constructionOverrides,
-        lccParameters: projectData.lccParameters,
-        hvacUpgradeActive: projectData.hvacUpgradeActive
+        // lccParameters / hvacUpgradeActive는 projectData 안에 포함되어 함께 전송됨
+        // (백엔드는 projectData에서 읽음 — 최상위로 보내면 SimulationPayload에서 누락됨)
       };
       const response = await runSimulation(payload);
 
