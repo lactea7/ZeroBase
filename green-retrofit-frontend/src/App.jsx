@@ -64,7 +64,7 @@ import {
 
 // --- 분리된 모듈 import ---
 import { uploadGbxml, runSimulation } from './api/client';
-import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
+import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS, OUTLET_W_PER_ACTIVITY } from './data/constants';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
 import { STRUCTURAL_MATERIALS } from './data/structuralMaterials';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
@@ -338,23 +338,6 @@ export default function App() {
   const latitude = REGION_LATITUDES[projectData.location] || 37.56;
   // 가상 층 판별: floor 번호가 실제 층 수보다 크면 특수 공간(창고, 샤프트 등)
   const isVirtualFloor = (f) => realFloorCount > 0 && f > realFloorCount;
-
-  /**
-   * 콘센트 수 → 전기 부하 밀도 (W/m²) 변환
-   * 근거: NREL/TP-7A40-54466 (2012), ASHRAE RP-1742 (2014), IEC 60364-8-1
-   *  - 다양성계수(diversity factor) 0.5 : NREL 권장
-   *  - 이용률(utilization rate)   0.7 : IEC 60364-8-1 ku 평균
-   *  - 용도별 콘센트당 정격W         : NREL 실측치 기반
-   */
-  const OUTLET_W_PER_ACTIVITY = {
-    // [activityId]: W/콘센트
-    office:      150,  // 사무소 (일반)
-    residential:  80,  // 주거
-    lab:         200,  // 실험실/연구실
-    warehouse:    50,  // 창고
-    restaurant:  120,  // 식음료
-    default:     100,  // 기타
-  };
 
   const getActivityCategory = (activityId) => {
     const id = Number(activityId);

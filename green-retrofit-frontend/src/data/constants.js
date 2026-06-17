@@ -342,3 +342,17 @@ export const KOREA_REGIONS = [
     ],
   },
 ];
+
+// --- 용도별 콘센트당 정격 전력 (W/콘센트) ---
+//  · 다양도(diversity) 0.5 : NREL/TP-7A40-54466
+//  · 이용률(utilization)  0.7 : IEC 60364-8-1 ku 평균
+//  · 용도별 콘센트당 정격W   : NREL 실측치 기반
+export const OUTLET_W_PER_ACTIVITY = {
+  // [category]: W/콘센트
+  office:      150,  // 사무소 (일반)
+  residential:  80,  // 주거
+  lab:         200,  // 실험실/연구실
+  warehouse:    50,  // 창고
+  restaurant:  120,  // 식음료
+  default:     100,  // 기타
+};

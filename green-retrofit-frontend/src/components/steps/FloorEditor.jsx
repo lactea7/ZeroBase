@@ -8,7 +8,7 @@ import {
   SlidersHorizontal, Thermometer, ToggleLeft, ToggleRight, Users, Wind, X,
 } from 'lucide-react';
 
-import { ACTIVITIES } from '../../data/constants';
+import { ACTIVITIES, OUTLET_W_PER_ACTIVITY } from '../../data/constants';
 import { INSULATION_TYPES, INSULATION_CATEGORIES, getLayerColor } from '../../data/insulation';
 import { STRUCTURAL_MATERIALS, getMaterialsByCategory } from '../../data/structuralMaterials';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from '../../data/hvac';
