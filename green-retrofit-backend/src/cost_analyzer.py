@@ -582,11 +582,13 @@ class LCCAnalyzer:
             annual_elec_bill += peak_kw_estimate * self.ELEC_BASE_CHARGE * 12
             
             for m in range(1, 13):
-                m_df = df[df['month'] == m]
+                mask_m = (df['month'] == m).values
+                # 난방은 '공간 난방'만 (급탕 DHW는 연중 발생하므로 제외 → 냉방과 대칭)
+                # 기존엔 total_heat_kwh(=공간난방+급탕)를 써서 여름에도 급탕만큼 난방값이 떠 보였음
                 monthly_data.append({
                     "name": f"{m}월",
-                    "heating": round(m_df['total_heat_kwh'].sum() / total_area, 1) if total_area > 0 else 0,
-                    "cooling": round(np.sum(total_c_con_kwh[df['month'] == m]) / total_area, 1) if total_area > 0 else 0
+                    "heating": round(np.sum(total_h_con_kwh[mask_m]) / total_area, 1) if total_area > 0 else 0,
+                    "cooling": round(np.sum(total_c_con_kwh[mask_m]) / total_area, 1) if total_area > 0 else 0
                 })
 
             pv_gen = ((pv_capacity_kw * 1300) / total_area) if pv_capacity_kw and total_area > 0 else 0.0
