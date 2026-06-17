@@ -16,8 +16,23 @@ class LCCAnalyzer:
     ELEC_RATE_WINTER = (138.5 + 112.2 + 98.1) / 3   # 11~2월 가중평균
     ELEC_RATE_SPRING = (121.7 + 103.9 + 98.1) / 3   # 3~5, 9~10월 가중평균
     ELEC_BASE_CHARGE = 4910    # 기본요금 (원/kW)
-    HEAT_RATE_MCAL = 145.82    
+    HEAT_RATE_MCAL = 145.82
     HEAT_RATE_KWH = HEAT_RATE_MCAL * 0.8604
+
+    # ── 비교 기준이 되는 '기존 노후 건물' 추정 가정값 ──
+    # ⚠️ 실측이 아닌 표준 가정치. NPV/IRR/절감액은 이 가정 대비 차이로 산출되므로
+    #    값이 바뀌면 투자지표가 크게 달라진다. (UI에 '추정 기준'으로 함께 표기)
+    BASELINE_HEATING_COP = 1.5            # 노후 난방기기 효율
+    BASELINE_COOLING_COP = 2.0            # 노후 냉방기기 효율
+    BASELINE_INEFFICIENCY_PENALTY = 0.20  # 단열 노후·외풍·누기 등 추가 손실 (+20%)
+
+    # ── 에너지원별 1차에너지 환산계수 / CO2 배출계수 ──
+    # 전기는 발전·송배전 손실로 계수가 높고, 열(난방·급탕)은 낮다.
+    # ⚠️ 열원이 가스가 아닌 지역난방이면 PRIMARY_FACTOR_HEAT=0.728로 조정.
+    PRIMARY_FACTOR_ELEC = 2.75   # 전력 1차에너지 환산계수 (건축물 에너지효율등급 기준)
+    PRIMARY_FACTOR_HEAT = 1.10   # 연료(가스) 기준 (지역난방 0.728)
+    CO2_FACTOR_ELEC = 0.466      # 전력 배출계수 (kgCO2/kWh)
+    CO2_FACTOR_HEAT = 0.232      # 가스(LNG) 연소 배출계수 (kgCO2/kWh)
 
     HEATING_EFF_DB = { 
         1: {1: 0.85, 2: 2.50, 4: 0.80, 11: 0.95}, 
@@ -659,26 +674,28 @@ class LCCAnalyzer:
             utility_inflation = kwargs.get("utility_inflation", 0.04)
             years = kwargs.get("lifecycle_years", 20)
             
+            # 누적 생애주기비용(LCC) 곡선: 초기투자비 + 연차별 할인 운영/유지/교체비
+            # (순절감액이 아닌 '총 소유비용'의 현재가치 누적 → 손익분기 차트용)
             cumulative_lcc_30y = []
-            current_npv = total_capital_cost
-            
+            lcc_pv = total_capital_cost
+
             for y in range(1, years + 1):
                 yearly_op_cost = (annual_elec_bill + annual_heat_bill) * ((1 + utility_inflation) ** y)
                 maint_cost = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
-                
+
                 replacement_cost = 0
                 if y % 15 == 0:
                     # 15년차 설비 전면 교체가 아닌 핵심기기(50%) 부분 교체 반영
                     replacement_cost += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
                 if y % 10 == 0:
                     replacement_cost += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
-                    
+
                 total_year_cost = yearly_op_cost + maint_cost + replacement_cost
-                
-                # NPV(순현재가치) = (미래가치) / (1 + 할인율)^y
+
+                # 해당 연도 비용을 현재가치로 할인하여 누적
                 discounted_cost = total_year_cost / ((1 + discount_rate) ** y)
-                current_npv += discounted_cost
-                cumulative_lcc_30y.append(int(current_npv))
+                lcc_pv += discounted_cost
+                cumulative_lcc_30y.append(int(lcc_pv))
 
             matrix = {
                 "heating": {"req": round(a_h_req/total_area, 1), "con": round(a_h_con/total_area, 1)},
@@ -696,12 +713,21 @@ class LCCAnalyzer:
             
             # 실제 전체 에너지 소요량 (LCC 및 탄소배출, 요금제용)
             total_con_actual = sum(v["con"] for k,v in matrix.items() if k != "renewable")
-            
+
+            # ── 에너지원별 분리: 전기(냉방·조명·환기·기기) vs 열(난방·급탕) ──
+            # 1차에너지/CO2를 단일 전기계수로 일괄 적용하던 것을 원별 계수로 분리
+            elec_con_zeb = matrix["cooling"]["con"] + matrix["lighting"]["con"] + matrix["ventilation"]["con"]
+            heat_con     = matrix["heating"]["con"] + matrix["hotwater"]["con"]
+            elec_con_actual = elec_con_zeb + matrix["equipment"]["con"]
+
+            primary_per_m2 = elec_con_zeb * self.PRIMARY_FACTOR_ELEC + heat_con * self.PRIMARY_FACTOR_HEAT
+            co2_per_m2     = elec_con_actual * self.CO2_FACTOR_ELEC + heat_con * self.CO2_FACTOR_HEAT
+
             summary = {
-                "demand_per_m2": sum(v["req"] for k,v in matrix.items() if k != "renewable"), 
-                "consume_per_m2": total_con_actual, 
-                "primary_per_m2": total_con_zeb * 2.75, 
-                "co2_per_m2": total_con_actual * 0.466, 
+                "demand_per_m2": sum(v["req"] for k,v in matrix.items() if k != "renewable"),
+                "consume_per_m2": total_con_actual,
+                "primary_per_m2": round(primary_per_m2, 1),
+                "co2_per_m2": round(co2_per_m2, 2),
                 "independence": independence_val
             }
             
@@ -792,17 +818,17 @@ class LCCAnalyzer:
                     else: high = rate
                 return rate
                 
-            # 현금흐름 배열 (Year 0은 -초기투자비, Year 1~N은 연간 운영수익(여기서는 기존 건물 대비 절감액으로 해야함))
-            # 기준 건물 대비 에너지 절감액을 현금 흐름으로 잡음
-            base_h_cop = 1.5
-            base_c_cop = 2.0
+            # 현금흐름 배열 (Year 0 = -초기투자비, Year 1~N = 기존 노후 건물 대비 절감액)
+            # ⚠️ 기준 건물은 실측이 아니라 표준 가정값(클래스 상수)으로 추정한 것이다.
+            base_h_cop = self.BASELINE_HEATING_COP
+            base_c_cop = self.BASELINE_COOLING_COP
             base_heat_bill = (a_h_req / base_h_cop) * self.HEAT_RATE_KWH
-            
+
             base_elec_bill = annual_elec_bill - df['heat_cost'].sum()  # 기존 전력
             base_elec_bill += (a_c_req / base_c_cop) * self.ELEC_BASE_CHARGE # 추정 냉방비 추가 (TOU 약산)
-            base_elec_bill *= 1.2 # 노후 기기 및 누기율 등에 의한 20% 패널티
-            
-            base_running_cost = base_elec_bill + base_heat_bill # 임의의 기존 노후 건물 추정 (약 60% 비효율)
+            base_elec_bill *= (1 + self.BASELINE_INEFFICIENCY_PENALTY)  # 노후 기기·누기 패널티
+
+            base_running_cost = base_elec_bill + base_heat_bill # 기존 노후 건물 운영비 추정치
             cash_flows = [-total_capital_cost]
             for y in range(1, years + 1):
                 base_cost_y = base_running_cost * ((1 + utility_inflation) ** y)
@@ -810,14 +836,21 @@ class LCCAnalyzer:
                 maint_cost_y = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
                 
                 rep_cost_y = 0
-                if y % 15 == 0: rep_cost_y += hvac_cost * ((1 + inflation_rate) ** y)
+                # NPV 누적 계산(cumulative_lcc_30y)과 동일한 교체 가정 사용:
+                #   15년차 핵심기기 50% 부분 교체, 10년차 LED 40% 교체
+                if y % 15 == 0: rep_cost_y += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
                 if y % 10 == 0: rep_cost_y += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
-                
+
                 # 절감액 = (기존 건물 운영비) - (리모델링 후 운영비 + 유지보수 + 교체비)
                 net_savings = base_cost_y - (yearly_op_cost_y + maint_cost_y + rep_cost_y)
                 cash_flows.append(net_savings)
-                
+
             irr_val = calculate_irr(cash_flows) * 100
+
+            # 순현재가치(NPV) = 순절감액 현금흐름을 할인율로 할인한 현재가치의 합
+            #   (cash_flows[0] = -초기투자비 이므로 자본비가 이미 반영됨)
+            #   IRR과 동일한 현금흐름을 사용 → 두 지표가 일관됨. 0 이상이면 투자 타당.
+            npv_real = sum(cf / ((1 + discount_rate) ** t) for t, cf in enumerate(cash_flows))
 
             financial = {
                 "annual_elec_bill": int(annual_elec_bill),
@@ -842,8 +875,15 @@ class LCCAnalyzer:
                     "utility_inflation": utility_inflation * 100,
                     "lifecycle_years": years
                 },
-                "npv": int(current_npv),
-                "irr": round(irr_val, 2)
+                "npv": int(npv_real),
+                "total_lcc": int(lcc_pv),
+                "irr": round(irr_val, 2),
+                # NPV/IRR/절감액이 비교한 '기존 노후 건물' 추정 가정 (UI 표기용)
+                "baseline_assumptions": {
+                    "heating_cop": self.BASELINE_HEATING_COP,
+                    "cooling_cop": self.BASELINE_COOLING_COP,
+                    "inefficiency_penalty_pct": round(self.BASELINE_INEFFICIENCY_PENALTY * 100)
+                }
             }
             
             surface_thermal = {}

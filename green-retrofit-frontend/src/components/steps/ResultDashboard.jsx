@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, PiggyBank, Coins, Wallet, Percent, Check, Calculator,
   AlertTriangle, Lightbulb, LineChart as LineChartIcon,
-  Box as BoxIcon, FileSpreadsheet, LayoutDashboard,
+  Box as BoxIcon, FileSpreadsheet, LayoutDashboard, Info,
 } from 'lucide-react';
 import { formatWon } from '../../utils/format';
 import BuildingViewer from '../viewer/BuildingViewer';
@@ -645,6 +645,19 @@ export default function ResultDashboard({
                       </motion.div>
                     ))}
                   </div>
+
+                  {/* NPV/IRR/회수기간 산정 기준 안내 (추정 baseline) */}
+                  {lccAnalysis.baselineAssumptions && (
+                    <p className={`text-[11px] leading-relaxed flex items-start gap-1.5 px-1 ${theme.textSub} opacity-70`}>
+                      <Info size={13} className="shrink-0 mt-0.5 text-indigo-400" />
+                      <span>
+                        NPV·IRR·회수기간은 <b>추정 기준 건물</b>(난방 COP {lccAnalysis.baselineAssumptions.heating_cop},
+                        냉방 COP {lccAnalysis.baselineAssumptions.cooling_cop},
+                        노후 비효율 +{lccAnalysis.baselineAssumptions.inefficiency_penalty_pct}%) 대비 절감액으로 산출된
+                        값입니다. 실제 건물의 사용량과 다를 수 있으며, 절대 수치보다 상대 비교 지표로 활용하세요.
+                      </span>
+                    </p>
+                  )}
 
                   {/* 세부 내역 2분할 */}
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

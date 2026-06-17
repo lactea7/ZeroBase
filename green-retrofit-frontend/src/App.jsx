@@ -909,7 +909,7 @@ export default function App() {
         paybackYears = 0;
     }
 
-    return { data, annualSavings, paybackYears, npv, irr, params };
+    return { data, annualSavings, paybackYears, npv, irr, params, baselineAssumptions: f.baseline_assumptions };
   };
 
   const lccAnalysis = getCashFlowData();
