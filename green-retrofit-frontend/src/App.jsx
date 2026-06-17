@@ -633,7 +633,9 @@ export default function App() {
     setEquipCalc((p) => ({ ...p, active: false }));
   };
 
-  const handleApplyRecommendation = (type) => {
+  // 제안 1건의 상태 변경만 수행하고, 무엇을 바꿨는지 요약 문자열을 반환한다.
+  // (alert/화면이동은 호출하는 쪽에서 일괄 처리 → 여러 제안을 한 번에 적용 가능)
+  const applyRecommendationChanges = (type) => {
     if (type === 'window') {
       setSurfaces((prev) =>
         prev.map((s) => {
@@ -643,6 +645,7 @@ export default function App() {
           return s;
         })
       );
+      return '창호를 일반 복층유리로 하향';
     } else if (type === 'insulation') {
       // 모든 구조체의 단열재를 일반 등급 제품(비드법 1종 1호, ID 1)으로 일괄 교체
       const stdProduct = INSULATION_TYPES.find(p => p.tier === 'standard') || INSULATION_TYPES[0];
@@ -700,37 +703,40 @@ export default function App() {
         ));
       }
       
-      alert(`✅ 단열재 공사비 절감 적용 완료!\n총 ${changedCount}개 외벽의 단열재가 '일반 등급(EPS/미네랄울)'으로 일괄 하향 조정되었습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
-      setStep('floorView');
-      return;
+      return `단열재 ${changedCount}개 외벽을 일반 등급(EPS/미네랄울)으로 하향`;
     } else if (type === 'hvac') {
       setProjectData((prev) => ({ ...prev, geothermalApplied: false }));
-      alert(`✅ 지열 시스템 취소 완료!\n지열 시스템 도입이 취소되었습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
-      setStep('floorView');
-      return;
+      return '지열(Geothermal) 시스템 도입 취소';
     } else if (type === 'led') {
-      let hasManualLed = false;
-      let reducedCount = 0;
-      setZones((prev) =>
-        prev.map((z) => {
-          if (z.ledFixtureCount > 0) {
-            hasManualLed = true;
-            const newCount = Math.floor(z.ledFixtureCount * 0.5);
-            reducedCount += (z.ledFixtureCount - newCount);
-            return { ...z, ledFixtureCount: newCount };
-          }
-          return z;
-        })
-      );
-      if (!hasManualLed) {
-        setProjectData((prev) => ({ ...prev, ledReductionActive: true }));
-        alert(`✅ LED 교체 수량 축소 완료!\n비필수 구역의 LED 교체를 제외하여 비용을 절감했습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
-      } else {
-        alert(`✅ LED 교체 수량 축소 완료!\n수동으로 입력하신 LED 교체 수량 중 총 ${reducedCount}개가 축소되었습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
+      const manualZones = zones.filter((z) => z.ledFixtureCount > 0);
+      if (manualZones.length > 0) {
+        const reducedCount = manualZones.reduce(
+          (acc, z) => acc + (z.ledFixtureCount - Math.floor(z.ledFixtureCount * 0.5)),
+          0
+        );
+        setZones((prev) =>
+          prev.map((z) =>
+            z.ledFixtureCount > 0 ? { ...z, ledFixtureCount: Math.floor(z.ledFixtureCount * 0.5) } : z
+          )
+        );
+        return `LED 교체 수량 ${reducedCount}개 축소`;
       }
-      setStep('floorView');
-      return;
+      setProjectData((prev) => ({ ...prev, ledReductionActive: true }));
+      return '비필수 구역 LED 교체 제외';
     }
+    return null;
+  };
+
+  // 선택한 여러 제안을 한 번에 적용 → 안내 1회 + 화면 이동 1회
+  const handleApplyRecommendations = (types) => {
+    if (!types || types.length === 0) return;
+    const summaries = types.map(applyRecommendationChanges).filter(Boolean);
+    alert(
+      `✅ ${summaries.length}개 제안을 적용했습니다.\n\n` +
+      summaries.map((s) => `· ${s}`).join('\n') +
+      `\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`
+    );
+    setStep('floorView');
   };
 
   const handleSimulation = async () => {
@@ -1706,7 +1712,7 @@ export default function App() {
               zones={zones}
               surfaces={surfaces}
               setStep={setStep}
-              handleApplyRecommendation={handleApplyRecommendation}
+              handleApplyRecommendations={handleApplyRecommendations}
               getZebGradeInfo={getZebGradeInfo}
               getAnnualChartData={getAnnualChartData}
               viewMode={viewMode}

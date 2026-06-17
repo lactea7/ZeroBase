@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
@@ -24,7 +24,7 @@ export default function ResultDashboard({
   zones,
   surfaces,
   setStep,
-  handleApplyRecommendation,
+  handleApplyRecommendations,
   getZebGradeInfo,
   getAnnualChartData,
   viewMode,
@@ -39,6 +39,13 @@ export default function ResultDashboard({
   // 에너지 항목 분류 및 차트 색상 (App.jsx에서 함께 이동)
   const categories = ['신재생', '난방', '냉방', '급탕', '조명', '환기', '기기'];
   const colors = ['#2DD4BF', '#F87171', '#60A5FA', '#FB923C', '#FACC15', '#4ADE80', '#A78BFA'];
+
+  // 비용 절감 제안: 즉시 적용이 아니라 다중 선택 후 일괄 적용
+  const [selectedRecTypes, setSelectedRecTypes] = useState([]);
+  const toggleRecType = (type) =>
+    setSelectedRecTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    );
 
   return (
             <div className="w-full h-full max-w-[1400px] mx-auto p-8 overflow-y-auto animate-in zoom-in duration-500 custom-scrollbar flex flex-col">
@@ -450,7 +457,7 @@ export default function ResultDashboard({
                         <span className="font-black text-rose-500 mx-1.5 underline decoration-rose-500/30 underline-offset-4">
                           {formatWon(res.financial.capital_cost - res.financial.target_budget)}
                         </span>
-                        초과했습니다. 아래 제안을 클릭 한 번으로 적용하여 시뮬레이션을 다시 돌려보세요.
+                        초과했습니다. 적용할 제안을 <span className="font-bold">여러 개 선택</span>한 뒤 아래 <span className="font-bold">[선택 적용]</span> 버튼으로 한 번에 반영하세요.
                       </p>
                       
                       {res.financial.recommendations && res.financial.recommendations.length > 0 && (
@@ -470,32 +477,76 @@ export default function ResultDashboard({
                           })()}
 
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {res.financial.recommendations.map((rec, idx) => (
-                              <div key={idx} className={`relative overflow-hidden p-5 rounded-2xl border flex flex-col gap-3 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${isDarkMode ? 'bg-gradient-to-br from-white/5 to-white/0 border-white/10 hover:border-emerald-500/50' : 'bg-gradient-to-br from-slate-50 to-white border-slate-200 shadow-sm hover:border-emerald-500/50'}`}>
+                            {res.financial.recommendations.map((rec, idx) => {
+                              const isSelected = selectedRecTypes.includes(rec.type);
+                              return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => toggleRecType(rec.type)}
+                                aria-pressed={isSelected}
+                                className={`relative overflow-hidden p-5 rounded-2xl border flex flex-col gap-3 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-lg cursor-pointer ${
+                                  isSelected
+                                    ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-500/10'
+                                    : isDarkMode
+                                    ? 'bg-gradient-to-br from-white/5 to-white/0 border-white/10 hover:border-emerald-500/50'
+                                    : 'bg-gradient-to-br from-slate-50 to-white border-slate-200 shadow-sm hover:border-emerald-500/50'
+                                }`}
+                              >
                                 {/* Glassmorphism accent */}
                                 <div className="absolute -top-12 -right-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
-                                
+
                                 <div className="flex justify-between items-start gap-2 z-10">
                                   <span className={`font-black flex items-center gap-2 text-[13px] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                                     <Lightbulb size={16} className="shrink-0 text-emerald-500" /> {rec.title}
                                   </span>
+                                  {/* 선택 표시 체크박스 */}
+                                  <span className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-400/50 text-transparent'}`}>
+                                    <Check size={14} />
+                                  </span>
                                 </div>
                                 <p className={`text-xs leading-relaxed z-10 opacity-80 ${theme.textSub}`}>{rec.description}</p>
-                                
+
                                 <div className="mt-auto pt-4 flex flex-wrap items-center justify-between gap-2 z-10 border-t border-slate-500/10">
                                   <span className="text-[11px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg border border-emerald-500/20">
                                     예상 절감: -{formatWon(rec.saved_cost).replace(' 만 원', '만원')}
                                   </span>
-                                  <button
-                                    onClick={() => handleApplyRecommendation(rec.type)}
-                                    className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1.5 shadow-sm hover:shadow"
-                                  >
-                                    <Check size={14} /> 자동 적용
-                                  </button>
+                                  <span className={`text-[11px] font-bold ${isSelected ? 'text-emerald-500' : 'opacity-50'}`}>
+                                    {isSelected ? '✓ 선택됨' : '선택하기'}
+                                  </span>
                                 </div>
-                              </div>
-                            ))}
+                              </button>
+                              );
+                            })}
                           </div>
+
+                          {/* 선택 일괄 적용 바 */}
+                          {(() => {
+                            const selectedSaved = res.financial.recommendations
+                              .filter((r) => selectedRecTypes.includes(r.type))
+                              .reduce((acc, r) => acc + r.saved_cost, 0);
+                            return (
+                              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border ${isDarkMode ? 'bg-black/20 border-emerald-500/20' : 'bg-white border-emerald-500/20 shadow-sm'}`}>
+                                <span className={`text-sm font-bold ${theme.textSub}`}>
+                                  {selectedRecTypes.length > 0
+                                    ? <>선택한 <span className="text-emerald-500 font-black">{selectedRecTypes.length}</span>개 제안 · 예상 절감 <span className="text-emerald-500 font-black">-{formatWon(selectedSaved)}</span></>
+                                    : '적용할 제안을 선택하세요'}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={selectedRecTypes.length === 0}
+                                  onClick={() => handleApplyRecommendations(selectedRecTypes)}
+                                  className={`px-6 py-2.5 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition-all ${
+                                    selectedRecTypes.length === 0
+                                      ? 'bg-slate-400/30 text-slate-400 cursor-not-allowed'
+                                      : 'bg-blue-500 hover:bg-blue-600 text-white shadow-md hover:shadow-lg active:scale-95'
+                                  }`}
+                                >
+                                  <Check size={16} /> 선택 적용{selectedRecTypes.length > 0 ? ` (${selectedRecTypes.length})` : ''}
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
