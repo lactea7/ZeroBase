@@ -304,7 +304,9 @@ class LCCAnalyzer:
                                 
                                 m2_valid = m2_insul[m2_insul['price_num'] > 0]
                                 if not m2_valid.empty:
-                                    cost_db_dict["avg_prices"]["insulation"] = int(m2_valid['price_num'].mean())
+                                    # 등급별 단가와 동일하게 중앙값 + 타당성 클램프 (평균은 이상치에 민감)
+                                    insul_fallback = int(self._clamp_price(m2_valid['price_num'].median(), "insulation_m2", "단열 폴백"))
+                                    cost_db_dict["avg_prices"]["insulation"] = insul_fallback
                                     # 키워드 기반 등급 분류
                                     for _, row in m2_valid.iterrows():
                                         text_chunk = ' '.join(str(v) for v in row.values if str(v) != 'nan')
@@ -316,7 +318,7 @@ class LCCAnalyzer:
                                                 insul_tier_prices[tier_key].append(price)
                                                 break
                                     
-                                    print(f"  📊 단열재 DB: ㎡ 단위 {len(m2_valid)}건, 평균 ₩{int(m2_valid['price_num'].mean()):,}/㎡")
+                                    print(f"  📊 단열재 DB: ㎡ 단위 {len(m2_valid)}건, 중앙값 ₩{insul_fallback:,}/㎡")
                             
                             cost_db_dict["status"]["eco_loaded"] = True
                             cost_db_dict["status"]["items"] += len(df)
