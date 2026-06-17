@@ -653,7 +653,7 @@ class LCCAnalyzer:
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
 
-            # LCC NPV (현금흐름) 계산 - TRACE 600 재무분석 모델 적용
+            # 생애주기비용(LCC) 현금흐름 계산 (할인 현금흐름 방식)
             discount_rate = kwargs.get("discount_rate", 0.05)
             inflation_rate = kwargs.get("inflation_rate", 0.03)
             utility_inflation = kwargs.get("utility_inflation", 0.04)

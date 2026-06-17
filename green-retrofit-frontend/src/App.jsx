@@ -893,7 +893,7 @@ export default function App() {
       });
     }
     
-    // TRACE 600 고급 지표
+    // 고급 재무 지표
     const npv = f.npv || 0;
     const irr = f.irr || 0;
     
@@ -1451,7 +1451,7 @@ export default function App() {
                       <details className="mt-4 p-4 rounded-xl border-2 border-indigo-500/30 bg-black/5 group">
                         <summary className="font-black flex items-center justify-between cursor-pointer outline-none">
                           <div className={`flex items-center gap-2 ${theme.textMain}`}>
-                            <Calculator className="text-indigo-500" size={18} /> 고급 재무 분석 설정 (TRACE 600)
+                            <Calculator className="text-indigo-500" size={18} /> 고급 재무 분석 설정
                           </div>
                           <span className="text-indigo-500 bg-indigo-500/10 px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest group-open:hidden">
                             기본값 사용 중
@@ -1495,7 +1495,7 @@ export default function App() {
                             />
                           </div>
                           <p className="col-span-1 md:col-span-2 text-[10px] opacity-60 mt-1">
-                            미국의 선진 LCC(수명주기비용) 분석 툴인 TRACE 600의 평가 모형에 따라, 각 항목별 물가상승률을 복리로 적용하여 순현재가치(NPV) 및 내부수익률(IRR)을 계산합니다.
+                            수명주기비용(LCC) 분석 모형에 따라 각 항목별 물가상승률을 복리로 적용하여 순현재가치(NPV) 및 내부수익률(IRR)을 계산합니다.
                           </p>
                         </div>
                       </details>
