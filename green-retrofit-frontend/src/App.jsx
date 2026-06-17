@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BarChart,
@@ -55,15 +55,21 @@ import {
   Coins,
   Wallet,
   Clock,
-  Calendar
+  Calendar,
+  AlertTriangle,
+  Check,
+  Percent,
+  LineChart as LineChartIcon
 } from 'lucide-react';
 
 // --- 분리된 모듈 import ---
 import { uploadGbxml, runSimulation } from './api/client';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
+import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
+import { STRUCTURAL_MATERIALS } from './data/structuralMaterials';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
-import { LOADING_MESSAGES, DIR_MAP, groupBy, formatWon } from './utils/format';
-import { getSurfaceGroupName, getZoneGroupName, getPanesCategory, getCoatingType } from './utils/surface';
+import { LOADING_MESSAGES, DIR_MAP } from './utils/format';
+import { getPanesCategory, getCoatingType } from './utils/surface';
 import ScheduleEditor from './components/ScheduleEditor';
 import Navigation from './components/landing/Navigation';
 import Hero from './components/landing/Hero';
@@ -73,6 +79,12 @@ import * as THREE from 'three';
 
 // --- 분리된 3D 뷰어 컴포넌트 ---
 import BuildingViewer from './components/viewer/BuildingViewer';
+
+// --- 분리된 결과 대시보드 (STEP 6) ---
+import ResultDashboard from './components/steps/ResultDashboard';
+
+// --- 분리된 평면도/속성 편집기 (STEP 3 & 4) ---
+import FloorEditor from './components/steps/FloorEditor';
 
 
 // --- [메인 애플리케이션] ---
@@ -104,7 +116,16 @@ export default function App() {
     location: 'KOR_SQ_Seoul',
     pvCapacity: 0,
     geothermalApplied: false,
+    hvacUpgradeActive: false,
     orientation: 0,
+    targetBudget: 0,
+    lccParameters: {
+      discountRate: 5.0,
+      inflationRate: 3.0,
+      utilityInflation: 4.0,
+      lifecycleYears: 20
+    },
+    ledFixtureCount: 0,
     customSchedule: {
       useCustom: true,
       mode: 'simplified', // 'simplified' | 'detailed'
@@ -162,58 +183,132 @@ export default function App() {
   
   // 💡 단열재 및 구조체 속성 튜닝을 위한 State
   const [materials, setMaterials] = useState(null);
-  const [insulationOverrides, setInsulationOverrides] = useState({});
+  const [constructionOverrides, setConstructionOverrides] = useState({});
 
   const calculateUpdatedUValue = (constr, override) => {
-    if (!constr) return null;
-    const origU = constr.uValue;
-    if (!origU || origU <= 0) return origU;
-    if (!override) return origU;
+    if (!constr || !constr.layers || constr.layers.length === 0) return null;
+    const R_FILM = 0.17; // 실내외 표면열전달저항 (근사치)
 
-    // 원본 단열 레이어 찾기
-    const origInsul = constr.layers?.find(l => l.isInsulation);
-    const d_orig = origInsul ? origInsul.thickness : 0.0;
-    const lambda_orig = origInsul ? origInsul.conductivity : 0.04;
+    if (!override) {
+      let r_other = 0;
+      let original_insul_r = 0;
+      constr.layers.forEach(l => {
+        const thick = l.thickness || 0;
+        const cond = l.conductivity || 1.0;
+        const r = cond > 0 ? (thick / 1000.0) / cond : 0;
+        if (l.isInsulation) {
+          original_insul_r += r;
+        } else {
+          r_other += r;
+        }
+      });
+      const r_total = R_FILM + r_other + original_insul_r;
+      if (r_total <= 0) return null;
+      return parseFloat((1.0 / r_total).toFixed(4));
+    }
 
-    const r_total = 1.0 / origU;
-    const r_insul_orig = lambda_orig && lambda_orig > 0 ? (d_orig / 1000.0) / lambda_orig : 0.0;
-    const r_other = Math.max(0.01, r_total - r_insul_orig);
+    if (override.isCustom) {
+      // 4-layer custom override (외장재, 단열재, 구조체, 내장재)
+      const getR = (id, thickRaw, db) => {
+        const t = parseFloat(thickRaw) || 0;
+        if (t <= 0) return 0;
+        const mat = db.find(m => m.id === id);
+        const cond = mat ? mat.conductivity : 0;
+        return cond > 0 ? (t / 1000.0) / cond : 0;
+      };
+      
+      const rOuter = getR(override.outerId, override.outerThick, STRUCTURAL_MATERIALS);
+      const rInsul = getR(override.insulId, override.insulThick, INSULATION_TYPES);
+      const rCore = getR(override.coreId, override.coreThick, STRUCTURAL_MATERIALS);
+      const rInner = getR(override.innerId, override.innerThick, STRUCTURAL_MATERIALS);
+      
+      const r_total_new = R_FILM + rOuter + rInsul + rCore + rInner;
+      if (r_total_new <= 0) return null;
+      return parseFloat((1.0 / r_total_new).toFixed(4));
+    } else {
+      // Fallback for simple insulation override (backward compatibility)
+      let r_other = 0;
+      constr.layers.forEach(l => {
+        if (!l.isInsulation) {
+          const thick = l.thickness || 0;
+          const cond = l.conductivity || 1.0;
+          r_other += cond > 0 ? (thick / 1000.0) / cond : 0;
+        }
+      });
 
-    const lambda_new = {
-      premium: 0.025,
-      high: 0.035,
-      standard: 0.055,
-      basic: 0.085
-    }[override.tier] || 0.04;
-
-    const r_insul_new = (override.thickness / 1000.0) / lambda_new;
-    const r_total_new = r_other + r_insul_new;
-    return parseFloat((1.0 / r_total_new).toFixed(4));
-  };
-
-  const handleInsulationOverrideChange = (constructionId, tier, thickness) => {
-    const newOverrides = {
-      ...insulationOverrides,
-      [constructionId]: { tier, thickness: parseFloat(thickness) || 0 }
-    };
-    setInsulationOverrides(newOverrides);
-
-    // 해당 구조체(Construction)를 사용하는 모든 외피(Surface)의 U-value 동적 재계산 반영
-    const constr = materials?.constructions?.find(c => c.id === constructionId);
-    if (constr) {
-      const newU = calculateUpdatedUValue(constr, { tier, thickness: parseFloat(thickness) || 0 });
-      setSurfaces(prevSurfaces =>
-        prevSurfaces.map(s =>
-          s.constructionRef === constructionId ? { ...s, uValue: newU } : s
-        )
-      );
+      let lambda_new = 0.04;
+      if (override.insulationId) {
+        const product = INSULATION_TYPES.find(p => p.id === override.insulationId);
+        if (product) lambda_new = product.conductivity;
+      } else if (override.tier) {
+        lambda_new = { premium: 0.025, high: 0.035, standard: 0.055, basic: 0.085 }[override.tier] || 0.04;
+      }
+  
+      const thick_new = parseFloat(override.thickness) || 0;
+      const r_insul_new = lambda_new > 0 ? (thick_new / 1000.0) / lambda_new : 0;
+  
+      const r_total_new = R_FILM + r_other + r_insul_new;
+      if (r_total_new <= 0) return null;
+      return parseFloat((1.0 / r_total_new).toFixed(4));
     }
   };
 
-  const handleResetInsulationOverride = (constructionId) => {
-    const newOverrides = { ...insulationOverrides };
-    delete newOverrides[constructionId];
-    setInsulationOverrides(newOverrides);
+  const handleConstructionOverrideChange = (surfaceId, constructionId, overrideUpdate) => {
+    setConstructionOverrides(prev => {
+      const current = prev[surfaceId] || {};
+      const next = { ...current, ...overrideUpdate };
+
+      // 제품 변경에 따른 기본 두께 적용 로직
+      if (overrideUpdate.isCustom) {
+        if (overrideUpdate.outerId && overrideUpdate.outerId !== current.outerId) {
+          next.outerThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.outerId)?.defaultThickness || 10;
+        }
+        if (overrideUpdate.coreId && overrideUpdate.coreId !== current.coreId) {
+          next.coreThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.coreId)?.defaultThickness || 150;
+        }
+        if (overrideUpdate.innerId && overrideUpdate.innerId !== current.innerId) {
+          next.innerThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.innerId)?.defaultThickness || 10;
+        }
+        if (overrideUpdate.insulId && overrideUpdate.insulId !== current.insulId) {
+          next.insulThick = INSULATION_TYPES.find(m => m.id === overrideUpdate.insulId)?.defaultThickness || 100;
+        }
+      } else if (overrideUpdate.insulationId && overrideUpdate.insulationId !== current.insulationId) {
+        // 단열재 단독 교체 모드일 경우
+        const product = INSULATION_TYPES.find(p => p.id === overrideUpdate.insulationId);
+        next.tier = product ? product.tier : 'standard';
+        if (overrideUpdate.thickness === undefined) {
+          next.thickness = product?.defaultThickness || 100;
+        }
+      }
+
+      // 선택한 개별 서피스(Surface)에만 U-value 동적 재계산 반영
+      const constr = materials?.constructions?.find(c => c.id === constructionId);
+      if (constr) {
+        const newU = calculateUpdatedUValue(constr, next);
+        next.uValue = newU; // 백엔드로 전달하기 위해 override 객체에 저장
+        
+        setSurfaces(prevSurfaces =>
+          prevSurfaces.map(s =>
+            (s.id === surfaceId) ? { ...s, uValue: newU } : s
+          )
+        );
+        
+        // 🔥 현재 편집 중인 서피스의 U-Value도 업데이트 (저장 시 덮어쓰기 방지 및 슬라이더 연동)
+        setEditState(prevEdit => {
+          if (selectedId === surfaceId) {
+            return { ...prevEdit, uValue: newU };
+          }
+          return prevEdit;
+        });
+      }
+      return { ...prev, [surfaceId]: next };
+    });
+  };
+
+  const handleResetInsulationOverride = (surfaceId, constructionId) => {
+    const newOverrides = { ...constructionOverrides };
+    delete newOverrides[surfaceId];
+    setConstructionOverrides(newOverrides);
 
     // 원본 U-value 복원
     const constr = materials?.constructions?.find(c => c.id === constructionId);
@@ -221,9 +316,16 @@ export default function App() {
       const origU = constr.uValue;
       setSurfaces(prevSurfaces =>
         prevSurfaces.map(s =>
-          s.constructionRef === constructionId ? { ...s, uValue: origU } : s
+          (s.id === surfaceId) ? { ...s, uValue: origU } : s
         )
       );
+      
+      setEditState(prevEdit => {
+        if (selectedId === surfaceId) {
+          return { ...prevEdit, uValue: origU };
+        }
+        return prevEdit;
+      });
     }
   };
 
@@ -405,6 +507,7 @@ export default function App() {
                   : 0.8,
               wwr: finalType === 'Wall' ? 25 : 0,
               glazingId: 42,
+              constructionId: finalType === 'Wall' ? 'C-Sample-Wall' : (finalType === 'Roof' ? 'C-Sample-Roof' : null),
             });
           }
         });
@@ -412,6 +515,40 @@ export default function App() {
     }
     setSurfaces(newSurfaces);
     setZones(newZones);
+    
+    // 샘플용 가상 단열재 데이터 주입 (DB 연동/단열재 표시 기능 활성화용)
+    setMaterials({
+      summary: { premium: 0, high: 2, standard: 0, basic: 0 },
+      constructions: [
+        {
+          id: 'C-Sample-Wall',
+          name: '외벽 (샘플)',
+          totalArea: 1600, // 20x4x4면x5층 = 1600
+          layers: [
+            {
+              isInsulation: true,
+              materialName: '중성능 단열 보드 (샘플)',
+              thickness: 100,
+              conductivity: 0.040
+            }
+          ]
+        },
+        {
+          id: 'C-Sample-Roof',
+          name: '지붕 (샘플)',
+          totalArea: 400, // 20x20
+          layers: [
+            {
+              isInsulation: true,
+              materialName: '중성능 단열 보드 (샘플)',
+              thickness: 150,
+              conductivity: 0.040
+            }
+          ]
+        }
+      ]
+    });
+    
     setStep('buildingView');
   };
 
@@ -424,7 +561,7 @@ export default function App() {
     setStep('parsing');
 
     setMaterials(null);
-    setInsulationOverrides({});
+    setConstructionOverrides({});
     try {
       const response = await uploadGbxml(file);
       if (response && response.data) {
@@ -513,6 +650,106 @@ export default function App() {
     setEquipCalc((p) => ({ ...p, active: false }));
   };
 
+  const handleApplyRecommendation = (type) => {
+    if (type === 'window') {
+      setSurfaces((prev) =>
+        prev.map((s) => {
+          if (s.type === 'Window' || s.type === 'Skylight') {
+            return { ...s, glazingId: 42 }; // 일반 복층 유리(ID 42)로 하향
+          }
+          return s;
+        })
+      );
+    } else if (type === 'insulation') {
+      // 모든 구조체의 단열재를 일반 등급 제품(비드법 1종 1호, ID 1)으로 일괄 교체
+      const stdProduct = INSULATION_TYPES.find(p => p.tier === 'standard') || INSULATION_TYPES[0];
+      
+      const newOverrides = { ...constructionOverrides };
+      const updatedUValues = {};
+
+      let changedCount = 0;
+
+      // 1. 기존 오버라이드 중 고성능 다운그레이드
+      Object.keys(newOverrides).forEach((id) => {
+        if (newOverrides[id].tier === 'premium' || newOverrides[id].tier === 'high') {
+          changedCount++;
+          const newOverride = { insulationId: stdProduct.id, tier: 'standard', thickness: newOverrides[id].thickness || 100 };
+          
+          const s = surfaces.find(surf => surf.id === id);
+          if (s && materials?.constructions) {
+            const c_ref = s.constructionRef || s.constructionId;
+            const c = materials.constructions.find(con => con.id === c_ref);
+            if (c) {
+              const newU = calculateUpdatedUValue(c, newOverride);
+              newOverride.uValue = newU;
+              updatedUValues[id] = newU;
+            }
+          }
+          newOverrides[id] = newOverride;
+        }
+      });
+
+      // 2. 오버라이드가 없는 원본 고성능 벽체 추가
+      if (materials?.constructions) {
+        surfaces.forEach((s) => {
+          if (!newOverrides[s.id]) {
+            const c_ref = s.constructionRef || s.constructionId;
+            const c = materials.constructions.find(con => con.id === c_ref);
+            if (c) {
+              const insul = c.layers?.find(l => l.isInsulation);
+              if (insul && insul.conductivity <= 0.045) {
+                changedCount++;
+                const newOverride = { insulationId: stdProduct.id, tier: 'standard', thickness: insul.thickness || 100 };
+                const newU = calculateUpdatedUValue(c, newOverride);
+                newOverride.uValue = newU;
+                updatedUValues[s.id] = newU;
+                newOverrides[s.id] = newOverride;
+              }
+            }
+          }
+        });
+      }
+
+      setConstructionOverrides(newOverrides);
+      if (Object.keys(updatedUValues).length > 0) {
+        setSurfaces(prevSurfaces => prevSurfaces.map(s => 
+          updatedUValues[s.id] !== undefined ? { ...s, uValue: updatedUValues[s.id] } : s
+        ));
+      }
+      
+      alert(`✅ 단열재 공사비 절감 적용 완료!\n총 ${changedCount}개 외벽의 단열재가 '일반 등급(EPS/미네랄울)'으로 일괄 하향 조정되었습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
+      setStep('floorView');
+      return;
+    } else if (type === 'hvac') {
+      setProjectData((prev) => ({ ...prev, geothermalApplied: false }));
+      alert(`✅ 지열 시스템 취소 완료!\n지열 시스템 도입이 취소되었습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
+      setStep('floorView');
+      return;
+    } else if (type === 'led') {
+      let hasManualLed = false;
+      let reducedCount = 0;
+      setZones((prev) =>
+        prev.map((z) => {
+          if (z.ledFixtureCount > 0) {
+            hasManualLed = true;
+            const newCount = Math.floor(z.ledFixtureCount * 0.5);
+            reducedCount += (z.ledFixtureCount - newCount);
+            return { ...z, ledFixtureCount: newCount };
+          }
+          return z;
+        })
+      );
+      if (!hasManualLed) {
+        setProjectData((prev) => ({ ...prev, ledReductionActive: true }));
+        alert(`✅ LED 교체 수량 축소 완료!\n비필수 구역의 LED 교체를 제외하여 비용을 절감했습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
+      } else {
+        alert(`✅ LED 교체 수량 축소 완료!\n수동으로 입력하신 LED 교체 수량 중 총 ${reducedCount}개가 축소되었습니다.\n\n하단의 [시뮬레이션 가동] 버튼을 눌러 낮아진 예산을 확인해 주세요.`);
+      }
+      setStep('floorView');
+      return;
+    }
+  };
+
   const handleSimulation = async () => {
     setStep('loading');
     setLoadingMsgIdx(0);
@@ -526,7 +763,9 @@ export default function App() {
         zones: zones, 
         surfaces: surfaces,
         materials: materials,
-        insulationOverrides: insulationOverrides
+        constructionOverrides: constructionOverrides,
+        lccParameters: projectData.lccParameters,
+        hvacUpgradeActive: projectData.hvacUpgradeActive
       };
       const response = await runSimulation(payload);
 
@@ -588,9 +827,6 @@ export default function App() {
     ];
   };
 
-  const categories = ['신재생', '난방', '냉방', '급탕', '조명', '환기', '기기'];
-  const colors = ['#2DD4BF', '#F87171', '#60A5FA', '#FB923C', '#FACC15', '#4ADE80', '#A78BFA'];
-
   const theme = {
     bg: isDarkMode ? 'bg-[#0B0F19] text-slate-200' : 'bg-[#DFDCD5] text-slate-800',
     card: isDarkMode ? 'bg-[#151B2B] border-slate-800' : 'bg-[#EAE8E3] border-[#D5D2C9]',
@@ -639,25 +875,22 @@ export default function App() {
   const getCashFlowData = () => {
     if (!res || !res.financial) return [];
 
-    // 리모델링 적용 후 에너지 운영비 (1년)
-    const retrofitRunningCost = res.financial.total_energy_bill;
-    // 초기 투자 비용
-    const capitalCost = res.financial.capital_cost;
-
-    // 기준 건물(기존 노후 건물)의 에너지 운영비 추정 (약 60% 더 발생한다고 가정 - U-value 1.5, 싱글창호 기준 추산)
+    // 백엔드에서 계산된 값이 넘어오면 그것을 우선 사용
+    const f = res.financial;
+    const retrofitRunningCost = f.total_energy_bill;
+    const capitalCost = f.capital_cost;
     const baseRunningCost = retrofitRunningCost * 1.6;
-
-    // 연간 에너지 절감액
     const annualSavings = baseRunningCost - retrofitRunningCost;
+    
+    const params = f.lcc_parameters || { inflation_rate: 2, lifecycle_years: 15 };
+    const inflationRate = params.inflation_rate / 100;
+    const years = params.lifecycle_years || 20;
 
-    // 15년간의 현금흐름 추적 (인플레이션 2% 가정)
-    const inflationRate = 0.02;
     const data = [];
-
     let cumulativeBase = 0;
-    let cumulativeRetrofit = -capitalCost; // Year 0 투자
+    let cumulativeRetrofit = -capitalCost; 
 
-    for (let year = 0; year <= 15; year++) {
+    for (let year = 0; year <= years; year++) {
       if (year > 0) {
         cumulativeBase -= baseRunningCost * Math.pow(1 + inflationRate, year - 1);
         cumulativeRetrofit -= retrofitRunningCost * Math.pow(1 + inflationRate, year - 1);
@@ -665,12 +898,29 @@ export default function App() {
 
       data.push({
         year: `${year}년차`,
-        '기존 노후건물 유지': cumulativeBase,
-        '친환경 리모델링 (투자+운영)': cumulativeRetrofit,
-        '누적 순이익 (ROI)': cumulativeRetrofit - cumulativeBase, // 0을 돌파하면 손익분기점!
+        '기존 노후건물 유지': Math.round(cumulativeBase),
+        '친환경 리모델링 (투자+운영)': Math.round(cumulativeRetrofit),
+        '누적 순이익 (ROI)': Math.round(cumulativeRetrofit - cumulativeBase),
       });
     }
-    return { data, annualSavings, paybackYears: capitalCost / annualSavings };
+    
+    // TRACE 600 고급 지표
+    const npv = f.npv || 0;
+    const irr = f.irr || 0;
+    
+    // payback 추산 (수익이 0을 돌파하는 시점)
+    let paybackYears = capitalCost / annualSavings; 
+    let exactPayback = data.findIndex(d => d['누적 순이익 (ROI)'] >= 0);
+    if(exactPayback > 0) {
+        // 선형 보간으로 소수점 연도 추정
+        const prev = data[exactPayback - 1]['누적 순이익 (ROI)'];
+        const curr = data[exactPayback]['누적 순이익 (ROI)'];
+        paybackYears = (exactPayback - 1) + Math.abs(prev) / (curr - prev);
+    } else {
+        paybackYears = 0;
+    }
+
+    return { data, annualSavings, paybackYears, npv, irr, params };
   };
 
   const lccAnalysis = getCashFlowData();
@@ -868,7 +1118,7 @@ export default function App() {
                   setSurfaces([]);
                   setZones([]);
                   setMaterials(null);
-                  setInsulationOverrides({});
+                  setConstructionOverrides({});
                   setUploadedFile(null);
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
@@ -1007,7 +1257,7 @@ export default function App() {
                           setSurfaces([]);
                           setZones([]);
                           setMaterials(null);
-                          setInsulationOverrides({});
+                          setConstructionOverrides({});
                         }}
                         className={`mt-8 text-xs font-bold transition-colors underline ${isDarkMode ? 'text-slate-500 hover:text-red-400' : 'text-slate-400 hover:text-red-500'}`}
                       >
@@ -1163,7 +1413,104 @@ export default function App() {
                           <ToggleLeft size={32} className="text-slate-500" />
                         )}
                       </div>
-                    </div>
+                      
+                      <div
+                        className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.hvacUpgradeActive ? 'border-orange-500 bg-orange-500/10' : 'border-slate-500/30 bg-black/5'}`}
+                        onClick={() => setProjectData((prev) => ({ ...prev, hvacUpgradeActive: !prev.hvacUpgradeActive }))}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${projectData.hvacUpgradeActive ? 'bg-orange-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
+                            <Thermometer size={18} />
+                          </div>
+                          <div>
+                            <span className={`block font-black text-sm ${projectData.hvacUpgradeActive ? 'text-orange-500' : theme.textSub}`}>
+                              설비 시스템 전면 교체 (HVAC Upgrade)
+                            </span>
+                            <span className="text-[10px] opacity-60">기존 냉난방 설비의 노후화로 인해 기기를 완전히 교체할 경우 체크하세요. (공사비 증가)</span>
+                          </div>
+                        </div>
+                        {projectData.hvacUpgradeActive ? (
+                          <ToggleRight size={32} className="text-orange-500" />
+                        ) : (
+                          <ToggleLeft size={32} className="text-slate-500" />
+                        )}
+                      </div>
+                      <div className="mt-4 p-4 rounded-xl border-2 border-slate-500/30 bg-black/5">
+                        <label className="flex items-center justify-between mb-2">
+                          <span className={`font-black flex items-center gap-2 ${theme.textMain}`}>
+                            <PiggyBank className="text-pink-500" size={18} /> 목표 공사 예산 (단위: 만 원)
+                          </span>
+                          <span className="text-pink-500 bg-pink-500/10 px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest">
+                            {projectData.targetBudget === 0 ? '미설정 (제한없음)' : `${projectData.targetBudget.toLocaleString()} 만 원`}
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          value={projectData.targetBudget || ''}
+                          placeholder="예: 5000 (5천만 원)"
+                          onChange={(e) => setProjectData({ ...projectData, targetBudget: parseInt(e.target.value) || 0 })}
+                          className={`w-full p-3 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none transition-all font-mono font-bold ${theme.input}`}
+                        />
+                        <p className="text-[11px] opacity-60 mt-2">
+                          목표 예산을 설정하면, 시뮬레이션 결과에서 예산 초과 여부를 분석하고 비용 절감을 위한 대안(창호 등급 하향 등)을 추천해 드립니다.
+                        </p>
+                      </div>
+
+                      {/* 고급 LCC 재무 설정 아코디언 */}
+                      <details className="mt-4 p-4 rounded-xl border-2 border-indigo-500/30 bg-black/5 group">
+                        <summary className="font-black flex items-center justify-between cursor-pointer outline-none">
+                          <div className={`flex items-center gap-2 ${theme.textMain}`}>
+                            <Calculator className="text-indigo-500" size={18} /> 고급 재무 분석 설정 (TRACE 600)
+                          </div>
+                          <span className="text-indigo-500 bg-indigo-500/10 px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest group-open:hidden">
+                            기본값 사용 중
+                          </span>
+                        </summary>
+                        <div className="pt-4 mt-4 border-t border-indigo-500/20 grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>인플레이션율 (%)</label>
+                            <input
+                              type="number" step="0.1"
+                              value={projectData.lccParameters.inflationRate}
+                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, inflationRate: parseFloat(e.target.value) || 0 } })}
+                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>에너지 요금 상승률 (%)</label>
+                            <input
+                              type="number" step="0.1"
+                              value={projectData.lccParameters.utilityInflation}
+                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, utilityInflation: parseFloat(e.target.value) || 0 } })}
+                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>할인율 (기대수익률, %)</label>
+                            <input
+                              type="number" step="0.1"
+                              value={projectData.lccParameters.discountRate}
+                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, discountRate: parseFloat(e.target.value) || 0 } })}
+                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>수명주기 분석 기간 (년)</label>
+                            <input
+                              type="number" step="1" min="5" max="50"
+                              value={projectData.lccParameters.lifecycleYears}
+                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, lifecycleYears: parseInt(e.target.value) || 20 } })}
+                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
+                            />
+                          </div>
+                          <p className="col-span-1 md:col-span-2 text-[10px] opacity-60 mt-1">
+                            미국의 선진 LCC(수명주기비용) 분석 툴인 TRACE 600의 평가 모형에 따라, 각 항목별 물가상승률을 복리로 적용하여 순현재가치(NPV) 및 내부수익률(IRR)을 계산합니다.
+                          </p>
+                        </div>
+                      </details>
+                                          </div>
                   </div>
                 </div>
               </div>
@@ -1282,1313 +1629,66 @@ export default function App() {
                   />
                 </div>
 
-                {/* 우측 전체 구조체 및 단열재 리스트 */}
-                {materials && (
-                  <div className={`w-full md:w-[380px] flex-shrink-0 rounded-[1.5rem] border ${theme.card} shadow-sm overflow-hidden flex flex-col`}>
-                    <div className="p-4 border-b border-slate-700/30 flex justify-between items-center bg-black/10">
-                      <div>
-                        <h3 className="text-sm font-black flex items-center gap-2">
-                          <Layers size={16} className="text-emerald-500" /> 건물 구조체 & 단열 튜닝
-                        </h3>
-                        <p className="text-[10px] opacity-60">gbXML 구조체 리스트 및 일괄 튜닝</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-                      {materials.constructions && materials.constructions.length > 0 ? (
-                        materials.constructions.map((c) => {
-                          const originalInsul = c.layers?.find(l => l.isInsulation);
-                          const activeOverride = insulationOverrides[c.id];
-                          const activeTier = activeOverride ? activeOverride.tier : (originalInsul ? (() => {
-                            const cond = originalInsul.conductivity;
-                            if (cond <= 0.030) return 'premium';
-                            if (cond <= 0.045) return 'high';
-                            if (cond <= 0.070) return 'standard';
-                            return 'basic';
-                          })() : 'standard');
-                          const activeThickness = activeOverride ? activeOverride.thickness : (originalInsul ? originalInsul.thickness : 0);
-                          const currentU = calculateUpdatedUValue(c, activeOverride);
 
-                          return (
-                            <div key={c.id} className="p-4 rounded-xl bg-black/15 border border-slate-700/20 space-y-3">
-                              <div className="flex justify-between items-start">
-                                <div className="max-w-[70%]">
-                                  <h4 className="text-xs font-black text-blue-400 truncate">{c.name}</h4>
-                                  <span className="text-[9px] font-mono opacity-50 block">{c.id}</span>
-                                </div>
-                                <span className="text-[10px] font-bold bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full flex-shrink-0">
-                                  면적: {c.totalArea}㎡
-                                </span>
-                              </div>
-                              
-                              <div className="text-[10px] opacity-75 space-y-1">
-                                <p>열관류율 (U-value): <span className={`font-bold ${activeOverride ? 'text-emerald-400' : 'text-slate-400'}`}>{currentU} W/m²K</span> {activeOverride && <span className="line-through text-slate-500 text-[9px] ml-1">({c.uValue})</span>}</p>
-                                <p className="truncate">레이어: {c.layers?.map(l => `${l.name}(${l.thickness}mm)`).join(' → ') || '없음'}</p>
-                              </div>
-
-                              <div className="p-3 rounded-lg bg-black/20 border border-white/5 space-y-2.5">
-                                <div className="flex justify-between items-center text-[10px] font-bold">
-                                  <span className="text-orange-400 flex items-center gap-1">🛠️ 단열 성능 조정</span>
-                                  {activeOverride && (
-                                    <button 
-                                      onClick={() => handleResetInsulationOverride(c.id)}
-                                      className="text-red-400 hover:text-red-300 underline font-black text-[9px]"
-                                    >
-                                      튜닝 취소
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[8px] font-black opacity-50 block mb-0.5">단열 성능 등급</label>
-                                    <select
-                                      value={activeTier}
-                                      onChange={(e) => handleInsulationOverrideChange(c.id, e.target.value, activeThickness || 100)}
-                                      className={`w-full p-2 text-[10px] font-black rounded-lg border outline-none ${theme.input} focus:border-orange-500`}
-                                    >
-                                      <option value="premium">고성능 (λ≤0.030)</option>
-                                      <option value="high">중성능 (λ≤0.045)</option>
-                                      <option value="standard">일반 (λ≤0.070)</option>
-                                      <option value="basic">저성능 (λ>0.070)</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="text-[8px] font-black opacity-50 block mb-0.5">단열 두께 (mm)</label>
-                                    <div className="relative">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        max="500"
-                                        step="5"
-                                        value={activeThickness}
-                                        onChange={(e) => handleInsulationOverrideChange(c.id, activeTier, parseFloat(e.target.value) || 0)}
-                                        className={`w-full p-1.5 pl-2 pr-6 text-[10px] font-black rounded-lg border outline-none ${theme.input} focus:border-orange-500 text-center`}
-                                      />
-                                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] opacity-45">mm</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <p className="text-xs text-center opacity-50 py-8">분석된 구조체가 없습니다.</p>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}
 
           {/* STEP 3 & 4: Floor View + Side Editor Panel */}
           {step === 'floorView' && (
-            <div className="flex-1 flex flex-col animate-in fade-in min-h-0 w-full h-full">
-              <div className="flex-shrink-0 p-4 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-black/5 z-10 shadow-sm">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => {
-                      setStep('buildingView');
-                      handleSaveClose();
-                    }}
-                    className="p-2 rounded-full hover:bg-slate-500/10 transition-colors"
-                  >
-                    <ChevronLeft />
-                  </button>
-                  <div className="flex items-center gap-4">
-                    <h2 className="text-xl font-black flex items-center gap-2">
-                      <HardHat className="text-emerald-500" /> 층간 빠른 이동
-                    </h2>
-                    <div className={`flex p-1.5 rounded-xl border shadow-inner ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-slate-300/60 border-slate-400/30'}`}>
-                      {displayFloors.map((f) => (
-                        <button
-                          key={f}
-                          onClick={() => {
-                            setActiveFloor(f);
-                            handleSaveClose();
-                            setSelectedId(null);
-                            setHoveredId(null);
-                          }}
-                          className={`px-4 py-1.5 text-sm font-black rounded-lg transition-all flex flex-col items-center ${
-                            activeFloor === f
-                              ? isVirtualFloor(f)
-                                ? 'bg-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.5)]'
-                                : 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.5)]'
-                              : isDarkMode
-                                ? 'text-slate-400 hover:text-white hover:bg-white/10'
-                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/80'
-                          }`}
-                        >
-                          <span>{isVirtualFloor(f) ? '⚡' : ''}{f}F</span>
-                          {isVirtualFloor(f) && <span className="text-[8px] font-medium opacity-75 leading-none">특수</span>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <div className={`flex w-full md:w-auto p-1 rounded-xl border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-200 border-slate-300'}`}>
-                  <button
-                    onClick={() => handleModeSwitch('zone')}
-                    className={`flex-1 md:flex-none px-4 md:px-6 py-2 rounded-lg font-black text-xs md:text-sm flex items-center justify-center gap-2 transition-all ${
-                      editMode === 'zone' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    <BoxIcon size={16} /> 구역(Zone)
-                  </button>
-                  <button
-                    onClick={() => handleModeSwitch('surface')}
-                    className={`flex-1 md:flex-none px-4 md:px-6 py-2 rounded-lg font-black text-xs md:text-sm flex items-center justify-center gap-2 transition-all ${
-                      editMode === 'surface' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    <Layers size={16} /> 외피(Surface)
-                  </button>
-                </div>
-                <button
-                  onClick={handleSimulation}
-                  className="w-full md:w-auto px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-black shadow-xl shadow-emerald-500/30 flex justify-center items-center gap-2 transition-transform hover:scale-105"
-                >
-                  <Settings2 size={20} /> 시뮬레이션 가동
-                </button>
-              </div>
-
-              <div className="flex-1 relative flex flex-col-reverse md:flex-row overflow-hidden w-full h-full">
-                <div
-                  className={`w-full md:w-[320px] flex-shrink-0 h-1/2 md:h-full overflow-y-auto border-t md:border-t-0 md:border-r z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] md:shadow-[10px_0_30px_rgba(0,0,0,0.05)] flex flex-col ${
-                    isDarkMode ? 'bg-[#0F172A]/95 border-slate-700' : 'bg-[#F8FAFC]/95 border-slate-300'
-                  }`}
-                >
-                  <div
-                    className={`p-6 border-b sticky top-0 backdrop-blur-xl z-10 flex justify-between items-center ${
-                      isDarkMode ? 'border-slate-700 bg-[#0F172A]/90' : 'border-slate-300 bg-[#F8FAFC]/90'
-                    }`}
-                  >
-                    <div>
-                      <h2 className="text-xl font-black flex items-center gap-2">
-                        {editMode === 'zone' ? (
-                          <>
-                            <Users size={22} className="text-emerald-500" /> 공간 용도 현황
-                          </>
-                        ) : (
-                          <>
-                            <List size={22} className="text-blue-500" /> 외피 단열 현황
-                          </>
-                        )}
-                      </h2>
-                      <p
-                        className={`text-[10px] opacity-60 mt-1 uppercase tracking-widest ${
-                          editMode === 'zone' ? 'text-emerald-500' : 'text-blue-500'
-                        }`}
-                      >
-                        {editMode === 'zone' ? 'Thermal Zone Inventory' : 'Surface Inventory'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="p-4 pb-32 custom-scrollbar">
-                    {editMode === 'zone' &&
-                      Object.entries(
-                        groupBy(
-                          zones.filter((z) => (z.floor || 1) === parseInt(activeFloor)),
-                          getZoneGroupName
-                        )
-                      ).map(([groupName, groupZones]) => (
-                        <div key={groupName} className="mb-6">
-                          <h3 className="text-[11px] font-black text-emerald-500 uppercase tracking-widest mb-3 flex items-center gap-2 border-b border-emerald-500/20 pb-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                            {groupName} <span className="opacity-50 text-slate-400">({groupZones.length})</span>
-                          </h3>
-                          <div className="space-y-3">
-                            {groupZones.map((zone) => (
-                              <div
-                                key={zone.id}
-                                onMouseEnter={() => setHoveredId(zone.id)}
-                                onMouseLeave={() => setHoveredId(null)}
-                                onClick={() => handleZoneClick(zone.id)}
-                                className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 group ${
-                                  selectedId === zone.id
-                                    ? 'border-emerald-500 bg-emerald-500/10 scale-[1.02] shadow-md'
-                                    : hoveredId === zone.id
-                                    ? 'border-emerald-500/50 bg-slate-500/10'
-                                    : `border-current/10 bg-black/5 hover:bg-black/10`
-                                }`}
-                              >
-                                <div className="flex justify-between items-center">
-                                  <span className="font-bold font-mono text-sm">{zone.id}</span>
-                                  <span
-                                    className={`text-[10px] font-black px-2 py-1 rounded uppercase ${
-                                      zone.isConditioned
-                                        ? 'bg-emerald-500/20 text-emerald-400'
-                                        : 'bg-slate-500/20 text-slate-400'
-                                    }`}
-                                  >
-                                    {zone.isConditioned ? '공조' : '비공조'}
-                                  </span>
-                                </div>
-                                <div className="text-xs font-bold opacity-80 mt-1 flex justify-between items-end">
-                                  <span className="truncate pr-2">
-                                    {ACTIVITIES.find((a) => a.id === zone.activityId)?.name || '알 수 없음'}
-                                  </span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleZoneClick(zone.id);
-                                    }}
-                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-transform shadow-lg group-hover:scale-105 shrink-0"
-                                  >
-                                    설정
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-
-                    {editMode === 'surface' &&
-                      Object.entries(
-                        groupBy(
-                          surfaces.filter((s) => (s.floor || 1) === parseInt(activeFloor)),
-                          (s) => getSurfaceGroupName(s.type)
-                        )
-                      ).map(([groupName, groupSurfs]) => (
-                        <div key={groupName} className="mb-6">
-                          <h3 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-3 flex items-center gap-2 border-b border-blue-500/20 pb-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                            {groupName} <span className="opacity-50 text-slate-400">({groupSurfs.length})</span>
-                          </h3>
-                          <div className="space-y-3">
-                            {groupSurfs.map((surf) => (
-                              <div
-                                key={surf.id}
-                                onMouseEnter={() => setHoveredId(surf.id)}
-                                onMouseLeave={() => setHoveredId(null)}
-                                onClick={() => handleSurfaceClick(surf)}
-                                className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-3 group ${
-                                  selectedId === surf.id
-                                    ? 'border-blue-500 bg-blue-500/10 scale-[1.02] shadow-md'
-                                    : hoveredId === surf.id
-                                    ? 'border-blue-500/50 bg-slate-500/10'
-                                    : `border-current/10 bg-black/5 hover:bg-black/10`
-                                }`}
-                              >
-                                <div className="flex justify-between items-center">
-                                  <span className="font-bold font-mono text-sm">{surf.id}</span>
-                                </div>
-                                <div className="flex justify-between items-end">
-                                  <span className="text-xs opacity-70 font-medium">
-                                    {DIR_MAP[surf.direction] || surf.direction || surf.zone}
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <div className="text-right">
-                                      <span className="text-[10px] opacity-50 uppercase mb-0.5 block">U-Value</span>
-                                      <span
-                                        className={`text-sm font-black ${
-                                          (surf.uValue || 0) > 0.6 ? 'text-orange-500' : 'text-blue-500'
-                                        }`}
-                                      >
-                                        {(surf.uValue || 0).toFixed(2)}
-                                      </span>
-                                    </div>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleSurfaceClick(surf);
-                                      }}
-                                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-transform shadow-lg group-hover:scale-105"
-                                    >
-                                      수정
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                <div className="flex-1 relative transition-all duration-300 w-full h-full flex flex-col bg-black/5 p-4">
-                  <div className="flex-1 relative min-h-[300px] md:min-h-[400px]">
-                    <BuildingViewer
-                      surfaces={surfaces}
-                      zones={zones}
-                      activeFloor={activeFloor}
-                      editMode={editMode}
-                      onSurfaceClick={handleSurfaceClick}
-                      onZoneClick={handleZoneClick}
-                      selectedId={selectedId}
-                      hoveredId={hoveredId}
-                      draftState={editState}
-                      isDarkMode={isDarkMode}
-                      viewMode={viewMode}
-                      setViewMode={setViewMode}
-                      sunMonth={sunMonth}
-                      setSunMonth={setSunMonth}
-                      sunHour={sunHour}
-                      setSunHour={setSunHour}
-                      res={res}
-                      latitude={latitude}
-                      locationName={selectedRegion.name}
-                    />
-                  </div>
-                  <div className="absolute bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full bg-black/80 backdrop-blur-md text-white text-xs font-bold pointer-events-none shadow-lg z-20">
-                    💡{' '}
-                    {editMode === 'zone'
-                      ? '공간 덩어리(Zone)를 클릭하여 용도와 공조(HVAC)를 세팅하세요.'
-                      : '외피(Surface)를 클릭하여 단열과 창호 속성을 수정하세요.'}
-                  </div>
-                </div>
-
-                {/* --- 우측 패널: 에디터 --- */}
-                {selectedId && (
-                  <div
-                    className={`absolute right-0 top-0 w-[480px] h-full shadow-[-30px_0_60px_rgba(0,0,0,0.4)] z-50 overflow-y-auto flex flex-col animate-in slide-in-from-right-8 duration-300 custom-scrollbar ${
-                      isDarkMode ? 'bg-[#0F172A] border-l border-slate-700' : 'bg-[#F8FAFC] border-l border-slate-300'
-                    }`}
-                  >
-                    <div
-                      className={`p-6 border-b sticky top-0 backdrop-blur-xl z-10 flex justify-between items-center ${
-                        isDarkMode ? 'border-slate-700 bg-[#0F172A]/90' : 'border-slate-300 bg-[#F8FAFC]/90'
-                      }`}
-                    >
-                      <div>
-                        <h2 className="text-xl font-black flex items-center gap-2">
-                          {editMode === 'zone' ? (
-                            <Info className="text-emerald-500" size={24} />
-                          ) : (
-                            <Info className="text-blue-500" size={24} />
-                          )}{' '}
-                          {editMode === 'zone' ? '구역 용도/공조 설정' : '외피 속성 상세 수정'}
-                        </h2>
-                      </div>
-                      <button
-                        onClick={() => setSelectedId(null)}
-                        className="p-2 rounded-xl hover:bg-red-500/10 text-red-500 transition-colors"
-                      >
-                        <X size={20} />
-                      </button>
-                    </div>
-
-                    <div className="p-6 space-y-6 pb-32">
-                      <div className={`p-4 rounded-2xl border ${theme.card} shadow-sm text-center`}>
-                        <p className="text-[10px] font-black uppercase tracking-widest opacity-50 mb-1">
-                          {editMode === 'zone' ? 'Target Zone ID' : 'Target Element ID'}
-                        </p>
-                        <p
-                          className={`text-2xl font-black font-mono ${
-                            editMode === 'zone' ? 'text-emerald-400' : 'text-blue-400'
-                          }`}
-                        >
-                          {selectedId}
-                        </p>
-                        {editMode === 'surface' &&
-                          (selectedSurfaceData?.type === 'InternalWall' ||
-                            selectedSurfaceData?.type === 'InteriorWall') &&
-                          selectedSurfaceData.adjacentZone && (
-                            <p className="text-xs font-bold text-orange-500 mt-2 bg-orange-500/10 py-1.5 rounded-lg inline-block px-3 border border-orange-500/20">
-                              연결된 구역: {selectedSurfaceData.zone} ↔ {selectedSurfaceData.adjacentZone}
-                            </p>
-                          )}
-                      </div>
-
-                      {/* ZONE EDITOR */}
-                      {editMode === 'zone' && (
-                        <div className="space-y-6 animate-in fade-in zoom-in-95">
-                          <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm`}>
-                            <label className="text-sm font-black block mb-4 flex items-center gap-2">
-                              <Users size={18} className="text-emerald-500" /> 공간 용도 할당 (Activity)
-                            </label>
-                            <select
-                              value={editState.activityId}
-                              onChange={(e) =>
-                                setEditState((prev) => ({ ...prev, activityId: parseInt(e.target.value) }))
-                              }
-                              className={`w-full p-4 text-[12px] font-bold rounded-xl border outline-none ${theme.input} focus:border-emerald-500`}
-                            >
-                              {ACTIVITIES.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div
-                            className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm space-y-6 border-emerald-500/10 bg-emerald-500/5`}
-                          >
-                            <h3 className="text-sm font-black flex items-center gap-2 text-emerald-500 border-b border-emerald-500/20 pb-3 mb-2">
-                              <Activity size={16} /> 내부 발열 부하 (Internal Loads)
-                            </h3>
-                            <div className="flex items-center justify-between gap-4">
-                              <label className={`text-xs font-bold flex items-center gap-2 w-1/3 ${theme.textMain}`}>
-                                <Users size={14} className="text-emerald-400" /> 재실 밀도
-                              </label>
-                              <div className="flex-1 flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={editState.peopleDensity || 0}
-                                  onChange={(e) =>
-                                    setEditState((prev) => ({ ...prev, peopleDensity: parseFloat(e.target.value) }))
-                                  }
-                                  className={`w-full p-2 rounded-lg font-black text-right outline-none border ${theme.input} focus:border-emerald-500`}
-                                />
-                                <span className={`text-[10px] font-bold w-12 ${theme.textSub}`}>명/m²</span>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-col gap-2 border-t border-emerald-500/10 pt-4">
-                              <div className="flex items-center justify-between gap-4">
-                                <label className={`text-xs font-bold flex items-center gap-2 w-1/3 ${theme.textMain}`}>
-                                  <Lightbulb size={14} className="text-yellow-400" /> 조명 부하
-                                </label>
-                                <div className="flex-1 flex flex-col items-end gap-1">
-                                  <div className="flex items-center gap-2 w-full">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.5"
-                                      value={editState.lightingPower || 0}
-                                      onChange={(e) =>
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          lightingPower: parseFloat(e.target.value),
-                                        }))
-                                      }
-                                      className={`w-full p-2 rounded-lg font-black text-right outline-none border ${theme.input} focus:border-emerald-500`}
-                                    />
-                                    <span className={`text-[10px] font-bold w-12 ${theme.textSub}`}>W/m²</span>
-                                  </div>
-                                  <button
-                                    onClick={() => setLightCalc((p) => ({ ...p, active: !p.active }))}
-                                    className="text-[10px] text-emerald-500 hover:text-emerald-400 font-bold flex items-center gap-1 mt-1 transition-colors"
-                                  >
-                                    <Calculator size={12} /> {lightCalc.active ? '계산기 닫기' : '🧮 개수로 계산하기'}
-                                  </button>
-                                </div>
-                              </div>
-                              {lightCalc.active && (
-                                <div className="p-3 rounded-xl bg-black/20 border border-emerald-500/20 flex flex-col gap-3 animate-in fade-in zoom-in-95">
-                                  <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-slate-400">
-                                    <div className="flex flex-col gap-1 items-center">
-                                      <span className="opacity-70">1대 전력</span>
-                                      <div className="flex items-center gap-1">
-                                        <input
-                                          type="number"
-                                          value={lightCalc.w}
-                                          onChange={(e) => setLightCalc((p) => ({ ...p, w: Number(e.target.value) }))}
-                                          className={`w-14 p-1.5 rounded-lg font-bold text-center outline-none border ${theme.input} focus:border-emerald-500`}
-                                        />{' '}
-                                        W
-                                      </div>
-                                    </div>
-                                    <span className="mt-4">×</span>
-                                    <div className="flex flex-col gap-1 items-center">
-                                      <span className="opacity-70">설치 개수</span>
-                                      <div className="flex items-center gap-1">
-                                        <input
-                                          type="number"
-                                          value={lightCalc.qty}
-                                          onChange={(e) => setLightCalc((p) => ({ ...p, qty: Number(e.target.value) }))}
-                                          className={`w-12 p-1.5 rounded-lg font-bold text-center outline-none border ${theme.input} focus:border-emerald-500`}
-                                        />{' '}
-                                        개
-                                      </div>
-                                    </div>
-                                    <span className="mt-4">÷</span>
-                                    <div className="flex flex-col gap-1 items-center">
-                                      <span className="opacity-70">구역 면적</span>
-                                      <div className="flex items-center gap-1">
-                                        <input
-                                          type="number"
-                                          value={lightCalc.area}
-                                          onChange={(e) =>
-                                            setLightCalc((p) => ({ ...p, area: Number(e.target.value) }))
-                                          }
-                                          className={`w-14 p-1.5 rounded-lg font-bold text-center outline-none border ${theme.input} focus:border-emerald-500`}
-                                        />{' '}
-                                        m²
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-between items-center border-t border-white/5 pt-2 mt-1">
-                                    <span className="text-[11px] text-emerald-400 font-black">
-                                      결과: {((lightCalc.w * lightCalc.qty) / (lightCalc.area || 1)).toFixed(1)} W/m²
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          lightingPower: parseFloat(
-                                            ((lightCalc.w * lightCalc.qty) / (lightCalc.area || 1)).toFixed(1)
-                                          ),
-                                        }));
-                                        setLightCalc((p) => ({ ...p, active: false }));
-                                      }}
-                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] rounded-lg font-black shadow-lg"
-                                    >
-                                      적용하기
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex flex-col gap-2 border-t border-emerald-500/10 pt-4">
-                              <div className="flex items-center justify-between gap-4">
-                                <label className={`text-xs font-bold flex items-center gap-2 w-1/3 ${theme.textMain}`}>
-                                  <Monitor size={14} className="text-blue-400" /> 기기 부하
-                                </label>
-                                <div className="flex-1 flex flex-col items-end gap-1">
-                                  <div className="flex items-center gap-2 w-full">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.5"
-                                      value={editState.equipmentPower || 0}
-                                      onChange={(e) =>
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          equipmentPower: parseFloat(e.target.value),
-                                        }))
-                                      }
-                                      className={`w-full p-2 rounded-lg font-black text-right outline-none border ${theme.input} focus:border-emerald-500`}
-                                    />
-                                    <span className={`text-[10px] font-bold w-12 ${theme.textSub}`}>W/m²</span>
-                                  </div>
-                                  <button
-                                    onClick={() => setEquipCalc((p) => ({ ...p, active: !p.active }))}
-                                    className="text-[10px] text-emerald-500 hover:text-emerald-400 font-bold flex items-center gap-1 mt-1 transition-colors"
-                                  >
-                                    <Calculator size={12} /> {equipCalc.active ? '계산기 닫기' : '🧮 개수로 계산하기'}
-                                  </button>
-                                </div>
-                              </div>
-                              {equipCalc.active && (
-                                <div className="p-3 rounded-xl bg-black/20 border border-emerald-500/20 flex flex-col gap-3 animate-in fade-in zoom-in-95">
-                                  <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-slate-400">
-                                    <div className="flex flex-col gap-1 items-center">
-                                      <span className="opacity-70">1대 전력</span>
-                                      <div className="flex items-center gap-1">
-                                        <input
-                                          type="number"
-                                          value={equipCalc.w}
-                                          onChange={(e) => setEquipCalc((p) => ({ ...p, w: Number(e.target.value) }))}
-                                          className={`w-14 p-1.5 rounded-lg font-bold text-center outline-none border ${theme.input} focus:border-emerald-500`}
-                                        />{' '}
-                                        W
-                                      </div>
-                                    </div>
-                                    <span className="mt-4">×</span>
-                                    <div className="flex flex-col gap-1 items-center">
-                                      <span className="opacity-70">설치 개수</span>
-                                      <div className="flex items-center gap-1">
-                                        <input
-                                          type="number"
-                                          value={equipCalc.qty}
-                                          onChange={(e) =>
-                                            setEquipCalc((p) => ({ ...p, qty: Number(e.target.value) }))
-                                          }
-                                          className={`w-12 p-1.5 rounded-lg font-bold text-center outline-none border ${theme.input} focus:border-emerald-500`}
-                                        />{' '}
-                                        개
-                                      </div>
-                                    </div>
-                                    <span className="mt-4">÷</span>
-                                    <div className="flex flex-col gap-1 items-center">
-                                      <span className="opacity-70">구역 면적</span>
-                                      <div className="flex items-center gap-1">
-                                        <input
-                                          type="number"
-                                          value={equipCalc.area}
-                                          onChange={(e) =>
-                                            setEquipCalc((p) => ({ ...p, area: Number(e.target.value) }))
-                                          }
-                                          className={`w-14 p-1.5 rounded-lg font-bold text-center outline-none border ${theme.input} focus:border-emerald-500`}
-                                        />{' '}
-                                        m²
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex justify-between items-center border-t border-white/5 pt-2 mt-1">
-                                    <span className="text-[11px] text-emerald-400 font-black">
-                                      결과: {((equipCalc.w * equipCalc.qty) / (equipCalc.area || 1)).toFixed(1)} W/m²
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          equipmentPower: parseFloat(
-                                            ((equipCalc.w * equipCalc.qty) / (equipCalc.area || 1)).toFixed(1)
-                                          ),
-                                        }));
-                                        setEquipCalc((p) => ({ ...p, active: false }));
-                                      }}
-                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] rounded-lg font-black shadow-lg"
-                                    >
-                                      적용하기
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className={`border-t ${isDarkMode ? 'border-white/5' : 'border-slate-300/60'} pt-4 mt-4 space-y-4 text-left`}>
-                                <div className="flex items-center justify-between">
-                                  <label className={`text-xs font-black flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                                    🔌 콘센트 (소켓) 수
-                                  </label>
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      value={editState.outletCount || 0}
-                                      onChange={(e) =>
-                                        setEditState((prev) => ({
-                                          ...prev,
-                                          outletCount: parseInt(e.target.value) || 0,
-                                        }))
-                                      }
-                                      className={`w-24 p-2 rounded-lg font-black text-right outline-none border ${theme.input} focus:border-emerald-500`}
-                                      placeholder="개수 입력"
-                                    />
-                                    <span className={`text-[10px] font-bold w-12 ${theme.textSub}`}>개</span>
-                                  </div>
-                                </div>
-
-                                {(editState.outletCount || 0) > 0 && (
-                                  <div className={`space-y-3 p-3 rounded-xl border ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-slate-300/40 border-slate-300/80'} animate-in fade-in duration-200`}>
-                                    <div className="flex items-center justify-between text-[11px] font-bold">
-                                      <span className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>구역 면적:</span>
-                                      <span className={isDarkMode ? 'text-slate-200' : 'text-slate-800'}>{getZoneFloorArea(editState.id).toFixed(1)} m²</span>
-                                    </div>
-                                    <div className="flex items-center justify-between text-[11px] font-bold">
-                                      <span className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>용도별 콘센트당 정격:</span>
-                                      <span className={isDarkMode ? 'text-slate-200' : 'text-slate-800'}>
-                                        {OUTLET_W_PER_ACTIVITY[getActivityCategory(editState.activityId)] || OUTLET_W_PER_ACTIVITY.default} W
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center justify-between text-[11px] font-bold">
-                                      <span className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>산정 방식 (NREL 2012 / IEC):</span>
-                                      <span className={`text-right ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                                        개수({editState.outletCount}) × 정격 × 0.5(다양성) × 0.7(사용률)
-                                      </span>
-                                    </div>
-                                    <div className={`flex items-center justify-between text-[11px] font-black border-t pt-2 ${isDarkMode ? 'text-emerald-400 border-white/5' : 'text-emerald-700 border-slate-300/60'}`}>
-                                      <span>🔌 예상 콘센트 부하:</span>
-                                      <span className={isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}>
-                                        {calcOutletPower(editState, getZoneFloorArea(editState.id)).toFixed(2)} W/m²
-                                      </span>
-                                    </div>
-
-                                    <div className="flex items-center justify-between pt-1">
-                                      <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>부하 합산 방식:</span>
-                                      <div className={`flex ${isDarkMode ? 'bg-black/30 border-white/5' : 'bg-slate-300/60 border-slate-300/80'} p-0.5 rounded-lg border`}>
-                                        <button
-                                          onClick={() =>
-                                            setEditState((prev) => ({
-                                              ...prev,
-                                              outletLoadType: 'sum',
-                                            }))
-                                          }
-                                          className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
-                                            (editState.outletLoadType || 'sum') === 'sum'
-                                              ? 'bg-emerald-600 text-white shadow-sm'
-                                              : `${isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-800'}`
-                                          }`}
-                                        >
-                                          합산 (Sum)
-                                        </button>
-                                        <button
-                                          onClick={() =>
-                                            setEditState((prev) => ({
-                                              ...prev,
-                                              outletLoadType: 'max',
-                                            }))
-                                          }
-                                          className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
-                                            (editState.outletLoadType || 'sum') === 'max'
-                                              ? 'bg-emerald-600 text-white shadow-sm'
-                                              : `${isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-800'}`
-                                          }`}
-                                        >
-                                          최댓값 (Max)
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    <div className={`text-[11px] font-bold flex justify-between items-center bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 mt-1 ${isDarkMode ? 'text-slate-300' : 'text-emerald-950'}`}>
-                                      <span>⚡ 시뮬레이션 반영 기기 부하:</span>
-                                      <span className={`font-black ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                                        {((editState.outletLoadType || 'sum') === 'sum'
-                                          ? (editState.equipmentPower || 0) + calcOutletPower(editState, getZoneFloorArea(editState.id))
-                                          : Math.max(editState.equipmentPower || 0, calcOutletPower(editState, getZoneFloorArea(editState.id)))
-                                        ).toFixed(2)}{' '}
-                                        W/m²
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-
-                            </div>
-                          </div>
-
-                          <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm`}>
-                            <label className="text-sm font-black flex items-center justify-between mb-4">
-                              <div className="flex items-center gap-2">
-                                <Wind size={18} className="text-blue-500" /> 냉난방 공조(HVAC) 가동 여부
-                              </div>
-                            </label>
-                            <div
-                              className={`p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${
-                                editState.isConditioned ? 'border-blue-500 bg-blue-500/10' : 'border-slate-500 bg-slate-500/10'
-                              }`}
-                              onClick={() => setEditState((prev) => ({ ...prev, isConditioned: !prev.isConditioned }))}
-                            >
-                              <span className={`font-black ${editState.isConditioned ? 'text-blue-400' : 'text-slate-400'}`}>
-                                {editState.isConditioned ? '냉난방기 가동 (Conditioned)' : '비공조 구역 (Unconditioned)'}
-                              </span>
-                              {editState.isConditioned ? (
-                                <ToggleRight size={32} className="text-blue-500" />
-                              ) : (
-                                <ToggleLeft size={32} className="text-slate-500" />
-                              )}
-                            </div>
-                          </div>
-
-                          {editState.isConditioned && (
-                            <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm animate-in slide-in-from-top-4 space-y-6 border-blue-500/30 bg-blue-500/5`}>
-                              <h3 className="text-sm font-black flex items-center gap-2 text-blue-500 border-b border-blue-500/20 pb-3 mb-4">
-                                <Settings2 size={16} /> 상세 공조 세팅 (HVAC Setup)
-                              </h3>
-                              <div>
-                                <label className="text-xs font-black block mb-2 opacity-70">
-                                  공조 시스템 종류 (System Type)
-                                </label>
-                                <select
-                                  value={editState.hvacSystemId}
-                                  onChange={(e) =>
-                                    setEditState((prev) => ({ ...prev, hvacSystemId: parseInt(e.target.value) }))
-                                  }
-                                  className={`w-full p-3 text-xs font-bold rounded-lg border outline-none ${theme.input} focus:border-blue-500`}
-                                >
-                                  {HVAC_SYSTEMS.map((sys) => (
-                                    <option key={sys.id} value={sys.id}>
-                                      {sys.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="text-xs font-black block mb-2 opacity-70">
-                                  난방 열원 (Heating Fuel)
-                                </label>
-                                <select
-                                  value={editState.heatingFuelId}
-                                  onChange={(e) =>
-                                    setEditState((prev) => ({ ...prev, heatingFuelId: parseInt(e.target.value) }))
-                                  }
-                                  className={`w-full p-3 text-xs font-bold rounded-lg border outline-none ${theme.input} focus:border-blue-500`}
-                                >
-                                  {FUEL_TYPES.map((fuel) => (
-                                    <option key={fuel.id} value={fuel.id}>
-                                      {fuel.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="text-xs font-black block mb-2 opacity-70">
-                                  환기/급배기 방식 (Ventilation)
-                                </label>
-                                <select
-                                  value={editState.ventilationId}
-                                  onChange={(e) =>
-                                    setEditState((prev) => ({ ...prev, ventilationId: parseInt(e.target.value) }))
-                                  }
-                                  className={`w-full p-3 text-xs font-bold rounded-lg border outline-none ${theme.input} focus:border-blue-500`}
-                                >
-                                  {VENT_TYPES.map((vt) => (
-                                    <option key={vt.id} value={vt.id}>
-                                      {vt.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div className="grid grid-cols-2 gap-4 pt-2">
-                                {projectData.customSchedule.useCustom ? (
-                                  <div className="col-span-2 p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 flex items-center gap-3">
-                                    <Clock size={20} className="text-indigo-500 shrink-0" />
-                                    <div>
-                                      <p className="text-sm font-bold text-indigo-500">24시간 스케줄 온도 제어 중</p>
-                                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">이전 단계의 스케줄 에디터에서 설정한 상세 온도 곡선이 최우선으로 적용됩니다.</p>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <div
-                                      className={`p-3 rounded-xl border ${
-                                        isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-                                      }`}
-                                    >
-                                      <label className="text-[10px] font-black uppercase text-red-500 flex items-center gap-1 mb-2">
-                                        <Flame size={12} /> 난방 설정온도
-                                      </label>
-                                      <div className="flex items-center gap-1 text-red-500">
-                                        <input
-                                          type="number"
-                                          min="16"
-                                          max="30"
-                                          value={editState.heatingSetpoint}
-                                          onChange={(e) =>
-                                            setEditState((prev) => ({
-                                              ...prev,
-                                              heatingSetpoint: parseFloat(e.target.value),
-                                            }))
-                                          }
-                                          className="w-12 bg-transparent font-black text-xl outline-none"
-                                        />
-                                        <span className="font-bold text-xs opacity-50">°C</span>
-                                      </div>
-                                    </div>
-                                    <div
-                                      className={`p-3 rounded-xl border ${
-                                        isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-                                      }`}
-                                    >
-                                      <label className="text-[10px] font-black uppercase text-cyan-500 flex items-center gap-1 mb-2">
-                                        <Thermometer size={12} /> 냉방 설정온도
-                                      </label>
-                                      <div className="flex items-center gap-1 text-cyan-500">
-                                        <input
-                                          type="number"
-                                          min="18"
-                                          max="32"
-                                          value={editState.coolingSetpoint}
-                                          onChange={(e) =>
-                                            setEditState((prev) => ({
-                                              ...prev,
-                                              coolingSetpoint: parseFloat(e.target.value),
-                                            }))
-                                          }
-                                          className="w-12 bg-transparent font-black text-xl outline-none"
-                                        />
-                                        <span className="font-bold text-xs opacity-50">°C</span>
-                                      </div>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* SURFACE EDITOR */}
-                      {editMode === 'surface' && selectedSurfaceData && (
-                        <div className="space-y-8 animate-in fade-in zoom-in-95">
-                          <div className={`p-4 rounded-2xl border ${theme.card} shadow-sm text-center mb-6`}>
-                            <p className="text-[10px] font-black uppercase tracking-widest opacity-50 mb-1">
-                              Surface Type
-                            </p>
-                            <p className="text-lg font-bold text-blue-500 uppercase">
-                              {selectedSurfaceData.type === 'InternalWall' ||
-                              selectedSurfaceData.type === 'InteriorWall'
-                                ? '내벽 (Internal Wall)'
-                                : selectedSurfaceData.type}{' '}
-                              {selectedSurfaceData.direction
-                                ? ` (${DIR_MAP[selectedSurfaceData.direction] || selectedSurfaceData.direction})`
-                                : ''}
-                            </p>
-                          </div>
-
-                          {/* 시뮬레이션 표면 열해석 결과 오버레이 */}
-                          {res && (res.surfaceThermal || res.result?.surfaceThermal) && (
-                            <div className="p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 shadow-sm space-y-2">
-                              <h4 className="text-xs font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1.5 justify-center">
-                                🌡️ EnergyPlus 표면 열해석 ({sunMonth}월)
-                              </h4>
-                              <div className="grid grid-cols-2 gap-3 text-left">
-                                <div className="text-center">
-                                  <span className="text-[10px] text-slate-500 font-bold block">외피 표면 온도</span>
-                                  <span className="text-sm font-black text-emerald-400">
-                                    {(res.surfaceThermal?.[selectedSurfaceData.id]?.temperature?.[sunMonth - 1] ?? 
-                                      res.result?.surfaceThermal?.[selectedSurfaceData.id]?.temperature?.[sunMonth - 1] ?? 20.0).toFixed(1)} °C
-                                  </span>
-                                </div>
-                                <div className="text-center">
-                                  <span className="text-[10px] text-slate-500 font-bold block">일사 도달량</span>
-                                  <span className="text-sm font-black text-emerald-400">
-                                    {(res.surfaceThermal?.[selectedSurfaceData.id]?.radiation?.[sunMonth - 1] ?? 
-                                      res.result?.surfaceThermal?.[selectedSurfaceData.id]?.radiation?.[sunMonth - 1] ?? 0.0).toFixed(1)} W/㎡
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 시뮬레이션 표면 환기량 결과 오버레이 */}
-                          {res && (res.surfaceAirflow || res.result?.surfaceAirflow) && (
-                            <div className="p-4 rounded-2xl border border-sky-500/30 bg-sky-500/5 shadow-sm space-y-2">
-                              <h4 className="text-xs font-black uppercase text-sky-500 tracking-wider flex items-center gap-1.5 justify-center">
-                                💨 EnergyPlus 개구부 환기/풍량 ({sunMonth}월)
-                              </h4>
-                              {(() => {
-                                const afData = res.surfaceAirflow?.[selectedSurfaceData.id] || res.result?.surfaceAirflow?.[selectedSurfaceData.id];
-                                if (afData && (afData.inflow || afData.outflow)) {
-                                  const inf = afData.inflow?.[sunMonth - 1] ?? 0.0;
-                                  const outf = afData.outflow?.[sunMonth - 1] ?? 0.0;
-                                  const chartData = Array.from({ length: 12 }, (_, i) => ({
-                                    name: `${i + 1}월`,
-                                    inflow: afData.inflow?.[i] ?? 0,
-                                    outflow: afData.outflow?.[i] ?? 0,
-                                  }));
-
-                                  return (
-                                    <div className="space-y-3">
-                                      <div className="grid grid-cols-2 gap-3 text-left">
-                                        <div className="text-center">
-                                          <span className="text-[10px] text-slate-500 font-bold block">유입량 (Inflow)</span>
-                                          <span className="text-sm font-black text-sky-400">
-                                            {inf.toFixed(2)} L/s
-                                          </span>
-                                        </div>
-                                        <div className="text-center">
-                                          <span className="text-[10px] text-slate-500 font-bold block">유출량 (Outflow)</span>
-                                          <span className="text-sm font-black text-orange-400">
-                                            {outf.toFixed(2)} L/s
-                                          </span>
-                                        </div>
-                                      </div>
-                                      <div className="h-24 w-full mt-2">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                          <BarChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
-                                            <XAxis dataKey="name" stroke="#64748b" fontSize={9} tickLine={false} />
-                                            <YAxis stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} unit="L" />
-                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', fontSize: 10 }} />
-                                            <Bar dataKey="inflow" fill="#0ea5e9" radius={[2, 2, 0, 0]} name="유입" />
-                                            <Bar dataKey="outflow" fill="#f97316" radius={[2, 2, 0, 0]} name="유출" />
-                                          </BarChart>
-                                        </ResponsiveContainer>
-                                      </div>
-                                    </div>
-                                  );
-                                } else {
-                                  return (
-                                    <p className="text-[10px] text-center text-slate-500 font-bold py-2">
-                                      이 벽면에는 개구부가 없거나 환기량이 발생하지 않았습니다.
-                                    </p>
-                                  );
-                                }
-                              })()}
-                            </div>
-                          )}
-
-                          {(selectedSurfaceData.type === 'InternalWall' ||
-                            selectedSurfaceData.type === 'InteriorWall') && (
-                            <div className={`p-6 rounded-[1.5rem] border border-orange-500/30 bg-orange-500/5 shadow-sm`}>
-                              <h3 className="text-sm font-black flex items-center gap-2 text-orange-500 mb-2">
-                                <Info size={16} /> 내벽 안내
-                              </h3>
-                              <p className="text-xs font-medium opacity-80 leading-relaxed text-orange-400/80">
-                                이 내벽은 양쪽 공간과 열을 교환하며, <b>창문(WWR)을 설치할 수 없습니다.</b>
-                              </p>
-                            </div>
-                          )}
-
-                          {(selectedSurfaceData.type === 'Wall' || selectedSurfaceData.type === 'ExteriorWall') && (
-                            <>
-                              <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm`}>
-                                <div className="flex justify-between items-end mb-4">
-                                  <label className="text-sm font-black flex items-center gap-2">
-                                    <Layers size={16} className="text-blue-500" /> 창면적비 (WWR)
-                                  </label>
-                                </div>
-                                <div className="flex items-center gap-4 mb-3">
-                                  <input
-                                    type="range"
-                                    min="0"
-                                    max="90"
-                                    step="1"
-                                    value={editState.wwr || 0}
-                                    onChange={(e) =>
-                                      setEditState((prev) => ({ ...prev, wwr: parseInt(e.target.value) || 0 }))
-                                    }
-                                    className="flex-1 h-3 rounded-full appearance-none accent-blue-500 bg-slate-700 cursor-pointer"
-                                  />
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max="90"
-                                    step="1"
-                                    value={editState.wwr || 0}
-                                    onChange={(e) =>
-                                      setEditState((prev) => ({ ...prev, wwr: parseInt(e.target.value) || 0 }))
-                                    }
-                                    className={`w-20 p-2 rounded-lg font-black text-center text-blue-500 border outline-none focus:border-blue-500 ${theme.input}`}
-                                  />
-                                  <span className="text-xs font-bold opacity-50">%</span>
-                                </div>
-                              </div>
-
-                              <div
-                                className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm transition-opacity ${
-                                  (editState.wwr || 0) === 0 ? 'opacity-30 pointer-events-none' : ''
-                                }`}
-                              >
-                                <label className="text-sm font-black block mb-4 flex items-center gap-2">
-                                  <FileText size={16} className="text-blue-500" /> 창호 시스템 사양
-                                </label>
-                                <div className="space-y-4">
-                                  <div>
-                                    <label className="text-[10px] font-black uppercase opacity-60 mb-2 flex items-center gap-1">
-                                      <span className="bg-blue-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px]">
-                                        1
-                                      </span>{' '}
-                                      창호 겹수 형태 (Window Panes)
-                                    </label>
-                                    <div className="flex gap-2 p-1 bg-black/10 rounded-xl">
-                                      {['Single', 'Double', 'Triple', 'Quadruple'].map((p) => {
-                                        const pLabel =
-                                          p === 'Single'
-                                            ? '단창'
-                                            : p === 'Double'
-                                            ? '복층창'
-                                            : p === 'Triple'
-                                            ? '삼중창'
-                                            : '사중/특수';
-                                        return (
-                                          <button
-                                            key={p}
-                                            onClick={() => handlePanesChange(p)}
-                                            className={`flex-1 py-2 text-[11px] font-black rounded-lg transition-all ${
-                                              currentPanes === p ? 'bg-blue-500 text-white shadow-md' : inactiveBtnClass
-                                            }`}
-                                          >
-                                            {pLabel}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-
-                                  <div className="animate-in fade-in slide-in-from-top-2 pt-2 border-t border-blue-500/10">
-                                    <label className="text-[10px] font-black uppercase opacity-60 mb-2 flex items-center gap-1">
-                                      <span className="bg-blue-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px]">
-                                        2
-                                      </span>{' '}
-                                      유리 코팅 및 특성 (Glass Type)
-                                    </label>
-                                    <div className="flex gap-2 p-1 bg-black/10 rounded-xl">
-                                      {['Clear/Tinted', 'Low-E', 'Smart'].map((t) => {
-                                        const tLabel =
-                                          t === 'Clear/Tinted'
-                                            ? '일반/칼라'
-                                            : t === 'Low-E'
-                                            ? '로이(Low-E)'
-                                            : '스마트/가변';
-                                        const isAvailable = availableTypes.includes(t);
-                                        return (
-                                          <button
-                                            key={t}
-                                            onClick={() => isAvailable && handleTypeChange(t)}
-                                            disabled={!isAvailable}
-                                            className={`flex-1 py-2 text-[11px] font-black rounded-lg transition-all ${
-                                              !isAvailable
-                                                ? 'opacity-20 cursor-not-allowed'
-                                                : currentType === t
-                                                ? 'bg-blue-500 text-white shadow-md'
-                                                : inactiveBtnClass
-                                            }`}
-                                          >
-                                            {tLabel}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-
-                                  <div className="animate-in fade-in slide-in-from-top-2 pt-2 border-t border-blue-500/10">
-                                    <label className="text-[10px] font-black uppercase opacity-60 mb-2 flex items-center gap-1">
-                                      <span className="bg-blue-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px]">
-                                        3
-                                      </span>{' '}
-                                      최종 상세 모델 (Specific Spec)
-                                    </label>
-                                    <select
-                                      value={editState.glazingId || 42}
-                                      onChange={(e) =>
-                                        setEditState((prev) => ({ ...prev, glazingId: parseInt(e.target.value) }))
-                                      }
-                                      className={`w-full p-3 text-[11px] font-bold rounded-xl border outline-none ${theme.input} focus:border-blue-500 custom-scrollbar`}
-                                    >
-                                      {filteredGlazingList.map((g) => (
-                                        <option key={g.id} value={g.id}>
-                                          {g.name.split(': ')[1] || g.name} (U: {g.u.toFixed(2)}, SHGC: {g.shgc.toFixed(2)})
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-                              </div>
-                            </>
-                          )}
-
-                          {/* 💡 단열재 및 레이어 상세 정보 · 튜닝 편집기 */}
-                          {materials && selectedSurfaceData?.constructionRef && (() => {
-                            const construction = materials.constructions?.find(c => c.id === selectedSurfaceData.constructionRef);
-                            if (!construction) return null;
-
-                            const originalInsul = construction.layers?.find(l => l.isInsulation);
-                            const activeOverride = insulationOverrides[construction.id];
-                            const activeTier = activeOverride ? activeOverride.tier : (originalInsul ? (() => {
-                              const cond = originalInsul.conductivity;
-                              if (cond <= 0.030) return 'premium';
-                              if (cond <= 0.045) return 'high';
-                              if (cond <= 0.070) return 'standard';
-                              return 'basic';
-                            })() : 'standard');
-                            const activeThickness = activeOverride ? activeOverride.thickness : (originalInsul ? originalInsul.thickness : 0);
-
-                            return (
-                              <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm space-y-4`}>
-                                <div className="flex justify-between items-center border-b pb-2 mb-2 opacity-90 border-slate-700/30">
-                                  <label className="text-sm font-black flex items-center gap-2">
-                                    <Layers size={16} className="text-orange-500" /> 단열재 및 레이어 정보
-                                  </label>
-                                  <span className="text-[10px] font-mono opacity-50">{construction.id}</span>
-                                </div>
-                                
-                                <div className="space-y-1.5">
-                                  <p className="text-xs font-bold">구조체명: <span className="text-blue-500">{construction.name}</span></p>
-                                  <div className="text-[11px] opacity-80 space-y-1 bg-black/10 p-3 rounded-xl">
-                                    <p className="font-bold border-b border-white/5 pb-1 mb-1">구성 레이어 (바깥쪽 → 안쪽):</p>
-                                    {construction.layers && construction.layers.length > 0 ? (
-                                      construction.layers.map((l, idx) => (
-                                        <div key={idx} className="flex justify-between items-center py-0.5">
-                                          <span>{l.name} <span className="opacity-50">({l.thickness}mm)</span></span>
-                                          {l.isInsulation ? (
-                                            <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/25 px-1.5 py-0.2 rounded text-[9px] font-bold">단열재</span>
-                                          ) : (
-                                            <span className="opacity-40 text-[9px]">구조체 레이어</span>
-                                          )}
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p className="opacity-50">레이어 정보가 없습니다.</p>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="p-4 rounded-xl border border-orange-500/10 bg-orange-500/5 space-y-3">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-xs font-black text-orange-500">단열 레이어 튜닝</span>
-                                    {activeOverride && (
-                                      <button 
-                                        onClick={() => handleResetInsulationOverride(construction.id)}
-                                        className="text-[10px] text-red-400 hover:text-red-300 underline font-bold"
-                                      >
-                                        원본 복원
-                                      </button>
-                                    )}
-                                  </div>
-                                  
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                      <label className="text-[9px] font-black opacity-60 block mb-1">단열 등급</label>
-                                      <select
-                                        value={activeTier}
-                                        onChange={(e) => handleInsulationOverrideChange(construction.id, e.target.value, activeThickness || 100)}
-                                        className={`w-full p-2.5 text-[11px] font-bold rounded-lg border outline-none ${theme.input} focus:border-orange-500`}
-                                      >
-                                        <option value="premium">고성능 (λ≤0.030)</option>
-                                        <option value="high">중성능 (λ≤0.045)</option>
-                                        <option value="standard">일반 (λ≤0.070)</option>
-                                        <option value="basic">저성능 (λ>0.070)</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="text-[9px] font-black opacity-60 block mb-1">두께 (mm)</label>
-                                      <div className="relative">
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          max="500"
-                                          step="5"
-                                          value={activeThickness}
-                                          onChange={(e) => handleInsulationOverrideChange(construction.id, activeTier, parseFloat(e.target.value) || 0)}
-                                          className={`w-full p-2 pl-3 pr-8 text-[11px] font-bold rounded-lg border outline-none ${theme.input} focus:border-orange-500 text-center`}
-                                        />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] opacity-40">mm</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  {activeOverride && (
-                                    <p className="text-[9px] text-emerald-400 font-bold text-center mt-1">
-                                      * 튜닝 적용됨! U-value가 {construction.uValue} → {calculateUpdatedUValue(construction, activeOverride)} W/m²K로 조정됩니다.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()}
-
-                          <div className={`p-6 rounded-[1.5rem] border ${theme.card} shadow-sm`}>
-                            <div className="flex justify-between items-end mb-4">
-                              <label className="text-sm font-black flex items-center gap-2">
-                                <SlidersHorizontal size={16} className="text-orange-500" /> 외피 단열 성능 (U-Value)
-                              </label>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <input
-                                type="range"
-                                min="0.1"
-                                max="3.0"
-                                step="0.05"
-                                value={editState.uValue || 0}
-                                onChange={(e) =>
-                                  setEditState((prev) => ({ ...prev, uValue: parseFloat(e.target.value) }))
-                                }
-                                className="flex-1 h-3 rounded-full appearance-none accent-orange-500 bg-slate-700 cursor-pointer"
-                              />
-                              <input
-                                type="number"
-                                min="0.1"
-                                max="3.0"
-                                step="0.01"
-                                value={editState.uValue || 0}
-                                onChange={(e) =>
-                                  setEditState((prev) => ({ ...prev, uValue: parseFloat(e.target.value) || 0.1 }))
-                                }
-                                className={`w-24 p-2 rounded-lg font-black text-center text-orange-500 border outline-none focus:border-orange-500 ${theme.input}`}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        onClick={handleSaveClose}
-                        className={`w-full py-5 text-white rounded-[1.5rem] font-black text-lg shadow-xl flex items-center justify-center gap-3 transition-transform hover:scale-105 mt-8 ${
-                          editMode === 'zone'
-                            ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/30'
-                            : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/30'
-                        }`}
-                      >
-                        <Save size={24} /> 설정 사항 저장 및 닫기
-                      </button>
-                      <p className="text-center text-[10px] text-slate-500 font-bold">
-                        * 저장을 누르셔야 시뮬레이션 엔진에 최종 반영됩니다.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <FloorEditor
+              theme={theme}
+              isDarkMode={isDarkMode}
+              projectData={projectData}
+              res={res}
+              surfaces={surfaces}
+              zones={zones}
+              materials={materials}
+              constructionOverrides={constructionOverrides}
+              editState={editState}
+              setEditState={setEditState}
+              editMode={editMode}
+              selectedId={selectedId}
+              setSelectedId={setSelectedId}
+              hoveredId={hoveredId}
+              setHoveredId={setHoveredId}
+              activeFloor={activeFloor}
+              setActiveFloor={setActiveFloor}
+              viewMode={viewMode}
+              setViewMode={setViewMode}
+              sunMonth={sunMonth}
+              setSunMonth={setSunMonth}
+              sunHour={sunHour}
+              setSunHour={setSunHour}
+              latitude={latitude}
+              selectedRegion={selectedRegion}
+              lightCalc={lightCalc}
+              setLightCalc={setLightCalc}
+              equipCalc={equipCalc}
+              setEquipCalc={setEquipCalc}
+              setStep={setStep}
+              displayFloors={displayFloors}
+              selectedSurfaceData={selectedSurfaceData}
+              currentPanes={currentPanes}
+              currentType={currentType}
+              availableTypes={availableTypes}
+              filteredGlazingList={filteredGlazingList}
+              inactiveBtnClass={inactiveBtnClass}
+              handleConstructionOverrideChange={handleConstructionOverrideChange}
+              handleResetInsulationOverride={handleResetInsulationOverride}
+              handleZoneClick={handleZoneClick}
+              handleSurfaceClick={handleSurfaceClick}
+              handleSaveClose={handleSaveClose}
+              handleModeSwitch={handleModeSwitch}
+              handleTypeChange={handleTypeChange}
+              handlePanesChange={handlePanesChange}
+              handleSimulation={handleSimulation}
+              getZoneFloorArea={getZoneFloorArea}
+              calcOutletPower={calcOutletPower}
+              isVirtualFloor={isVirtualFloor}
+              getActivityCategory={getActivityCategory}
+              calculateUpdatedUValue={calculateUpdatedUValue}
+            />
           )}
 
           {/* STEP 5: Loading */}
@@ -2612,712 +1712,29 @@ export default function App() {
 
           {/* STEP 6: Result */}
           {step === 'result' && (
-            <div className="w-full h-full max-w-[1400px] mx-auto p-8 overflow-y-auto animate-in zoom-in duration-500 custom-scrollbar flex flex-col">
-              <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4 flex-shrink-0">
-                <div>
-                  <h2 className="text-5xl font-black text-emerald-500 mb-2 tracking-tighter">Analysis Complete</h2>
-                  <p className={`${theme.textSub} text-lg font-medium`}>
-                    사용자 맞춤 설정이 반영된 최종 건물 성능 및 경제성 리포트입니다.
-                  </p>
-                </div>
-                <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
-                  <div
-                    className={`p-1 flex flex-col sm:flex-row rounded-2xl border shadow-inner ${
-                      isDarkMode ? 'bg-black/30 border-slate-800' : 'bg-slate-200 border-slate-300'
-                    }`}
-                  >
-                    <button
-                      onClick={() => setActiveResultTab('energy')}
-                      className={`px-6 py-3 font-black rounded-xl text-sm transition-all ${
-                        activeResultTab === 'energy'
-                          ? 'bg-emerald-500 text-white shadow-lg'
-                          : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'
-                      }`}
-                    >
-                      ⚡ 에너지 성능
-                    </button>
-                    <button
-                      onClick={() => setActiveResultTab('lcc')}
-                      className={`px-6 py-3 font-black rounded-xl text-sm transition-all flex items-center gap-2 ${
-                        activeResultTab === 'lcc'
-                          ? 'bg-amber-500 text-white shadow-lg'
-                          : 'text-slate-500 hover:text-amber-400 hover:bg-white/5'
-                      }`}
-                    >
-                      💰 경제성(LCC) 분석{' '}
-                      <span className="flex h-2 w-2 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                      </span>
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => setStep('buildingView')}
-                    className="px-6 py-3 rounded-2xl border-2 border-slate-500 font-black text-sm hover:bg-slate-500/10 transition-all active:scale-95 text-slate-400"
-                  >
-                    모델 재수정
-                  </button>
-                </div>
-              </div>
-
-              {/* 탭: ⚡ 에너지 성능 (기존) */}
-              {activeResultTab === 'energy' && (
-                <div className="animate-in fade-in slide-in-from-bottom-4">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
-                    {[
-                      {
-                        label: '요구량',
-                        val: res?.summary?.demand_per_m2 || 0,
-                        unit: 'kWh/m²a',
-                        layoutId: 'metric-demand',
-                        desc: '건축물 자체가 요구하는 순수 에너지의 양입니다. 단열재, 창호 성능, 일사량, 외풍 등 건물의 물리적 특성만으로 결정되며, 전기/설비 기기의 효율은 반영되지 않은 이상적인 필요량입니다. 이 수치를 낮추려면 패시브(Passive) 건축 기법(고성능 단열, 로이유리 등)을 적용해야 합니다.'
-                      },
-                      {
-                        label: '소요량',
-                        val: res?.summary?.consume_per_m2 || 0,
-                        unit: 'kWh/m²a',
-                        layoutId: 'metric-consume',
-                        desc: '요구량 에너지를 실제로 공급하기 위해 보일러, 에어컨, 조명 등 냉난방 설비가 기구적으로 소비하는 실제 에너지양입니다. 물리적 한계(요구량)에 설비 기기의 효율(COP)이 결합된 결과이며, 실질적인 에너지 비용/관리비 청구서에 직접적으로 영향을 미칩니다.'
-                      },
-                      {
-                        label: '1차 소요량',
-                        val: res?.summary?.primary_per_m2 || 0,
-                        unit: 'kWh/m²a',
-                        layoutId: 'metric-primary',
-                        desc: '건물까지 에너지를 배달하기 위해 화력, 원자력 발전소 등에서 채굴, 발전, 송전하는 과정에서 발생한 에너지 손실까지 모두 합산한 국가/에너지원 관점의 환산(원시) 소요량입니다. 건축물 에너지 효율 등급 평가의 절대적 기준이 됩니다.'
-                      },
-                      {
-                        label: 'CO2 배출량',
-                        val: res?.summary?.co2_per_m2 || 0,
-                        unit: 'kg/m²a',
-                        layoutId: 'metric-co2',
-                        desc: '해당 시뮬레이션의 에너지 사용에 따라 발생하는 연간 온실가스 평균 배출량입니다. 에너지 사용량에 각 에너지원별(전기 0.466, 가스 2.1 등) 환산 배출 계수를 곱하여 산출합니다. 탄소 중립 및 관련 건축 인증에 가장 비중 있게 활용됩니다.'
-                      },
-                    ].map((stat, i) => (
-                      <motion.div
-                        key={i}
-                        layoutId={stat.layoutId}
-                        onClick={() => setSelectedMetric(stat)}
-                        className={`p-8 rounded-[2rem] ${theme.card} border flex flex-col justify-center items-center text-center shadow-lg cursor-pointer hover:border-emerald-500/50 transition-colors z-10`}
-                      >
-                        <motion.p layoutId={`${stat.layoutId}-label`} className={`text-xs font-bold uppercase tracking-widest mb-3 opacity-60 ${theme.textSub}`}>
-                          {stat.label}
-                        </motion.p>
-                        <motion.div layoutId={`${stat.layoutId}-val`} className="flex items-baseline gap-2">
-                          <span className="text-4xl font-black text-emerald-400">{Number(stat.val).toFixed(1)}</span>
-                          <span className="text-xs font-bold opacity-50">{stat.unit}</span>
-                        </motion.div>
-                      </motion.div>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-6">
-                    <div
-                      className={`xl:col-span-4 p-8 rounded-[2.5rem] ${theme.card} border flex flex-col items-center justify-center relative overflow-hidden shadow-lg`}
-                    >
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
-                      <h3 className={`text-sm font-black uppercase tracking-widest mb-8 ${theme.textSub}`}>
-                        에너지 자립률
-                      </h3>
-                      <div className="relative w-full aspect-square flex items-center justify-center">
-                        <PieChart width={250} height={250}>
-                          <Pie
-                            data={[
-                              { v: Number(res?.summary?.independence || 0) },
-                              { v: 100 - Number(res?.summary?.independence || 0) },
-                            ]}
-                            innerRadius={85}
-                            outerRadius={110}
-                            startAngle={225}
-                            endAngle={-45}
-                            paddingAngle={0}
-                            dataKey="v"
-                            stroke="none"
-                          >
-                            <Cell fill="#10B981" />
-                            <Cell fill={theme.pieBg} />
-                          </Pie>
-                        </PieChart>
-                        <div
-                          className={`absolute inset-0 flex flex-col items-center justify-center ${theme.textMain}`}
-                        >
-                          <span className="text-6xl font-black tracking-tighter">
-                            {Number(res?.summary?.independence || 0).toFixed(1)}
-                          </span>
-                          <span className={`text-sm font-bold ${theme.textSub}`}>%</span>
-                        </div>
-                      </div>
-                      <div
-                        className={`mt-6 px-6 py-2.5 rounded-full text-xs font-black border transition-colors ${
-                          Number(res?.summary?.independence || 0) >= 20
-                            ? isDarkMode
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              : 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                            : isDarkMode
-                            ? 'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                            : 'bg-slate-200 text-slate-600 border-slate-300'
-                        }`}
-                      >
-                        {Number(res?.summary?.independence || 0) >= 20
-                          ? `ZEB 인증 완료 (${getZebGradeInfo(res?.summary?.independence)})`
-                          : `ZEB 인증 미달 (등급 외)`}
-                      </div>
-                    </div>
-
-                    <div className={`xl:col-span-8 p-8 rounded-[2.5rem] ${theme.card} border flex flex-col shadow-lg`}>
-                      <div className="flex justify-between items-center mb-6">
-                        <h3 className={`text-lg font-black flex items-center gap-2 ${theme.textMain}`}>
-                          <BoxIcon size={20} className="text-emerald-500" /> 최종 적용된 3D 모델 형상
-                        </h3>
-                      </div>
-                      <div
-                        className={`flex-1 w-full rounded-2xl overflow-hidden relative min-h-[300px] ${
-                          isDarkMode ? 'bg-slate-900/50 border border-white/5' : 'bg-slate-100 border border-slate-200'
-                        }`}
-                      >
-                        <BuildingViewer
-                          surfaces={surfaces}
-                          zones={zones}
-                          activeFloor="all"
-                          editMode="surface"
-                          readOnly={true}
-                          isDarkMode={isDarkMode}
-                          viewMode={viewMode}
-                          setViewMode={setViewMode}
-                          sunMonth={sunMonth}
-                          setSunMonth={setSunMonth}
-                          sunHour={sunHour}
-                          setSunHour={setSunHour}
-                          res={res}
-                          latitude={latitude}
-                          locationName={selectedRegion.name}
-                        />
-                      </div>
-                      <p className={`mt-4 text-[11px] text-center font-bold ${theme.textSub}`}>
-                        적용된 창면적비(WWR)와 단열재가 반영된 형상입니다. 마우스로 드래그하여 확인할 수 있습니다.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className={`p-8 rounded-[2.5rem] ${theme.card} border shadow-lg mb-6`}>
-                    <div className="flex justify-between items-center mb-8">
-                      <h3 className={`text-lg font-black flex items-center gap-2 ${theme.textMain}`}>
-                        <LayoutDashboard size={20} className="text-emerald-500" /> 월별 냉난방 에너지 요구량
-                        [kWh/m²a]
-                      </h3>
-                      <div className={`flex gap-4 text-xs font-bold ${theme.textSub}`}>
-                        <span className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-red-400"></div> 난방
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-blue-400"></div> 냉방
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-[280px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={res?.monthly || []} barGap={4}>
-                          <CartesianGrid vertical={false} stroke={theme.chartGrid} />
-                          <XAxis
-                            dataKey="name"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
-                            dy={10}
-                          />
-                          <YAxis
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
-                          />
-                          <Tooltip
-                            cursor={{ fill: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
-                            formatter={(value) => Number(value).toFixed(1)}
-                            contentStyle={{
-                              borderRadius: '16px',
-                              border: isDarkMode ? 'none' : '1px solid #e2e8f0',
-                              backgroundColor: isDarkMode ? '#1e293b' : '#fff',
-                              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                            }}
-                          />
-                          <Bar dataKey="heating" fill="#F87171" radius={[8, 8, 0, 0]} barSize={16} />
-                          <Bar dataKey="cooling" fill="#60A5FA" radius={[8, 8, 0, 0]} barSize={16} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className={`mt-8 overflow-x-auto rounded-2xl border ${theme.tableBorder}`}>
-                      <table className="w-full text-[12px] text-center border-collapse">
-                        <thead className={`${theme.tableHeader} border-b ${theme.tableBorder}`}>
-                          <tr>
-                            <th className="p-3 font-bold">비주거</th>
-                            {(res?.monthly || []).map((d) => (
-                              <th key={d.name} className="p-3 font-bold">
-                                {d.name}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className={`font-bold ${theme.textMain}`}>
-                          <tr className={`border-b ${theme.tableBorder}`}>
-                            <td className="p-3 text-red-500">난방</td>
-                            {(res?.monthly || []).map((d) => (
-                              <td key={d.name}>{Number(d.heating || 0).toFixed(1)}</td>
-                            ))}
-                          </tr>
-                          <tr>
-                            <td className="p-3 text-blue-500">냉방</td>
-                            {(res?.monthly || []).map((d) => (
-                              <td key={d.name}>{Number(d.cooling || 0).toFixed(1)}</td>
-                            ))}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className={`p-10 rounded-[2.5rem] ${theme.card} border shadow-lg`}>
-                    <h3 className={`text-xl font-black mb-8 flex items-center gap-3 ${theme.textMain}`}>
-                      <FileSpreadsheet className="text-emerald-500" /> 연간 에너지 요구량 및 소요량 [kWh/m²a]
-                    </h3>
-                    <div className="h-[300px] mb-12">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={getAnnualChartData()}
-                          layout="vertical"
-                          margin={{ left: 40, right: 40 }}
-                          stackOffset="sign"
-                        >
-                          <CartesianGrid horizontal={false} stroke={theme.chartGrid} />
-                          <XAxis type="number" hide />
-                          <YAxis
-                            dataKey="name"
-                            type="category"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: theme.chartText, fontSize: 13, fontWeight: 'bold' }}
-                          />
-                          <Tooltip
-                            cursor={{ fill: 'transparent' }}
-                            formatter={(value) => Number(value).toFixed(1)}
-                            contentStyle={{
-                              borderRadius: '12px',
-                              border: isDarkMode ? 'none' : `1px solid ${theme.tableBorder}`,
-                              backgroundColor: isDarkMode ? '#1e293b' : '#fff',
-                            }}
-                          />
-                          <Legend
-                            iconType="circle"
-                            wrapperStyle={{ color: theme.chartText, fontWeight: 'bold', paddingTop: '20px' }}
-                          />
-                          <ReferenceLine
-                            x={0}
-                            stroke={isDarkMode ? '#fff' : '#475569'}
-                            opacity={isDarkMode ? 0.2 : 0.4}
-                            strokeDasharray="3 3"
-                          />
-                          {categories.map((c, i) => (
-                            <Bar
-                              key={c}
-                              dataKey={c}
-                              stackId="a"
-                              fill={colors[i]}
-                              barSize={32}
-                              radius={i === 0 ? [6, 0, 0, 6] : i === categories.length - 1 ? [0, 6, 6, 0] : 0}
-                            />
-                          ))}
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className={`overflow-hidden rounded-3xl border ${theme.tableBorder}`}>
-                      <table className="w-full text-sm text-center border-collapse">
-                        <thead className={`${theme.tableHeader} border-b ${theme.tableBorder}`}>
-                          <tr>
-                            <th className={`p-4 border-r ${theme.tableBorder} font-bold`}>구분</th>
-                            {categories.map((c) => (
-                              <th key={c} className={`p-4 border-r ${theme.tableBorder} font-bold`}>
-                                {c}
-                              </th>
-                            ))}
-                            <th className="p-4 font-black">합계</th>
-                          </tr>
-                        </thead>
-                        <tbody className={`font-semibold ${theme.textMain}`}>
-                          {[
-                            { id: 'req', name: '요구량' },
-                            { id: 'con', name: '소요량' },
-                            { id: 'pri', name: '1차 소요량' },
-                            { id: 'co2', name: 'CO2 발생량' },
-                            { id: 'grd', name: '등급용 1차' },
-                          ].map((row, idx) => {
-                            const m = res?.matrix;
-                            if (!m) return null;
-                            const getVal = (catId) => {
-                              const base = m[catId];
-                              if (row.id === 'req') return Number(base?.req || 0);
-                              if (row.id === 'con') return Number(base?.con || 0);
-                              if (row.id === 'pri') return Number(base?.con || 0) * 2.75;
-                              if (row.id === 'co2') return Number(base?.con || 0) * 0.466;
-                              if (row.id === 'grd') {
-                                if (catId === 'equipment') return 0;
-                                return Number(base?.con || 0) * 2.1;
-                              }
-                              return 0;
-                            };
-                            const rowDataValues = ['renewable', 'heating', 'cooling', 'hotwater', 'lighting', 'ventilation', 'equipment'].map((id) =>
-                              getVal(id)
-                            );
-                            const totalValue = rowDataValues.reduce((a, b) => a + b, 0);
-                            return (
-                              <tr
-                                key={row.id}
-                                className={`${
-                                  idx % 2 === 0 ? (isDarkMode ? 'bg-white/5' : 'bg-white/40') : 'bg-transparent'
-                                } border-b ${theme.tableBorder}`}
-                              >
-                                <td
-                                  className={`p-4 border-r ${theme.tableBorder} font-bold ${
-                                    isDarkMode ? 'text-emerald-400' : 'text-emerald-700'
-                                  }`}
-                                >
-                                  {row.name}
-                                </td>
-                                {rowDataValues.map((v, i) => (
-                                  <td
-                                    key={i}
-                                    className={`p-4 border-r ${theme.tableBorder} ${
-                                      v < 0 ? (isDarkMode ? 'text-cyan-400' : 'text-cyan-600 font-bold') : ''
-                                    }`}
-                                  >
-                                    {v.toFixed(1)}
-                                  </td>
-                                ))}
-                                <td
-                                  className={`p-4 font-black ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}
-                                >
-                                  {totalValue.toFixed(1)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 탭: 💰 LCC (경제성) 분석 */}
-              {activeResultTab === 'lcc' && res?.financial && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 flex flex-col gap-6">
-                  {/* 핵심 3대 지표 요약 */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {[
-                      {
-                        label: '초기 총 공사비 (Capital Cost)',
-                        val: formatWon(res.financial.capital_cost).replace(' 만 원', ''),
-                        unit: '만 원',
-                        isRawString: true, // Prevents formatting as number
-                        layoutId: 'lcc-capital',
-                        colorClass: 'text-amber-500',
-                        bgClass: 'bg-amber-500/10',
-                        borderClass: 'border-amber-500/20',
-                        hoverClass: 'hover:border-amber-500/50',
-                        icon: <Wallet className="text-amber-500" size={32} />,
-                        desc: '기존 건물의 에너지 성능을 개선하기 위해 투입되는 1회성 공사비입니다. 고효율 창호, 단열재 보강, 고효율 조명 등 적용된 친환경 자재 스펙과 조달청 단가를 기반으로 자동 산출되며, LCC(생애주기비용) 모의 분석의 출발점이 되는 핵심 투자금입니다.'
-                      },
-                      {
-                        label: '연간 운영비 (Running Cost)',
-                        val: formatWon(res.financial.total_energy_bill).replace(' 만 원', ''),
-                        unit: '만 원 / 년',
-                        isRawString: true,
-                        layoutId: 'lcc-running',
-                        colorClass: 'text-emerald-400',
-                        bgClass: 'bg-emerald-500/10',
-                        borderClass: 'border-emerald-500/20',
-                        hoverClass: 'hover:border-emerald-500/50',
-                        icon: <PiggyBank className="text-emerald-500" size={32} />,
-                        desc: '친환경 건물로 변신한 뒤, 향상된 단열성능과 설비효율 덕분에 실제로 매년 납부하게 될 평균 에너지 요금입니다. 현재 노후 상태일 때 납부하는 예상 관리비와 비교 시 연간 수익(절감액)을 직관적으로 보여주는 지표입니다.'
-                      },
-                      {
-                        label: '투자비 회수 기간 (Payback)',
-                        val: lccAnalysis.paybackYears.toFixed(1),
-                        unit: '년',
-                        isRawString: true,
-                        layoutId: 'lcc-payback',
-                        colorClass: 'text-blue-400',
-                        bgClass: 'bg-blue-500/10',
-                        borderClass: 'border-blue-500/20',
-                        hoverClass: 'hover:border-blue-500/50',
-                        icon: <TrendingUp className="text-blue-500" size={32} />,
-                        glow: true,
-                        desc: '초기 지출한 "총 공사비"를 매 등 매년 아껴지는 "에너지 요금 절감액"으로 100% 되돌려 받는 데 걸리는 기간입니다. 이 기간이 짧을수록 경제적 타당성이 높은 리모델링이며, 이 기간이 끝나는 시점부터는 오롯이 흑자를 보게 됩니다.'
-                      }
-                    ].map((stat, i) => (
-                      <motion.div
-                        key={i}
-                        layoutId={stat.layoutId}
-                        onClick={() => setSelectedMetric(stat)}
-                        className={`p-8 rounded-[2rem] ${theme.card} border ${stat.borderClass} ${stat.hoverClass} shadow-lg flex items-center gap-6 cursor-pointer transition-colors relative overflow-hidden z-10`}
-                      >
-                        {stat.glow && (
-                          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
-                        )}
-                        <motion.div layoutId={`${stat.layoutId}-icon`} className={`w-16 h-16 rounded-2xl ${stat.bgClass} flex items-center justify-center shrink-0 border ${stat.borderClass} z-10`}>
-                          {stat.icon}
-                        </motion.div>
-                        <div className="z-10">
-                          <motion.p layoutId={`${stat.layoutId}-label`} className={`text-xs font-bold uppercase tracking-widest mb-1 opacity-60 ${theme.textSub}`}>
-                            {stat.label}
-                          </motion.p>
-                          <motion.div layoutId={`${stat.layoutId}-val`} className={`text-3xl font-black ${stat.colorClass} tracking-tighter flex items-end gap-1`}>
-                            {stat.val} <span className="text-sm font-bold opacity-50 mb-1">{stat.unit}</span>
-                          </motion.div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-
-                  {/* 세부 내역 2분할 */}
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                    {/* 공사비 브레이크다운 */}
-                    <div className={`p-8 rounded-[2.5rem] ${theme.card} border shadow-lg flex flex-col`}>
-                      <h3 className={`text-lg font-black flex items-center gap-2 mb-6 ${theme.textMain}`}>
-                        <Calculator size={20} className="text-amber-500" /> 공종별 내역서 (조달청/친환경 DB)
-                      </h3>
-
-                      <div className="flex-1 flex flex-col justify-center gap-4">
-                        {[
-                          { key: 'window', label: '창호 공사 (Glazing)', color: 'bg-blue-500' },
-                          { key: 'insulation', label: '단열 공사 (Insulation)', color: 'bg-orange-500' },
-                          { key: 'led', label: '전기 공사 (LED 등기구)', color: 'bg-yellow-400' },
-                          { key: 'hvac', label: '설비 공사 (HVAC 시스템)', color: 'bg-emerald-500' },
-                        ].map((item) => {
-                          const cost = res.financial.cost_details[item.key] || 0;
-                          const pct = (cost / res.financial.capital_cost) * 100 || 0;
-                          return (
-                            <div key={item.key} className="flex flex-col gap-2">
-                              <div className="flex justify-between items-end">
-                                <span className={`text-sm font-bold ${theme.textMain} flex items-center gap-2`}>
-                                  <div className={`w-3 h-3 rounded-full ${item.color}`}></div>
-                                  {item.label}
-                                </span>
-                                <span className="text-sm font-black tracking-tight">
-                                  {formatWon(cost)} <span className="text-[10px] opacity-40 ml-1">({pct.toFixed(1)}%)</span>
-                                </span>
-                              </div>
-                              <div className="w-full h-2.5 bg-black/10 rounded-full overflow-hidden border border-white/5">
-                                <div className={`h-full ${item.color} rounded-full`} style={{ width: `${pct}%` }}></div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="mt-8 p-4 bg-black/10 rounded-2xl border border-white/5 flex flex-col gap-2">
-                        <div className="flex items-center justify-between">
-                          <span className={`text-xs font-bold opacity-60 ${theme.textMain}`}>적용된 DB 데이터베이스 건수</span>
-                          <span className="text-xs font-black text-emerald-400">
-                            {res.financial.csv_db_loaded?.items?.toLocaleString() || 0} 건의 실견적 단가 로드됨
-                          </span>
-                        </div>
-                        {/* 💡 [신규] 백엔드에서 매칭된 창호 실제 제품명 표시 */}
-                        <div className="flex items-center justify-between border-t border-white/5 pt-2 mt-1">
-                          <span className={`text-xs font-bold opacity-60 ${theme.textMain}`}>적용된 창호 단가 제품명 (U-Value 연동)</span>
-                          <span className="text-xs font-black text-blue-400 max-w-[200px] truncate" title={res.financial.mapped_window_name}>
-                            {res.financial.mapped_window_name}
-                          </span>
-                        </div>
-                        {/* 💡 [신규] 백엔드에서 매칭된 단열재 실제 등급 및 U-Value 연동 단가 표시 */}
-                        {res.financial.insulation_details && res.financial.insulation_details.length > 0 && (
-                          <div className="flex flex-col border-t border-white/5 pt-2 mt-1 gap-1.5">
-                            <span className={`text-xs font-bold opacity-60 ${theme.textMain}`}>적용된 구조체별 단열 공사비 상세 (친환경DB 연동)</span>
-                            <div className="space-y-1 max-h-[120px] overflow-y-auto custom-scrollbar pr-1">
-                              {res.financial.insulation_details.map((d, idx) => (
-                                <div key={idx} className="flex justify-between items-center text-[10px] font-bold">
-                                  <span className="text-slate-400 truncate max-w-[180px]">{d.constructionName} ({d.area.toFixed(1)}㎡)</span>
-                                  <span className="text-orange-400">{d.tier.split(' ')[0]} (₩{d.price.toLocaleString()}/㎡)</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* 공과금 브레이크다운 */}
-                    <div className={`p-8 rounded-[2.5rem] ${theme.card} border shadow-lg flex flex-col`}>
-                      <h3 className={`text-lg font-black flex items-center gap-2 mb-6 ${theme.textMain}`}>
-                        <Coins size={20} className="text-emerald-500" /> 연간 예상 공과금 내역 (KEPCO/지역난방)
-                      </h3>
-
-                      <div className="flex-1 flex items-center justify-center relative">
-                        <PieChart width={300} height={300}>
-                          <Pie
-                            data={[
-                              { name: '전기요금 (조명/기기/냉방)', value: res.financial.annual_elec_bill, fill: '#3B82F6' },
-                              { name: '열요금 (지역난방/급탕)', value: res.financial.annual_heat_bill, fill: '#EF4444' },
-                            ]}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={80}
-                            outerRadius={110}
-                            paddingAngle={2}
-                            dataKey="value"
-                            stroke="none"
-                          />
-                          <Tooltip
-                            formatter={(val) => formatWon(val)}
-                            contentStyle={{
-                              borderRadius: '12px',
-                              border: isDarkMode ? 'none' : `1px solid ${theme.tableBorder}`,
-                              backgroundColor: isDarkMode ? '#1e293b' : '#fff',
-                              fontWeight: 'bold',
-                            }}
-                          />
-                        </PieChart>
-                        <div
-                          className={`absolute inset-0 flex flex-col items-center justify-center ${theme.textMain} pointer-events-none`}
-                        >
-                          <span className="text-xs font-bold opacity-50 uppercase tracking-widest mb-1">TOTAL</span>
-                          <span className="text-2xl font-black">{formatWon(res.financial.total_energy_bill)}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-center gap-6 mt-4">
-                        <div className="text-center">
-                          <span className="flex items-center justify-center gap-1 text-[10px] font-bold opacity-60 mb-1">
-                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>전기요금
-                          </span>
-                          <span className={`text-sm font-black ${theme.textMain}`}>
-                            {formatWon(res.financial.annual_elec_bill)}
-                          </span>
-                        </div>
-                        <div className="text-center">
-                          <span className="flex items-center justify-center gap-1 text-[10px] font-bold opacity-60 mb-1">
-                            <div className="w-2 h-2 rounded-full bg-red-500"></div>지역난방비
-                          </span>
-                          <span className={`text-sm font-black ${theme.textMain}`}>
-                            {formatWon(res.financial.annual_heat_bill)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 💰 하이라이트: ROI Cash Flow 차트 */}
-                  <motion.div 
-                    layoutId="lcc-graph"
-                    onClick={() => setSelectedMetric({
-                      layoutId: 'lcc-graph',
-                      label: '생애주기비용 (LCC) 누적 현금 흐름도',
-                      val: `+${formatWon(lccAnalysis.annualSavings).replace(' 만 원', '')}`,
-                      unit: '만 원 / 년 순절감액',
-                      isRawString: true,
-                      colorClass: 'text-emerald-400',
-                      desc: '리모델링 공사비(초기 투자금)를 비용으로 지출한 뒤, 향상된 에너지 효율을 통해 매달 절감하는 운영비가 기존 노후 건물을 방치했을 때의 낭비보다 장기적으로 얼마나 더 이득인지 15년간 추적한 차트입니다. 빨간선(기존 상태 유지)과 파란선(리모델링 진행)이 교차하는 지점이 바로 초기 투자금을 100% 회수하고 누적 순이익(초록선)이 플러스가 되는 ‘손익분기점’입니다. 시간이 갈수록 초록선이 우상향하며 친환경 리모델링의 압도적인 경제적 가치를 증명합니다.'
-                    })}
-                    className={`p-10 rounded-[2.5rem] ${theme.card} border shadow-xl flex flex-col cursor-pointer hover:border-emerald-500/50 transition-colors z-10 relative overflow-hidden`}
-                  >
-                    <div className="flex justify-between items-end mb-8">
-                      <div>
-                        <h3 className={`text-xl font-black flex items-center gap-3 ${theme.textMain}`}>
-                          <TrendingUp className="text-amber-400" size={24} /> 생애주기비용 (LCC) 누적 현금 흐름도
-                        </h3>
-                        <p className={`text-sm font-medium mt-2 ${theme.textSub}`}>
-                          친환경 리모델링 시뮬레이션에 따른 15년간의 투자/수익(절감액) 분석표입니다.
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-bold opacity-50 uppercase tracking-widest mb-1">연간 순 절감액</p>
-                        <p className="text-2xl font-black text-emerald-400">+{formatWon(lccAnalysis.annualSavings)}</p>
-                      </div>
-                    </div>
-
-                    <div className="h-[400px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={lccAnalysis.data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.chartGrid} />
-                          <XAxis
-                            dataKey="year"
-                            tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
-                            axisLine={false}
-                            tickLine={false}
-                            dy={10}
-                          />
-                          <YAxis
-                            tickFormatter={(val) => `${Math.round(val / 10000000)}천만`}
-                            tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
-                            axisLine={false}
-                            tickLine={false}
-                            domain={['auto', 'auto']}
-                          />
-                          <Tooltip
-                            formatter={(val) => formatWon(val)}
-                            contentStyle={{
-                              borderRadius: '16px',
-                              border: isDarkMode ? 'none' : '1px solid #e2e8f0',
-                              backgroundColor: isDarkMode ? '#0F172A' : '#fff',
-                              fontWeight: 'bold',
-                              boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.3)',
-                            }}
-                          />
-                          <Legend wrapperStyle={{ paddingTop: '20px', fontWeight: 'bold', color: theme.chartText }} />
-
-                          {/* 0원 선 (손익분기점 기준선) */}
-                          <ReferenceLine
-                            y={0}
-                            stroke={isDarkMode ? '#ffffff' : '#000'}
-                            strokeOpacity={0.3}
-                            strokeWidth={2}
-                            strokeDasharray="3 3"
-                          />
-
-                          {/* 투자 회수 기점 라인 표시 */}
-                          <ReferenceLine
-                            x={`${Math.ceil(lccAnalysis.paybackYears)}년차`}
-                            stroke="#F59E0B"
-                            strokeOpacity={0.8}
-                            strokeDasharray="3 3"
-                            label={{
-                              position: 'top',
-                              value: '손익분기 돌파',
-                              fill: '#F59E0B',
-                              fontSize: 12,
-                              fontWeight: 'black',
-                            }}
-                          />
-
-                          <Line
-                            type="monotone"
-                            dataKey="기존 노후건물 유지"
-                            stroke="#EF4444"
-                            strokeWidth={3}
-                            dot={{ r: 4, strokeWidth: 2 }}
-                            activeDot={{ r: 6 }}
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="친환경 리모델링 (투자+운영)"
-                            stroke="#3B82F6"
-                            strokeWidth={3}
-                            dot={{ r: 4, strokeWidth: 2 }}
-                            activeDot={{ r: 6 }}
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="누적 순이익 (ROI)"
-                            stroke="#10B981"
-                            strokeWidth={4}
-                            dot={{ r: 6, fill: '#10B981', strokeWidth: 2, stroke: '#fff' }}
-                            activeDot={{ r: 8, stroke: '#fff', strokeWidth: 3 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </motion.div>
-                </div>
-              )}
-            </div>
+            <ResultDashboard
+              theme={theme}
+              res={res}
+              isDarkMode={isDarkMode}
+              lccAnalysis={lccAnalysis}
+              activeResultTab={activeResultTab}
+              setActiveResultTab={setActiveResultTab}
+              setSelectedMetric={setSelectedMetric}
+              zones={zones}
+              surfaces={surfaces}
+              setStep={setStep}
+              handleApplyRecommendation={handleApplyRecommendation}
+              getZebGradeInfo={getZebGradeInfo}
+              getAnnualChartData={getAnnualChartData}
+              viewMode={viewMode}
+              setViewMode={setViewMode}
+              sunMonth={sunMonth}
+              setSunMonth={setSunMonth}
+              sunHour={sunHour}
+              setSunHour={setSunHour}
+              latitude={latitude}
+              selectedRegion={selectedRegion}
+            />
           )}
 
           {/* 팝업 모달 공간 (전역으로 위치 조정됨) */}

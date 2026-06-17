@@ -107,13 +107,13 @@ class LCCAnalyzer:
         },
         "high": {
             "label": "중성능 (XPS, 글라스울)",
-            "lambda_range": (0.030, 0.045),
+            "lambda_range": (0.030, 0.040),
             "default_price": 25000,
             "keywords": ["압출", "XPS", "글라스울", "glass wool"]
         },
         "standard": {
             "label": "일반 (EPS, 미네랄울)",
-            "lambda_range": (0.045, 0.070),
+            "lambda_range": (0.040, 0.070),
             "default_price": 15000,
             "keywords": ["비드", "EPS", "미네랄울", "mineral", "광물"]
         },
@@ -151,7 +151,13 @@ class LCCAnalyzer:
                 "window": 250000,
                 "insulation": 45000,
                 "led": 12000,
-                "hvac_kw": 2000000
+                "hvac_kw_system": {
+                    1: 1800000, # AHU
+                    2: 2500000, # VRF/EHP
+                    3: 2200000, # FCU
+                    5: 1500000  # Generic
+                },
+                "hvac_kw_default": 2000000
             },
             "window_db": [],
             "window_tiers": {},  # 성능 등급별 {prices: [], avg: 0, count: 0}
@@ -350,27 +356,28 @@ class LCCAnalyzer:
                 
         return target_window_price, mapped_window_name
 
-    def match_insulation_price(self, conductivity: float) -> tuple:
+    def match_insulation_price(self, conductivity: float, explicit_tier: str = None) -> tuple:
         """열전도율(conductivity)을 기반으로 가장 적합한 단열재 등급의 평균 단가를 반환합니다."""
         target_price = self.cost_db["avg_prices"]["insulation"]
         mapped_name = "기본 단열재 단가 (DB 미매칭)"
         
-        if not self.cost_db.get("insulation_tiers") or conductivity is None:
+        if not self.cost_db.get("insulation_tiers") or (conductivity is None and explicit_tier is None):
             return target_price, mapped_name
             
-        matched_tier = None
-        for tier_key, tier_info in self.INSULATION_TIERS.items():
-            l_min, l_max = tier_info["lambda_range"]
-            if l_min <= conductivity < l_max:
-                matched_tier = tier_key
-                break
-                
-        if not matched_tier:
-            # fallback
-            if conductivity <= 0.030: matched_tier = "premium"
-            elif conductivity <= 0.045: matched_tier = "high"
-            elif conductivity <= 0.070: matched_tier = "standard"
-            else: matched_tier = "basic"
+        matched_tier = explicit_tier
+        if not matched_tier and conductivity is not None:
+            for tier_key, tier_info in self.INSULATION_TIERS.items():
+                l_min, l_max = tier_info["lambda_range"]
+                if l_min <= conductivity < l_max:
+                    matched_tier = tier_key
+                    break
+                    
+            if not matched_tier:
+                # fallback
+                if conductivity <= 0.030: matched_tier = "premium"
+                elif conductivity <= 0.040: matched_tier = "high"
+                elif conductivity <= 0.070: matched_tier = "standard"
+                else: matched_tier = "basic"
             
         tier_data = self.cost_db["insulation_tiers"].get(matched_tier, {})
         if tier_data:
@@ -384,11 +391,14 @@ class LCCAnalyzer:
                 
         return target_price, mapped_name
 
-    def calculate(self, eplus_csv_path: str, zones: list, total_area: float, 
-                  total_window_area: float, total_wall_area: float, 
-                  target_u: float, target_shgc: float, pv_capacity_kw: float, 
-                  is_geothermal: bool, act_main: int, surfaces: list = None,
-                  materials: dict = None, insulation_overrides: dict = None):
+    def calculate(self, eplus_csv_path: str, zones: list, total_area: float,
+                  total_window_area: float, total_wall_area: float,
+                  target_u: float, target_shgc: float, pv_capacity_kw: float,
+                  is_geothermal: bool, act_main: int, surfaces: list,
+                  materials: dict, target_budget: float, led_fixture_count: int,
+                  led_reduction_active: bool, **kwargs) -> dict:
+        
+        construction_overrides = kwargs.get("construction_overrides", {})
         
         if pd is None:
             return self._fallback_data()
@@ -407,98 +417,128 @@ class LCCAnalyzer:
             vent_cols = [c for c in df.columns if 'Mechanical Ventilation Mass Flow Rate' in c and '[kg/s]' in c]
             demand_col = next((c for c in df.columns if 'Facility Total Electric Demand Rate' in c), None)
 
+            import numpy as np
+
             monthly_data = []
-            a_h_req = a_c_req = a_h_con = a_c_con = a_l_con = a_e_con = a_dhw_req = a_dhw_con = a_vent_req = a_vent_con = 0.0
-            annual_elec_bill = annual_heat_bill = peak_elec_kw = 0
             
-            for m in range(min(12, len(df))):
-                m_h_req = m_c_req = m_h_con = m_c_con = m_l_con = m_e_con = m_h_rate = m_c_rate = m_v_flow = 0.0
-                m_dhw_j = float(df.iloc[m][dhw_col]) if dhw_col else 0.0
-                m_dhw_kwh = m_dhw_j / 3600000.0
+            total_rows = len(df)
+            is_hourly = total_rows > 365
+            
+            if is_hourly:
+                dt_str = df.iloc[:, 0].astype(str)
+                # EnergyPlus format: ' 01/01  01:00:00'
+                df['month'] = dt_str.str.extract(r'(\d{2})/\d{2}')[0].fillna(1).astype(int)
+                df['hour'] = dt_str.str.extract(r'\s+(\d{2}):')[0].fillna(12).astype(int)
+            else:
+                df['month'] = np.arange(1, min(13, total_rows + 1))
+                df['hour'] = 12
+
+            total_c_con_kwh = np.zeros(total_rows)
+            total_h_con_kwh = np.zeros(total_rows)
+            total_c_req_kwh = np.zeros(total_rows)
+            total_h_req_kwh = np.zeros(total_rows)
+            total_c_rate_w = np.zeros(total_rows)
+            total_h_rate_w = np.zeros(total_rows)
+
+            for z in zones:
+                z_id = z['id'].replace(" ", "_").upper()
+                zh_cols = [c for c in h_cols if z_id in c.upper()]
+                zc_cols = [c for c in c_cols if z_id in c.upper()]
+                zr_h_cols = [c for c in h_rate_cols if z_id in c.upper()]
+                zr_c_cols = [c for c in c_rate_cols if z_id in c.upper()]
                 
-                for z in zones:
-                    z_id = z['id'].replace(" ", "_").upper()
+                zh_kwh = df[zh_cols].sum(axis=1).values / 3600000.0 if zh_cols else 0.0
+                zc_kwh = df[zc_cols].sum(axis=1).values / 3600000.0 if zc_cols else 0.0
+                zh_rate = df[zr_h_cols].sum(axis=1).values if zr_h_cols else 0.0
+                zc_rate = df[zr_c_cols].sum(axis=1).values if zr_c_cols else 0.0
+                
+                if not z.get("isConditioned", True):
+                    continue
                     
-                    zh_kwh = sum(float(df.iloc[m][c]) for c in h_cols if z_id in c.upper()) / 3600000.0
-                    zc_kwh = sum(float(df.iloc[m][c]) for c in c_cols if z_id in c.upper()) / 3600000.0
-                    zl_kwh = sum(float(df.iloc[m][c]) for c in l_cols if z_id in c.upper()) / 3600000.0
-                    ze_kwh = sum(float(df.iloc[m][c]) for c in e_cols if z_id in c.upper()) / 3600000.0
+                hvac_sys = z.get('hvacSystemId', 5)
+                fuel_type = z.get('heatingFuelId', 2)
+                
+                if is_geothermal: 
+                    h_cop, c_cop = 4.5, 5.0
+                else:
+                    c_cop = self.COOLING_EFF_DB.get(hvac_sys, 2.8)
+                    h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, 1.0)
                     
-                    zh_rate = sum(float(df.iloc[m][c]) for c in h_rate_cols if z_id in c.upper())
-                    zc_rate = sum(float(df.iloc[m][c]) for c in c_rate_cols if z_id in c.upper())
-                    zv_flow = sum(float(df.iloc[m][c]) for c in vent_cols if z_id in c.upper())
+                total_h_req_kwh += zh_kwh
+                total_c_req_kwh += zc_kwh
+                total_h_con_kwh += zh_kwh / h_cop
+                total_c_con_kwh += zc_kwh / c_cop
+                total_h_rate_w += zh_rate / h_cop
+                total_c_rate_w += zc_rate / c_cop
+
+            l_kwh = df[l_cols].sum(axis=1).values / 3600000.0 if l_cols else 0.0
+            e_kwh = df[e_cols].sum(axis=1).values / 3600000.0 if e_cols else 0.0
+            
+            dhw_j = df[dhw_col].values if dhw_col else np.zeros(total_rows)
+            dhw_kwh = (dhw_j / 3600000.0) * 1.1 
+            
+            v_flow = df[vent_cols].sum(axis=1).values if vent_cols else np.zeros(total_rows)
+            vent_multiplier = 1.0 if is_hourly else 730.0
+            vent_kwh = (v_flow / 1.2) * 0.8 * vent_multiplier
+
+            df['total_elec_kwh'] = total_c_con_kwh + l_kwh + e_kwh + vent_kwh
+            df['total_heat_kwh'] = total_h_con_kwh + dhw_kwh
+
+            # TOU Rate calculation (시간대별 차등 요금제 적용)
+            def get_tou_rate(row):
+                m, h = row['month'], row['hour']
+                if m in [6, 7, 8]:
+                    if 13 <= h < 17: return 147.3  # Peak
+                    if (9 <= h < 13) or (17 <= h < 23): return 109.0  # Mid
+                    return 56.1  # Off
+                elif m in [11, 12, 1, 2]:
+                    if (9 <= h < 12) or (16 <= h < 19): return 137.9
+                    if (12 <= h < 16) or (19 <= h < 23): return 109.0
+                    return 61.6
+                else:
+                    if 9 <= h < 23: return 65.5
+                    return 56.1
                     
-                    m_h_req += zh_kwh
-                    m_c_req += zc_kwh
-                    m_l_con += zl_kwh
-                    m_e_con += ze_kwh
-                    m_v_flow += zv_flow
-                    
-                    if not z.get("isConditioned", True): 
-                        continue
-                        
-                    hvac_sys = z.get('hvacSystemId', 5)
-                    fuel_type = z.get('heatingFuelId', 2)
-                    
-                    if is_geothermal: 
-                        h_cop = 4.5
-                        c_cop = 5.0
-                    else:
-                        c_cop = self.COOLING_EFF_DB.get(hvac_sys, 2.8)
-                        h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, 1.0)
-                        
-                    m_h_con += zh_kwh / h_cop
-                    m_c_con += zc_kwh / c_cop
-                    m_h_rate += zh_rate / h_cop
-                    m_c_rate += zc_rate / c_cop
-                
-                a_h_req += m_h_req
-                a_c_req += m_c_req
-                a_h_con += m_h_con
-                a_c_con += m_c_con
-                a_l_con += m_l_con
-                a_e_con += m_e_con
-                
-                m_dhw_req = m_dhw_kwh
-                m_dhw_con = m_dhw_kwh * 1.1  # 시스템 열손실 반영
-                a_dhw_req += m_dhw_req
-                a_dhw_con += m_dhw_con
-                
-                m_vent_m3_s = m_v_flow / 1.2  # kg/s -> m3/s 변환 (대략적 밀도)
-                m_vent_kw = m_vent_m3_s * 0.8  # Fan 전력 (예: 0.8 kW per m3/s)
-                m_vent_kwh = m_vent_kw * 730   # 월 730시간
-                a_vent_req += m_vent_kwh
-                a_vent_con += m_vent_kwh
-                
-                month_num = m + 1
-                month_elec_kwh = m_c_con + m_l_con + m_e_con + m_vent_kwh
-                month_heat_kwh = m_h_con + m_dhw_con
-                
-                m_base_demand = float(df.iloc[m][demand_col]) if demand_col else 0.0
-                m_peak_kw = (m_base_demand + m_c_rate + m_h_rate + (m_vent_kw * 1000.0)) / 1000.0
-                if m_peak_kw > peak_elec_kw:
-                    peak_elec_kw = m_peak_kw
-                
-                if month_num in [6, 7, 8]: 
-                    elec_rate = self.ELEC_RATE_SUMMER
-                elif month_num in [11, 12, 1, 2]: 
-                    elec_rate = self.ELEC_RATE_WINTER
-                else: 
-                    elec_rate = self.ELEC_RATE_SPRING
-                
-                annual_elec_bill += month_elec_kwh * elec_rate
-                annual_heat_bill += month_heat_kwh * self.HEAT_RATE_KWH
-                
+            if is_hourly:
+                df['elec_rate'] = df.apply(get_tou_rate, axis=1)
+            else:
+                df['elec_rate'] = df['month'].apply(lambda m: self.ELEC_RATE_SUMMER if m in [6,7,8] else (self.ELEC_RATE_WINTER if m in [11,12,1,2] else self.ELEC_RATE_SPRING))
+
+            df['elec_cost'] = df['total_elec_kwh'] * df['elec_rate']
+            df['heat_cost'] = df['total_heat_kwh'] * self.HEAT_RATE_KWH
+
+            annual_elec_bill = df['elec_cost'].sum()
+            annual_heat_bill = df['heat_cost'].sum()
+
+            a_h_req = np.sum(total_h_req_kwh)
+            a_c_req = np.sum(total_c_req_kwh)
+            a_dhw_req = np.sum(dhw_j / 3600000.0) if dhw_col else 0.0
+            a_vent_req = np.sum((v_flow / 1.2) * vent_multiplier)
+            
+            a_h_con = np.sum(total_h_con_kwh)
+            a_c_con = np.sum(total_c_con_kwh)
+            a_l_con = np.sum(l_kwh)
+            a_e_con = np.sum(e_kwh)
+            a_dhw_con = np.sum(dhw_kwh)
+            a_vent_con = np.sum(vent_kwh)
+
+            base_demand = df[demand_col].values if demand_col else np.zeros(total_rows)
+            peak_kw_series = (base_demand + total_c_rate_w + total_h_rate_w + (v_flow / 1.2 * 0.8 * 1000.0)) / 1000.0
+            
+            # 동시사용률(Diversity Factor) 0.8 적용하여 피크 과대평가 방지
+            peak_elec_kw = peak_kw_series.max() * 0.8 if len(peak_kw_series) > 0 else 0
+            peak_kw_estimate = peak_elec_kw if peak_elec_kw > 0 else total_area * 0.05
+            annual_elec_bill += peak_kw_estimate * self.ELEC_BASE_CHARGE * 12
+            
+            for m in range(1, 13):
+                m_df = df[df['month'] == m]
                 monthly_data.append({
-                    "name": f"{month_num}월", 
-                    "heating": round(m_h_con / total_area, 1) if total_area > 0 else 0, 
-                    "cooling": round(m_c_con / total_area, 1) if total_area > 0 else 0
+                    "name": f"{m}월",
+                    "heating": round(m_df['total_heat_kwh'].sum() / total_area, 1) if total_area > 0 else 0,
+                    "cooling": round(np.sum(total_c_con_kwh[df['month'] == m]) / total_area, 1) if total_area > 0 else 0
                 })
 
             pv_gen = ((pv_capacity_kw * 1300) / total_area) if pv_capacity_kw and total_area > 0 else 0.0
-                
-            peak_kw_estimate = peak_elec_kw if peak_elec_kw > 0 else total_area * 0.1
-            annual_elec_bill += peak_kw_estimate * self.ELEC_BASE_CHARGE * 12
             
             target_window_price, mapped_window_name = self.match_window_price(target_u, target_shgc)
             
@@ -508,63 +548,62 @@ class LCCAnalyzer:
             insulation_cost = 0.0
             detailed_insulation_costs = []
             
-            if materials and "constructions" in materials:
-                constructions = materials["constructions"]
-                insulation_overrides_dict = insulation_overrides or {}
+            for s in surfaces:
+                s_id = s.get("id")
+                s_area = s.get("area", 0.0)
                 
-                # 각 Construction 별로 단열 공사비 계산
-                for c in constructions:
-                    c_id = c["id"]
-                    c_area = c.get("totalArea", 0.0)
-                    if c_area <= 0:
-                        continue
+                # 프론트엔드 캐시로 인해 area가 없을 경우 자체 계산 (긴급 패치)
+                if s_area <= 0 and s.get("vertices"):
+                    try:
+                        from src.gbxml_parser import calculate_surface_area
+                        s_area = round(calculate_surface_area(s["vertices"]), 2)
+                    except Exception:
+                        pass
                         
-                    # 오버라이드 확인
-                    override = insulation_overrides_dict.get(c_id)
-                    
-                    has_insulation = False
-                    conductivity = None
-                    
-                    if override:
-                        new_thickness = float(override.get("thickness", 0.0))
-                        new_tier = override.get("tier")
-                        if new_thickness > 0 and new_tier:
-                            has_insulation = True
-                            # 티어별 대표 전도율
-                            TIER_CONDUCTIVITY = {
-                                "premium": 0.025,
-                                "high": 0.035,
-                                "standard": 0.055,
-                                "basic": 0.085
-                            }
-                            conductivity = TIER_CONDUCTIVITY.get(new_tier, 0.04)
-                    else:
-                        # 원본 레이어 중 단열재 탐색
-                        for layer in c.get("layers", []):
-                            if layer.get("isInsulation"):
-                                has_insulation = True
-                                conductivity = layer.get("conductivity", 0.04)
-                                break
-                                
-                    if has_insulation and conductivity is not None:
-                        price, tier_label = self.match_insulation_price(conductivity)
-                        cost = c_area * price
-                        insulation_cost += cost
-                        detailed_insulation_costs.append({
-                            "constructionId": c_id,
-                            "constructionName": c.get("name", c_id),
-                            "area": c_area,
-                            "price": price,
-                            "cost": int(cost),
-                            "tier": tier_label
-                        })
+                s_type = s.get("type", s.get("surfaceType", ""))
+                if s_area <= 0 or s_type in ["InteriorWall", "InteriorFloor", "Ceiling"]:
+                    continue
                 
-                # 만약 단열재가 있는 외벽 면적이 전체 외벽 면적보다 많이 작거나 단열 공사비가 0이고 외벽 면적이 있는 경우,
-                # 기본 단열재로 처리할지 결정 (fallback)
-                if insulation_cost == 0.0 and total_wall_area > 0:
-                    insulation_cost = total_wall_area * self.cost_db["avg_prices"]["insulation"]
-            else:
-                # materials 정보가 없으면 기본 U-value 혹은 전체 외벽 면적 기반 fallback
+                has_insulation = False
+                conductivity = None
+                
+                override = construction_overrides.get(s_id)
+                if override and (override.get("isCustom") or override.get("insulationId") is not None):
+                    has_insulation = True
+                    target_u = override.get("uValue", s.get("uValue", 0.4))
+                    
+                    if override.get("isCustom"):
+                        t_insul = override.get("insulThick", 100) / 1000.0
+                    else:
+                        t_insul = override.get("thickness", 100) / 1000.0
+                        
+                    conductivity = t_insul * target_u # R값 기반 임시 열전도율 계산
+                else:
+                    c_id = s.get("constructionRef") or s.get("constructionId")
+                    if materials and "constructions" in materials:
+                        c = next((c for c in materials["constructions"] if c["id"] == c_id), None)
+                        if c:
+                            for layer in c.get("layers", []):
+                                if layer.get("isInsulation"):
+                                    has_insulation = True
+                                    conductivity = layer.get("conductivity", 0.04)
+                                    break
+                                    
+                override_tier = override.get("tier") if override else None
+                
+                if has_insulation and (conductivity is not None or override_tier is not None):
+                    price, tier_label = self.match_insulation_price(conductivity, explicit_tier=override_tier)
+                    cost = s_area * price
+                    insulation_cost += cost
+                    detailed_insulation_costs.append({
+                        "surfaceId": s_id,
+                        "area": s_area,
+                        "price": price,
+                        "cost": int(cost),
+                        "tier": tier_label
+                    })
+                    
+            if insulation_cost == 0.0 and total_wall_area > 0:
                 insulation_cost = total_wall_area * self.cost_db["avg_prices"]["insulation"]
             
             # LED 공사 면적 산출: 비거주 구역(계단실, 기계실, 창고, 엘리베이터 등)은
@@ -585,33 +624,58 @@ class LCCAnalyzer:
                     non_habitable_area += z_area
                 else:
                     habitable_area += z_area
-            led_effective_area = habitable_area + (non_habitable_area * 0.3)
-            # 안전장치: 면적이 0이면 전체 면적의 70%를 기본값으로 사용
-            if led_effective_area < 1.0:
-                led_effective_area = total_area * 0.7
-            led_cost = led_effective_area * self.cost_db["avg_prices"]["led"]
-            hvac_cost = peak_kw_estimate * self.cost_db["avg_prices"]["hvac_kw"]
+            if led_fixture_count > 0:
+                led_cost = led_fixture_count * 30000  # 등기구 개당 3만원 가정
+            else:
+                if led_reduction_active:
+                    led_effective_area = habitable_area  # 공용구역 전체 제외
+                else:
+                    led_effective_area = habitable_area + (non_habitable_area * 0.3)
+                # 안전장치: 면적이 0이면 전체 면적 비율을 조정하여 기본값으로 사용
+                if led_effective_area < 1.0:
+                    led_effective_area = total_area * (0.5 if led_reduction_active else 0.7)
+                led_cost = led_effective_area * self.cost_db["avg_prices"]["led"]
+            
+            hvac_upgrade_active = kwargs.get("hvac_upgrade_active", False)
+            
+            main_hvac_sys = 5
+            for z in zones:
+                if z.get("isConditioned", True):
+                    main_hvac_sys = z.get('hvacSystemId', 5)
+                    break
+            
+            hvac_unit_cost = self.cost_db["avg_prices"]["hvac_kw_system"].get(main_hvac_sys, self.cost_db["avg_prices"]["hvac_kw_default"])
+                    
+            if is_geothermal or hvac_upgrade_active:
+                hvac_cost = peak_kw_estimate * hvac_unit_cost
+            else:
+                hvac_cost = 0.0
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
 
-            # LCC NPV (30년) 계산 (순현재가치 반영)
-            discount_rate = 0.035
-            years = 30
+            # LCC NPV (현금흐름) 계산 - TRACE 600 재무분석 모델 적용
+            discount_rate = kwargs.get("discount_rate", 0.05)
+            inflation_rate = kwargs.get("inflation_rate", 0.03)
+            utility_inflation = kwargs.get("utility_inflation", 0.04)
+            years = kwargs.get("lifecycle_years", 20)
+            
             cumulative_lcc_30y = []
             current_npv = total_capital_cost
             
             for y in range(1, years + 1):
-                yearly_op_cost = annual_elec_bill + annual_heat_bill
-                maint_cost = (hvac_cost * 0.02) + (led_cost * 0.01)
+                yearly_op_cost = (annual_elec_bill + annual_heat_bill) * ((1 + utility_inflation) ** y)
+                maint_cost = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
                 
                 replacement_cost = 0
                 if y % 15 == 0:
-                    replacement_cost += hvac_cost
+                    # 15년차 설비 전면 교체가 아닌 핵심기기(50%) 부분 교체 반영
+                    replacement_cost += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
                 if y % 10 == 0:
-                    # LED 교체는 등기구 전체가 아닌 램프/안정기 교체로 가정 (초기 비용의 40%)
-                    replacement_cost += led_cost * 0.4
+                    replacement_cost += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
                     
                 total_year_cost = yearly_op_cost + maint_cost + replacement_cost
+                
+                # NPV(순현재가치) = (미래가치) / (1 + 할인율)^y
                 discounted_cost = total_year_cost / ((1 + discount_rate) ** y)
                 current_npv += discounted_cost
                 cumulative_lcc_30y.append(int(current_npv))
@@ -641,11 +705,126 @@ class LCCAnalyzer:
                 "independence": independence_val
             }
             
+            recommendations = []
+            if target_budget > 0 and total_capital_cost > target_budget:
+                if '고성능' in mapped_window_name or 'premium' in mapped_window_name.lower():
+                    std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
+                    saved_cost = window_cost - (total_window_area * std_price)
+                    if saved_cost > 0:
+                        recommendations.append({
+                            "type": "window",
+                            "title": "창호 등급 하향 (Premium → Standard)",
+                            "description": "최상급 창호 대신 일반 복층 유리로 변경하면 공사비를 크게 절감할 수 있습니다.",
+                            "saved_cost": int(saved_cost)
+                        })
+                elif '중성능' in mapped_window_name or 'high' in mapped_window_name.lower():
+                    std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
+                    saved_cost = window_cost - (total_window_area * std_price)
+                    if saved_cost > 0:
+                        recommendations.append({
+                            "type": "window",
+                            "title": "창호 등급 하향 (High → Standard)",
+                            "description": "로이 복층유리 대신 일반 복층 유리로 변경하여 예산을 아낄 수 있습니다.",
+                            "saved_cost": int(saved_cost)
+                        })
+                        
+                high_tier_insul_cost = 0
+                std_insul_price = self.cost_db.get("insulation_tiers", {}).get("standard", {}).get("avg", 15000)
+                std_insul_cost_sum = 0
+                
+                if 'detailed_insulation_costs' in locals() and detailed_insulation_costs:
+                    for d in detailed_insulation_costs:
+                        if '고성능' in d["tier"] or 'premium' in d["tier"].lower() or '중성능' in d["tier"] or 'high' in d["tier"].lower():
+                            high_tier_insul_cost += d["cost"]
+                            std_insul_cost_sum += d["area"] * std_insul_price
+                            
+                print(f"DEBUG: high_tier_insul_cost={high_tier_insul_cost}, std_insul_cost_sum={std_insul_cost_sum}")
+                if high_tier_insul_cost > std_insul_cost_sum:
+                    saved_insul = high_tier_insul_cost - std_insul_cost_sum
+                    recommendations.append({
+                        "type": "insulation",
+                        "title": "단열재 사양 하향 (일반 EPS/미네랄울 활용)",
+                        "description": "고성능 단열재 대신 일반 단열재로 변경할 경우 초기 비용이 감소합니다.",
+                        "saved_cost": int(saved_insul)
+                    })
+                    
+                if is_geothermal:
+                    saved_hvac = hvac_cost * 0.4
+                    recommendations.append({
+                        "type": "hvac",
+                        "title": "지열 난방 시스템 해제",
+                        "description": "초기 설치비가 높은 지열 시스템을 일반 시스템으로 변경하여 비용을 절감합니다.",
+                        "saved_cost": int(saved_hvac)
+                    })
+                elif hvac_upgrade_active:
+                    saved_hvac = hvac_cost
+                    recommendations.append({
+                        "type": "hvac",
+                        "title": "설비 시스템 전면 교체 보류",
+                        "description": "기존 냉난방 설비를 유지하여 막대한 초기 공사비를 대폭 절감합니다.",
+                        "saved_cost": int(saved_hvac)
+                    })
+
+                if led_cost > 0:
+                    if led_fixture_count > 0:
+                        saved_led = led_cost * 0.5
+                        desc = "직접 입력한 LED 교체 수량을 50% 축소하여 필수 구역만 우선 교체합니다."
+                        title = "LED 조명 교체 수량 축소 (50%)"
+                    else:
+                        saved_led = led_cost * 0.3
+                        desc = "계단실, 복도, 창고 등 공용 구역을 제외하고 주요 거주 구역 위주로 부분 교체합니다."
+                        title = "LED 조명 부분 교체 (공용구역 제외)"
+                    recommendations.append({
+                        "type": "led",
+                        "title": title,
+                        "description": desc,
+                        "saved_cost": int(saved_led)
+                    })
+
+            # 단순 IRR (내부수익률) 계산기 (Bisection method)
+            def calculate_irr(cash_flows, max_iter=100):
+                low, high = -0.99, 1.0
+                for _ in range(max_iter):
+                    rate = (low + high) / 2
+                    npv_test = sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
+                    if abs(npv_test) < 1e-5: return rate
+                    if npv_test > 0: low = rate
+                    else: high = rate
+                return rate
+                
+            # 현금흐름 배열 (Year 0은 -초기투자비, Year 1~N은 연간 운영수익(여기서는 기존 건물 대비 절감액으로 해야함))
+            # 기준 건물 대비 에너지 절감액을 현금 흐름으로 잡음
+            base_h_cop = 1.5
+            base_c_cop = 2.0
+            base_heat_bill = (a_h_req / base_h_cop) * self.HEAT_RATE_KWH
+            
+            base_elec_bill = annual_elec_bill - df['heat_cost'].sum()  # 기존 전력
+            base_elec_bill += (a_c_req / base_c_cop) * self.ELEC_BASE_CHARGE # 추정 냉방비 추가 (TOU 약산)
+            base_elec_bill *= 1.2 # 노후 기기 및 누기율 등에 의한 20% 패널티
+            
+            base_running_cost = base_elec_bill + base_heat_bill # 임의의 기존 노후 건물 추정 (약 60% 비효율)
+            cash_flows = [-total_capital_cost]
+            for y in range(1, years + 1):
+                base_cost_y = base_running_cost * ((1 + utility_inflation) ** y)
+                yearly_op_cost_y = (annual_elec_bill + annual_heat_bill) * ((1 + utility_inflation) ** y)
+                maint_cost_y = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
+                
+                rep_cost_y = 0
+                if y % 15 == 0: rep_cost_y += hvac_cost * ((1 + inflation_rate) ** y)
+                if y % 10 == 0: rep_cost_y += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
+                
+                # 절감액 = (기존 건물 운영비) - (리모델링 후 운영비 + 유지보수 + 교체비)
+                net_savings = base_cost_y - (yearly_op_cost_y + maint_cost_y + rep_cost_y)
+                cash_flows.append(net_savings)
+                
+            irr_val = calculate_irr(cash_flows) * 100
+
             financial = {
                 "annual_elec_bill": int(annual_elec_bill),
                 "annual_heat_bill": int(annual_heat_bill),
                 "total_energy_bill": int(annual_elec_bill + annual_heat_bill),
                 "capital_cost": int(total_capital_cost),
+                "target_budget": int(target_budget),
                 "cost_details": {
                     "window": int(window_cost), 
                     "insulation": int(insulation_cost), 
@@ -654,8 +833,17 @@ class LCCAnalyzer:
                 },
                 "mapped_window_name": mapped_window_name,
                 "insulation_details": detailed_insulation_costs if 'detailed_insulation_costs' in locals() else [],
+                "recommendations": recommendations,
                 "csv_db_loaded": self.cost_db["status"],
-                "cumulative_lcc_30y": cumulative_lcc_30y
+                "cumulative_lcc_30y": cumulative_lcc_30y,
+                "lcc_parameters": {
+                    "discount_rate": discount_rate * 100,
+                    "inflation_rate": inflation_rate * 100,
+                    "utility_inflation": utility_inflation * 100,
+                    "lifecycle_years": years
+                },
+                "npv": int(current_npv),
+                "irr": round(irr_val, 2)
             }
             
             surface_thermal = {}

@@ -418,14 +418,104 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     # 기본 재료
     idf.add_material("Concrete_Heavy", "MediumRough", 0.2, 1.95, 2240, 900)
     
+    # 재료 물성치 DB (프론트엔드와 동기화)
+    STRUCT_DB = {
+        'O1': {'n': 'Brickwork', 'c': 0.84, 'd': 1700, 'sh': 800},
+        'O2': {'n': 'Ext_Rendering', 'c': 0.50, 'd': 1300, 'sh': 1000},
+        'O3': {'n': 'Stone', 'c': 1.50, 'd': 2500, 'sh': 800},
+        'O4': {'n': 'Asphalt', 'c': 0.70, 'd': 2100, 'sh': 1000},
+        'O5': {'n': 'Aluminum_Panel', 'c': 200.0, 'd': 2700, 'sh': 900},
+        'O6': {'n': 'Stucco', 'c': 0.72, 'd': 1850, 'sh': 840},
+        'O7': {'n': 'Zinc_Panel', 'c': 110.0, 'd': 7140, 'sh': 390},
+        'O8': {'n': 'Wood_Siding', 'c': 0.14, 'd': 600, 'sh': 1200},
+        'O9': {'n': 'Granite', 'c': 2.80, 'd': 2600, 'sh': 1000},
+        'O10': {'n': 'Steel_Panel', 'c': 50.0, 'd': 7800, 'sh': 450},
+        'C1': {'n': 'Concrete', 'c': 1.13, 'd': 2000, 'sh': 1000},
+        'C2': {'n': 'Concrete_Dense', 'c': 1.40, 'd': 2100, 'sh': 840},
+        'C3': {'n': 'Concrete_Block', 'c': 0.51, 'd': 1400, 'sh': 1000},
+        'C4': {'n': 'Timber', 'c': 0.14, 'd': 650, 'sh': 1200},
+        'C5': {'n': 'Structural_Brick', 'c': 0.84, 'd': 1700, 'sh': 800},
+        'C6': {'n': 'ALC_Block', 'c': 0.11, 'd': 500, 'sh': 1000},
+        'C7': {'n': 'Precast_Concrete', 'c': 1.63, 'd': 2200, 'sh': 840},
+        'C8': {'n': 'Light_Gauge_Steel', 'c': 50.0, 'd': 7800, 'sh': 450},
+        'C9': {'n': 'Mud_Brick', 'c': 0.60, 'd': 1600, 'sh': 850},
+        'I1': {'n': 'Gypsum_Board', 'c': 0.25, 'd': 900, 'sh': 1000},
+        'I2': {'n': 'Plastering', 'c': 0.40, 'd': 1000, 'sh': 1000},
+        'I3': {'n': 'Screed', 'c': 0.41, 'd': 1200, 'sh': 840},
+        'I4': {'n': 'Wood_Panel', 'c': 0.14, 'd': 650, 'sh': 1200},
+        'I5': {'n': 'Ceramic_Tile', 'c': 1.20, 'd': 2300, 'sh': 840},
+        'I6': {'n': 'Plywood', 'c': 0.13, 'd': 540, 'sh': 1210},
+        'I7': {'n': 'Marble', 'c': 2.80, 'd': 2600, 'sh': 800},
+        'I8': {'n': 'Acoustic_Tile', 'c': 0.06, 'd': 300, 'sh': 1300},
+        'I9': {'n': 'Wallpaper', 'c': 0.10, 'd': 600, 'sh': 1200}
+    }
+    
+    # 프론트엔드는 payload 최상위에, 일부 경로에서는 projectData 안에 넣을 수 있음 → 양쪽 모두 체크
+    construction_overrides = payload.get("constructionOverrides", {}) or project_data.get("constructionOverrides", {})
+    print(f"🔧 construction_overrides 수신: {len(construction_overrides)}건")
+    
     # 표면별 단열재 + 구조체 + 유리
     for s in surfaces:
         u_val = max(0.1, s.get("uValue", 0.8))
-        r_insul = max(0.01, (1.0 / u_val) - 0.102)
-        t_insul = r_insul * 0.04
+        c_ref = s.get("constructionRef") or s.get("constructionId")
         
-        idf.add_material(f"Insul_{s['id']}", "Smooth", t_insul, 0.04, 50, 800)
-        idf.add_construction(f"Const_{s['id']}", ["Concrete_Heavy", f"Insul_{s['id']}", "Concrete_Heavy"])
+        override = construction_overrides.get(s['id'])
+        is_custom = override and override.get("isCustom")
+        
+        if is_custom and override.get("uValue"):
+            u_val = max(0.1, override.get("uValue"))
+            
+        if is_custom:
+            # 4중 레이어 커스텀 모드
+            layer_names = []
+            
+            # 1. 외장재
+            out_mat = STRUCT_DB.get(override.get("outerId"), STRUCT_DB['O1'])
+            t_out = max(0.001, override.get("outerThick", 10) / 1000.0)
+            mat_name_out = f"{out_mat['n']}_{s['id']}"
+            idf.add_material(mat_name_out, "Smooth", t_out, out_mat['c'], out_mat['d'], out_mat['sh'])
+            layer_names.append(mat_name_out)
+            
+            # 2. 단열재 (U-value를 맞추기 위해 역계산, 프론트에서 넘어온 두께 사용)
+            t_insul = max(0.001, override.get("insulThick", 100) / 1000.0)
+            # R_total = 1/U = R_film + R_out + R_insul + R_core + R_in
+            r_film = 0.17
+            r_out = t_out / out_mat['c']
+            
+            core_mat = STRUCT_DB.get(override.get("coreId"), STRUCT_DB['C1'])
+            t_core = max(0.001, override.get("coreThick", 150) / 1000.0)
+            r_core = t_core / core_mat['c']
+            
+            in_mat = STRUCT_DB.get(override.get("innerId"), STRUCT_DB['I1'])
+            t_in = max(0.001, override.get("innerThick", 10) / 1000.0)
+            r_in = t_in / in_mat['c']
+            
+            r_insul_target = (1.0 / u_val) - r_film - r_out - r_core - r_in
+            c_insul = t_insul / max(0.01, r_insul_target) if r_insul_target > 0 else 0.04
+            
+            mat_name_insul = f"Insul_{s['id']}"
+            idf.add_material(mat_name_insul, "Smooth", t_insul, c_insul, 50, 800)
+            layer_names.append(mat_name_insul)
+            
+            # 3. 구조체
+            mat_name_core = f"{core_mat['n']}_{s['id']}"
+            idf.add_material(mat_name_core, "MediumRough", t_core, core_mat['c'], core_mat['d'], core_mat['sh'])
+            layer_names.append(mat_name_core)
+            
+            # 4. 내장재
+            mat_name_in = f"{in_mat['n']}_{s['id']}"
+            idf.add_material(mat_name_in, "Smooth", t_in, in_mat['c'], in_mat['d'], in_mat['sh'])
+            layer_names.append(mat_name_in)
+            
+            idf.add_construction(f"Const_{s['id']}", layer_names)
+            
+        else:
+            # 기본 모드 (단열재만 변경 또는 원본)
+            r_insul = max(0.01, (1.0 / u_val) - 0.102)
+            t_insul = r_insul * 0.04
+            
+            idf.add_material(f"Insul_{s['id']}", "Smooth", t_insul, 0.04, 50, 800)
+            idf.add_construction(f"Const_{s['id']}", ["Concrete_Heavy", f"Insul_{s['id']}", "Concrete_Heavy"])
         
         wwr = s.get("wwr", 0)
         if wwr > 0:
@@ -669,6 +759,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     if ep_success:
         csv_path = os.path.join(temp_dir_abs, "eplusout.csv")
         act_main = project_data.get('activityId', 1105)
+        target_budget = float(project_data.get('targetBudget', 0.0)) * 10000.0
+        led_reduction_active = project_data.get('ledReductionActive', False)
+        hvac_upgrade_active = payload.get('hvacUpgradeActive', False)
+        
+        lcc_parameters = payload.get('lccParameters', {})
         
         result_data = analyzer.calculate(
             eplus_csv_path=csv_path,
@@ -683,7 +778,15 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             act_main=act_main,
             surfaces=surfaces,
             materials=materials_data,
-            insulation_overrides=insulation_overrides
+            construction_overrides=construction_overrides,
+            target_budget=target_budget,
+            led_fixture_count=sum(int(z.get('ledFixtureCount', 0)) for z in zones),
+            led_reduction_active=led_reduction_active,
+            hvac_upgrade_active=hvac_upgrade_active,
+            discount_rate=float(lcc_parameters.get('discountRate', 5.0)) / 100.0,
+            inflation_rate=float(lcc_parameters.get('inflationRate', 3.0)) / 100.0,
+            utility_inflation=float(lcc_parameters.get('utilityInflation', 4.0)) / 100.0,
+            lifecycle_years=int(lcc_parameters.get('lifecycleYears', 20))
         )
         return result_data
 

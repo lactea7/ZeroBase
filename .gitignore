@@ -4,12 +4,35 @@ green-retrofit-frontend/.eslintcache
 
 green-retrofit-backend/__pycache__/
 green-retrofit-backend/temp_workspace/
+green-retrofit-backend/temp_test_cost/
 green-retrofit-backend/venv/
 green-retrofit-backend/env/
+.venv/
+
+# EnergyPlus 시뮬레이션 산출물 (재생성됨)
+green-retrofit-backend/**/eplusout*
+green-retrofit-backend/**/eplustbl*
+green-retrofit-backend/**/generated_model.idf
+
+# 일회용 스크래치/디버그 스크립트 (아카이브: _scratch/)
+_scratch/
+green-retrofit-backend/test_*.py
+green-retrofit-backend/check_*.py
+green-retrofit-backend/debug_*.py
+green-retrofit-backend/run_test.py
+green-retrofit-backend/curl_output.txt
+green-retrofit-backend/*.patch
+green-retrofit-backend/test_peak.idf
 
 _data/eplusout*
 _data/*.zip
 
+# 루트 작업/보고서 산출물
+/src/
+/memory.md/
+/test_area.py
+
 .DS_Store
 *.pyc
+__pycache__/
 .env

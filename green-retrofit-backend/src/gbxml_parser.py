@@ -528,6 +528,7 @@ def parse_gbxml_to_json(filepath: str):
         }
 
         surf_area = calculate_surface_area(vertices)
+        surface_data["area"] = round(surf_area, 2)
         total_op_area = 0.0
 
         # 5. 창문/문(Opening) 파싱
