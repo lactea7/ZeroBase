@@ -34,6 +34,9 @@ class LCCAnalyzer:
     CO2_FACTOR_ELEC = 0.466      # 전력 배출계수 (kgCO2/kWh)
     CO2_FACTOR_HEAT = 0.232      # 가스(LNG) 연소 배출계수 (kgCO2/kWh)
 
+    # LED 조명: 단가는 '개당(EA)' 기준이므로 면적은 등기구 개수로 환산해 적용한다.
+    LED_FIXTURE_AREA_M2 = 10.0   # 등기구 1개가 담당하는 바닥면적 (㎡/개)
+
     HEATING_EFF_DB = { 
         1: {1: 0.85, 2: 2.50, 4: 0.80, 11: 0.95}, 
         2: {2: 3.50, 11: 1.00}, 
@@ -165,7 +168,7 @@ class LCCAnalyzer:
             "avg_prices": {
                 "window": 250000,
                 "insulation": 45000,
-                "led": 12000,
+                "led_per_ea": 85000,   # LED 등기구 개당 단가(원/개) — DB에서 보정
                 "hvac_kw_system": {
                     1: 1800000, # AHU
                     2: 2500000, # VRF/EHP
@@ -239,12 +242,26 @@ class LCCAnalyzer:
                                         "price": price
                                     })
                             
-                            # LED 단가 수집
-                            led_items = df[row_texts.str.contains('LED', na=False, case=False)]
-                            if not led_items.empty: 
-                                led_valid = led_items[led_items['price_num'] > 0]
-                                if not led_valid.empty:
-                                    cost_db_dict["avg_prices"]["led"] = led_valid['price_num'].mean()
+                            # LED 조명 등기구 단가 수집 (개당/EA 기준)
+                            # ⚠️ 'LED' 행에는 전광판·모니터·센서 등 비조명 품목과 EA 외 단위가 섞여 있어
+                            #    조명 키워드 + EA 단위만 남기고 산업용 고가 이상치를 제외한 '중앙값'을 사용한다.
+                            led_light_kw = '등|조명|램프|다운라이트|평판|직부|매입|벽등|투광|형광|전구|라이트'
+                            led_noise_kw = '전광판|모니터|TV|스크린|표시기|센서|신호|가로등|보안등|디스플레이|패널|감시|카메라|광고|사이니지'
+                            unit_col_led = next((c for c in df.columns if '단위' in str(c)), None)
+                            led_mask = (
+                                row_texts.str.contains('LED', na=False, case=False)
+                                & row_texts.str.contains(led_light_kw, na=False)
+                                & ~row_texts.str.contains(led_noise_kw, na=False, case=False)
+                                & (df['price_num'] > 0)
+                                & (df['price_num'] <= 1_000_000)   # 산업용 고가 이상치 제외
+                            )
+                            if unit_col_led is not None:
+                                led_mask = led_mask & df[unit_col_led].astype(str).str.contains('EA|개', na=False, case=False)
+                            led_valid = df[led_mask]
+                            if not led_valid.empty:
+                                led_med = int(led_valid['price_num'].median())
+                                cost_db_dict["avg_prices"]["led_per_ea"] = led_med
+                                print(f"  📊 LED 조명 DB: {len(led_valid)}건, 등기구 개당 중앙값 ₩{led_med:,}")
                             
                             # 단열재 단가 수집 (EL243.보온·단열재 카테고리)
                             insul_mask = row_texts.str.contains('EL243|보온.*단열재', na=False, case=False)
@@ -639,8 +656,11 @@ class LCCAnalyzer:
                     non_habitable_area += z_area
                 else:
                     habitable_area += z_area
+            # LED 비용은 '등기구 개당(EA)' 단가로 통일 (면적 기준일 때도 개수로 환산)
+            led_per_ea = self.cost_db["avg_prices"].get("led_per_ea", 85000)
             if led_fixture_count > 0:
-                led_cost = led_fixture_count * 30000  # 등기구 개당 3만원 가정
+                # 사용자가 직접 입력한 등기구 수량 기준
+                led_cost = led_fixture_count * led_per_ea
             else:
                 if led_reduction_active:
                     led_effective_area = habitable_area  # 공용구역 전체 제외
@@ -649,7 +669,9 @@ class LCCAnalyzer:
                 # 안전장치: 면적이 0이면 전체 면적 비율을 조정하여 기본값으로 사용
                 if led_effective_area < 1.0:
                     led_effective_area = total_area * (0.5 if led_reduction_active else 0.7)
-                led_cost = led_effective_area * self.cost_db["avg_prices"]["led"]
+                # 면적 → 등기구 개수 환산(약 LED_FIXTURE_AREA_M2 ㎡당 1개) 후 개당 단가 적용
+                est_fixtures = led_effective_area / self.LED_FIXTURE_AREA_M2
+                led_cost = est_fixtures * led_per_ea
             
             hvac_upgrade_active = kwargs.get("hvac_upgrade_active", False)
             
