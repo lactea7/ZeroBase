@@ -1,6 +1,7 @@
 # src/cost_analyzer.py
 import os
 import re
+import statistics
 
 try:
     import pandas as pd
@@ -36,6 +37,21 @@ class LCCAnalyzer:
 
     # LED 조명: 단가는 '개당(EA)' 기준이므로 면적은 등기구 개수로 환산해 적용한다.
     LED_FIXTURE_AREA_M2 = 10.0   # 등기구 1개가 담당하는 바닥면적 (㎡/개)
+
+    # 공종별 단가 타당성 범위 (원). DB 추출값이 벗어나면 클램프 + 경고 → 오매핑 재발 방지.
+    PRICE_BOUNDS = {
+        "window_m2":     (50_000, 600_000),   # 창호 ₩/㎡
+        "insulation_m2":  (5_000, 120_000),   # 단열재 ₩/㎡
+        "led_ea":        (20_000, 500_000),   # LED 등기구 ₩/개
+    }
+
+    def _clamp_price(self, value, key, label=""):
+        """DB에서 뽑은 단가가 상식 범위를 벗어나면 경계값으로 보정하고 경고를 남긴다."""
+        lo, hi = self.PRICE_BOUNDS[key]
+        v = min(max(value, lo), hi)
+        if v != value:
+            print(f"  ⚠️ 단가 가드: {label or key} ₩{int(value):,} → ₩{int(v):,} (정상범위 {lo:,}~{hi:,})")
+        return v
 
     HEATING_EFF_DB = { 
         1: {1: 0.85, 2: 2.50, 4: 0.80, 11: 0.95}, 
@@ -259,7 +275,7 @@ class LCCAnalyzer:
                                 led_mask = led_mask & df[unit_col_led].astype(str).str.contains('EA|개', na=False, case=False)
                             led_valid = df[led_mask]
                             if not led_valid.empty:
-                                led_med = int(led_valid['price_num'].median())
+                                led_med = int(self._clamp_price(led_valid['price_num'].median(), "led_ea", "LED 등기구"))
                                 cost_db_dict["avg_prices"]["led_per_ea"] = led_med
                                 print(f"  📊 LED 조명 DB: {len(led_valid)}건, 등기구 개당 중앙값 ₩{led_med:,}")
                             
@@ -316,13 +332,14 @@ class LCCAnalyzer:
         for tier_key, tier_info in self.WINDOW_TIERS.items():
             prices = tier_prices[tier_key]
             if prices:
-                avg_price = sum(prices) / len(prices)
+                # 이상치에 강한 중앙값 + 타당성 클램프
+                avg_price = self._clamp_price(statistics.median(prices), "window_m2", f"창호 {tier_info['label']}")
                 cost_db_dict["window_tiers"][tier_key] = {
                     "avg": int(avg_price),
                     "count": len(prices),
                     "label": tier_info["label"]
                 }
-                print(f"  📊 창호 [{tier_info['label']}] 등급: {len(prices)}건 → 평균 ₩{int(avg_price):,}/㎡")
+                print(f"  📊 창호 [{tier_info['label']}] 등급: {len(prices)}건 → 중앙값 ₩{int(avg_price):,}/㎡")
             else:
                 cost_db_dict["window_tiers"][tier_key] = {
                     "avg": tier_info["default_price"],
@@ -338,7 +355,7 @@ class LCCAnalyzer:
         for tier_key, tier_info in self.INSULATION_TIERS.items():
             prices = insul_tier_prices[tier_key]
             if prices:
-                avg_price = sum(prices) / len(prices)
+                avg_price = self._clamp_price(statistics.median(prices), "insulation_m2", f"단열 {tier_info['label']}")
                 cost_db_dict["insulation_tiers"][tier_key] = {
                     "avg": int(avg_price),
                     "count": len(prices),
@@ -602,14 +619,20 @@ class LCCAnalyzer:
                 override = construction_overrides.get(s_id)
                 if override and (override.get("isCustom") or override.get("insulationId") is not None):
                     has_insulation = True
-                    target_u = override.get("uValue", s.get("uValue", 0.4))
-                    
+                    # ⚠️ 함수 파라미터 target_u를 덮어쓰지 않도록 지역변수 사용
+                    surf_u = override.get("uValue", s.get("uValue", 0.4))
+
                     if override.get("isCustom"):
                         t_insul = override.get("insulThick", 100) / 1000.0
                     else:
                         t_insul = override.get("thickness", 100) / 1000.0
-                        
-                    conductivity = t_insul * target_u # R값 기반 임시 열전도율 계산
+
+                    # 단열층 열전도율 추정: λ = 두께 / 단열저항
+                    #   단열저항 ≈ 전체저항(1/U) − 표면열전달저항(0.17). 구조층은 보수적으로 무시.
+                    #   (기존 t_insul×U는 단위는 맞지만 λ를 체계적으로 과소평가 → 등급 과대평가)
+                    r_total = (1.0 / surf_u) if surf_u and surf_u > 0 else 0.0
+                    r_insul = max(r_total - 0.17, 0.1)
+                    conductivity = t_insul / r_insul if r_insul > 0 else 0.04
                 else:
                     c_id = s.get("constructionRef") or s.get("constructionId")
                     if materials and "constructions" in materials:
@@ -689,6 +712,18 @@ class LCCAnalyzer:
                 hvac_cost = 0.0
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
+
+            # 공사비 비중 새너티 점검: 단가/물량 오매핑으로 한 공종이 비정상 지배하면 경고
+            # (설비는 전면교체 시 정상적으로 클 수 있어 임계 제외)
+            cost_warnings = []
+            if total_capital_cost > 0:
+                _shares = {"창호": window_cost, "단열": insulation_cost, "LED": led_cost}
+                for _label, _val in _shares.items():
+                    _share = _val / total_capital_cost
+                    if _share > 0.6:
+                        _msg = f"{_label} 공사비가 전체의 {_share*100:.0f}%로 과도합니다 — 단가/물량 매핑 점검 필요"
+                        cost_warnings.append(_msg)
+                        print(f"  ⚠️ 비중 점검: {_msg}")
 
             # 생애주기비용(LCC) 현금흐름 계산 (할인 현금흐름 방식)
             discount_rate = kwargs.get("discount_rate", 0.05)
@@ -900,6 +935,7 @@ class LCCAnalyzer:
                 "npv": int(npv_real),
                 "total_lcc": int(lcc_pv),
                 "irr": round(irr_val, 2),
+                "cost_warnings": cost_warnings,
                 # NPV/IRR/절감액이 비교한 '기존 노후 건물' 추정 가정 (UI 표기용)
                 "baseline_assumptions": {
                     "heating_cop": self.BASELINE_HEATING_COP,

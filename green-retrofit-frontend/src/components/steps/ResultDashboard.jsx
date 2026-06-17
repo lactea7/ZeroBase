@@ -667,6 +667,21 @@ export default function ResultDashboard({
                         <Calculator size={20} className="text-amber-500" /> 공종별 내역서 (조달청/친환경 DB)
                       </h3>
 
+                      <p className={`text-[11px] mb-5 -mt-3 flex items-start gap-1.5 ${theme.textSub} opacity-70`}>
+                        <Info size={13} className="shrink-0 mt-0.5 text-amber-400" />
+                        <span>자재비 단가 기준 <b>상대 비교용 추정치</b>입니다(노무·철거·가설비 미포함). 절대 금액보다 공종 간 비중·대안 비교에 활용하세요.</span>
+                      </p>
+
+                      {res.financial.cost_warnings?.length > 0 && (
+                        <div className="mb-5 p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 flex flex-col gap-1">
+                          {res.financial.cost_warnings.map((w, i) => (
+                            <span key={i} className="text-[11px] font-bold text-rose-500 flex items-start gap-1.5">
+                              <AlertTriangle size={12} className="shrink-0 mt-0.5" /> {w}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
                       <div className="flex-1 flex flex-col justify-center gap-4">
                         {[
                           { key: 'window', label: '창호 공사 (Glazing)', color: 'bg-blue-500' },
