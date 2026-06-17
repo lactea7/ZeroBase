@@ -868,7 +868,9 @@ export default function App() {
     const f = res.financial;
     const retrofitRunningCost = f.total_energy_bill;
     const capitalCost = f.capital_cost;
-    const baseRunningCost = retrofitRunningCost * 1.6;
+    // 기준 건물 운영비 배수는 백엔드(baseline_assumptions)와 단일 소스로 공유 → 차트/NPV/IRR 일관
+    const baseMultiplier = f.baseline_assumptions?.running_cost_multiplier || 1.6;
+    const baseRunningCost = retrofitRunningCost * baseMultiplier;
     const annualSavings = baseRunningCost - retrofitRunningCost;
     
     const params = f.lcc_parameters || { inflation_rate: 2, lifecycle_years: 15 };

@@ -651,9 +651,9 @@ export default function ResultDashboard({
                     <p className={`text-[11px] leading-relaxed flex items-start gap-1.5 px-1 ${theme.textSub} opacity-70`}>
                       <Info size={13} className="shrink-0 mt-0.5 text-indigo-400" />
                       <span>
-                        NPV·IRR·회수기간은 <b>추정 기준 건물</b>(난방 COP {lccAnalysis.baselineAssumptions.heating_cop},
-                        냉방 COP {lccAnalysis.baselineAssumptions.cooling_cop},
-                        노후 비효율 +{lccAnalysis.baselineAssumptions.inefficiency_penalty_pct}%) 대비 절감액으로 산출된
+                        NPV·IRR·회수기간은 <b>추정 기준 건물</b>(기존 노후 건물의 운영비를 리모델링 후의{' '}
+                        {lccAnalysis.baselineAssumptions.running_cost_multiplier}배 ≈ 절감률{' '}
+                        {lccAnalysis.baselineAssumptions.savings_pct}%로 가정) 대비 절감액으로 산출된
                         값입니다. 실제 건물의 사용량과 다를 수 있으며, 절대 수치보다 상대 비교 지표로 활용하세요.
                       </span>
                     </p>

@@ -20,12 +20,12 @@ class LCCAnalyzer:
     HEAT_RATE_MCAL = 145.82
     HEAT_RATE_KWH = HEAT_RATE_MCAL * 0.8604
 
-    # ── 비교 기준이 되는 '기존 노후 건물' 추정 가정값 ──
-    # ⚠️ 실측이 아닌 표준 가정치. NPV/IRR/절감액은 이 가정 대비 차이로 산출되므로
-    #    값이 바뀌면 투자지표가 크게 달라진다. (UI에 '추정 기준'으로 함께 표기)
-    BASELINE_HEATING_COP = 1.5            # 노후 난방기기 효율
-    BASELINE_COOLING_COP = 2.0            # 노후 냉방기기 효율
-    BASELINE_INEFFICIENCY_PENALTY = 0.20  # 단열 노후·외풍·누기 등 추가 손실 (+20%)
+    # ── 비교 기준이 되는 '기존 노후 건물' 운영비 추정 ──
+    # ⚠️ 실측 데이터가 없으므로 단일·투명·보수적 가정을 쓴다.
+    #    기존 건물 운영비 = 리모델링 후 운영비 × 배수. (절감률 = (배수-1)/배수)
+    #    NPV/IRR/절감액은 전적으로 이 가정 대비 차이이므로 UI에 '추정 기준'으로 표기한다.
+    #    1.6 → 기존이 60% 더 비쌈 ≈ 절감률 37.5%
+    BASELINE_RUNNING_COST_MULTIPLIER = 1.6
 
     # ── 에너지원별 1차에너지 환산계수 / CO2 배출계수 ──
     # 전기는 발전·송배전 손실로 계수가 높고, 열(난방·급탕)은 낮다.
@@ -867,8 +867,9 @@ class LCCAnalyzer:
                     })
 
             # 단순 IRR (내부수익률) 계산기 (Bisection method)
-            def calculate_irr(cash_flows, max_iter=100):
-                low, high = -0.99, 1.0
+            # 상한을 5.0(500%)까지 넓혀 인위적으로 100%에 고정되지 않게 한다.
+            def calculate_irr(cash_flows, max_iter=200):
+                low, high = -0.99, 5.0
                 for _ in range(max_iter):
                     rate = (low + high) / 2
                     npv_test = sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
@@ -878,16 +879,10 @@ class LCCAnalyzer:
                 return rate
                 
             # 현금흐름 배열 (Year 0 = -초기투자비, Year 1~N = 기존 노후 건물 대비 절감액)
-            # ⚠️ 기준 건물은 실측이 아니라 표준 가정값(클래스 상수)으로 추정한 것이다.
-            base_h_cop = self.BASELINE_HEATING_COP
-            base_c_cop = self.BASELINE_COOLING_COP
-            base_heat_bill = (a_h_req / base_h_cop) * self.HEAT_RATE_KWH
-
-            base_elec_bill = annual_elec_bill - df['heat_cost'].sum()  # 기존 전력
-            base_elec_bill += (a_c_req / base_c_cop) * self.ELEC_BASE_CHARGE # 추정 냉방비 추가 (TOU 약산)
-            base_elec_bill *= (1 + self.BASELINE_INEFFICIENCY_PENALTY)  # 노후 기기·누기 패널티
-
-            base_running_cost = base_elec_bill + base_heat_bill # 기존 노후 건물 운영비 추정치
+            # ⚠️ 기준 건물 운영비 = 리모델링 후 운영비 × 배수 (단일·투명 가정).
+            #    프론트 LCC 차트와 동일한 모델을 사용해 NPV/IRR과 차트가 일관되게 한다.
+            retrofit_running_cost = annual_elec_bill + annual_heat_bill
+            base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
             cash_flows = [-total_capital_cost]
             for y in range(1, years + 1):
                 base_cost_y = base_running_cost * ((1 + utility_inflation) ** y)
@@ -905,6 +900,13 @@ class LCCAnalyzer:
                 cash_flows.append(net_savings)
 
             irr_val = calculate_irr(cash_flows) * 100
+
+            # 비현실적으로 높은 IRR은 (초기투자비 대비 절감액 과다) 가정 민감도 경고
+            if irr_val > 100:
+                cost_warnings.append(
+                    f"IRR이 {irr_val:.0f}%로 비정상적으로 높습니다 — 초기투자비가 작거나 기준 건물 가정이 절감액을 과대평가했을 수 있어 참고용으로만 보세요"
+                )
+                print(f"  ⚠️ IRR 점검: {irr_val:.0f}% (가정 민감도 높음)")
 
             # 순현재가치(NPV) = 순절감액 현금흐름을 할인율로 할인한 현재가치의 합
             #   (cash_flows[0] = -초기투자비 이므로 자본비가 이미 반영됨)
@@ -940,9 +942,8 @@ class LCCAnalyzer:
                 "cost_warnings": cost_warnings,
                 # NPV/IRR/절감액이 비교한 '기존 노후 건물' 추정 가정 (UI 표기용)
                 "baseline_assumptions": {
-                    "heating_cop": self.BASELINE_HEATING_COP,
-                    "cooling_cop": self.BASELINE_COOLING_COP,
-                    "inefficiency_penalty_pct": round(self.BASELINE_INEFFICIENCY_PENALTY * 100)
+                    "running_cost_multiplier": self.BASELINE_RUNNING_COST_MULTIPLIER,
+                    "savings_pct": round((1 - 1 / self.BASELINE_RUNNING_COST_MULTIPLIER) * 100)
                 }
             }
             
