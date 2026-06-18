@@ -91,19 +91,51 @@ DEFAULT_ARCHETYPE = "office"
 
 # ── 용도명 키워드 → 아키타입 (위에서부터 먼저 맞는 것 채택) ─────────────────────
 _KEYWORD_RULES = [
-    (["domestic", "en suite", "bedroom", "lounge", "dwelling", "living"], "residential"),
+    (["domestic", "en suite", "bedroom", "lounge", "dwelling", "living", "bathroom", "washing"], "residential"),
     (["hotel", "guest", "dormitory", "기숙"], "lodging"),
     (["sales area", "shop", "retail", "store unit", "판매"], "retail"),
     (["food preparation", "eating", "drinking", "restaurant", "kitchen", "음식", "식당"], "restaurant"),
     (["classroom", "lecture", "teaching", "seminar", "library", "school", "교육", "강의"], "education"),
     (["ward", "surgery", "patient", "hospital", "treatment", "consulting", "post mortem", "medical", "의료", "병"], "healthcare"),
     (["laboratory", "industrial process", "workshop", "실험", "공정"], "lab"),
-    (["assembly", "performance", "stage", "sports hall", "swimming pool", "gym", "fitness", "hall", "집회", "공연", "체육"], "assembly"),
+    (["assembly", "performance", "stage", "sports hall", "swimming pool", "gym", "fitness", "hall", "sauna", "pool", "집회", "공연", "체육"], "assembly"),
     (["office", "reception", "사무"], "office"),
     # 보조/비주거 공간
-    (["store room", "warehouse", "storage", "circulation", "corridor", "stairway",
-      "toilet", "changing", "laundry", "plant room", "lobby", "창고", "복도", "계단", "화장실", "기계"], "auxiliary"),
+    (["store room", "warehouse", "storage", "circulation", "corridor", "stairway", "stair",
+      "vestibule", "chase", "shaft", "lift", "elevator", "parking", "toilet", "changing", "locker",
+      "laundry", "plant room", "boiler", "mechanical", "lobby",
+      "창고", "복도", "계단", "화장실", "기계", "주차"], "auxiliary"),
 ]
+
+
+# ── Space 이름 키워드 → 대표 SBEM activityId (parser의 용도 추론용) ─────────────
+# gbXML에 spaceType이 없을 때 Space 이름(예: "1 BATHROOM")으로 용도를 추정한다.
+# ⚠️ 순서 중요: 'room'은 다른 단어의 부분문자열(BATHROOM, STORE ROOM 등)이므로 맨 뒤.
+_NAME_TO_ACTIVITY = [
+    (["bathroom", "washing"], 1185),   # Domestic Bathroom
+    (["toilet", " wc", "restroom"], 1182),  # Domestic Toilet
+    (["kitchen"], 1183),               # Domestic Kitchen
+    (["sauna", "gym", "fitness", "sports", "pool"], 1106),  # Fitness/gym
+    (["dining"], 1181),                # Domestic Dining
+    (["lounge", "living", "communal", "common space"], 1179),  # Domestic Lounge
+    (["store", "storage", "parking", "warehouse"], 1100),  # Store Room
+    (["stair", "vestibule", "chase", "shaft", "lift", "elevator",
+      "corridor", "circulation", "lobby", "locker", "changing"], 1101),  # Circulation
+    (["plant", "boiler", "mechanical", "vent", "heating", "electrical"], 1104),  # Plant room
+    (["office"], 1105),
+    (["bedroom", "room"], 1180),       # 남은 ROOM = 침실(주거) — 반드시 맨 뒤
+]
+DEFAULT_ACTIVITY_ID = 1105
+
+
+def activity_id_from_space_name(name: str) -> int:
+    """Space 이름으로 대표 용도(activityId)를 추정한다. 못 찾으면 1105(사무) 폴백."""
+    if name:
+        low = name.lower()
+        for keywords, aid in _NAME_TO_ACTIVITY:
+            if any(kw in low for kw in keywords):
+                return aid
+    return DEFAULT_ACTIVITY_ID
 
 
 def classify_activity(name: str) -> str:

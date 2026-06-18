@@ -2,6 +2,7 @@
 import defusedxml.ElementTree as ET
 import re
 import math
+from src.activity_schedules import activity_id_from_space_name
 
 def strip_ns_and_lower(tag):
     """XML 태그에서 네임스페이스와 접두사를 모두 제거하고 소문자로 변환합니다."""
@@ -694,7 +695,8 @@ def parse_gbxml_to_json(filepath: str):
             "id": sp_data["name"],
             "floor": sp_data["floor"],
             "height": sp_data.get("height", 3.0),  # 💡 [신규] 역산된 높이
-            "activityId": 1105,
+            # gbXML에 spaceType이 없으므로 Space 이름으로 용도 추론 (못 찾으면 1105)
+            "activityId": activity_id_from_space_name(sp_data.get("name", "")),
             "isConditioned": True,
             "heatingSetpoint": 20.0,
             "coolingSetpoint": 26.0
