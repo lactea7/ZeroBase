@@ -29,69 +29,70 @@ _DAYTYPE_FOR = {
     "holiday": "Holidays",
 }
 
-# ── 아키타입별 표준 스케줄 (ECO2 구조 기반 근사) ───────────────────────────────
-# 시간은 24h 기준. 빈 리스트 = 해당 요일 비운영(종일 설정후퇴).
+# ── 아키타입별 표준 스케줄 ────────────────────────────────────────────────────
+# 운영(재실/조명/기기) 프로파일은 ASHRAE_OCC(아래)의 시간별 재실률을 사용한다.
+# 냉난방은 '재실>임계' 시 존 설정온도, 그 외 setback(여기 값). 즉 타이밍=ASHRAE,
+# 온도=사용자 설정. auxiliary만 ASHRAE 프로파일 없이 상시 저조도(op_fraction).
 ARCHETYPES = {
-    "office": {
-        "label": "업무시설(사무)",
-        "weekday": [(9, 18)], "weekend": [], "holiday": [],
-        "heat_setback": 16.0, "cool_setback": 30.0,
-    },
-    "residential": {
-        "label": "주거",
-        # 거주: 저녁~아침 위주 + 주말 종일 (낮 시간 외출 가정)
-        "weekday": [(0, 9), (18, 24)], "weekend": [(0, 24)], "holiday": [(0, 24)],
-        "heat_setback": 18.0, "cool_setback": 28.0,
-    },
-    "lodging": {
-        "label": "숙박(객실/기숙)",
-        "weekday": [(0, 9), (17, 24)], "weekend": [(0, 24)], "holiday": [(0, 24)],
-        "heat_setback": 18.0, "cool_setback": 28.0,
-    },
-    "retail": {
-        "label": "판매시설",
-        "weekday": [(10, 20)], "weekend": [(10, 20)], "holiday": [(10, 20)],
-        "heat_setback": 16.0, "cool_setback": 30.0,
-    },
-    "restaurant": {
-        "label": "음식점",
-        # 점심·저녁 영업 (매일)
-        "weekday": [(10, 15), (17, 22)], "weekend": [(10, 15), (17, 22)], "holiday": [(10, 15), (17, 22)],
-        "heat_setback": 16.0, "cool_setback": 30.0,
-    },
-    "education": {
-        "label": "교육연구(학교)",
-        "weekday": [(9, 17)], "weekend": [], "holiday": [],
-        "heat_setback": 16.0, "cool_setback": 30.0,
-    },
-    "healthcare": {
-        "label": "의료시설",
-        "weekday": [(0, 24)], "weekend": [(0, 24)], "holiday": [(0, 24)],
-        "heat_setback": 22.0, "cool_setback": 26.0,
-    },
-    "lab": {
-        "label": "연구/산업(실험·공정)",
-        "weekday": [(0, 24)], "weekend": [(0, 24)], "holiday": [(0, 24)],
-        "heat_setback": 18.0, "cool_setback": 28.0,
-    },
-    "assembly": {
-        "label": "집회/체육/공연",
-        "weekday": [(9, 22)], "weekend": [(9, 22)], "holiday": [(9, 22)],
-        "heat_setback": 16.0, "cool_setback": 30.0,
-    },
-    "auxiliary": {
-        "label": "보조공간(복도·창고·화장실·기계실)",
-        # 냉난방은 상시 최소(설정후퇴)만 — 적극 공조 없음
-        "weekday": [], "weekend": [], "holiday": [],
-        "heat_setback": 15.0, "cool_setback": 32.0,
-        # 단, 조명/기기는 복도 등 상시 저조도만 (op=0이면 복도 조명까지 꺼짐).
-        # 0.1 = 복도 상시 저조도 수준 (0.25는 과대 → 기기까지 부풀어 과교정됨)
-        "op_periods": {"weekday": [(6, 24)], "weekend": [(6, 24)], "holiday": [(6, 24)]},
-        "op_fraction": 0.1,
-    },
+    "office":      {"label": "업무시설(사무)",        "heat_setback": 16.0, "cool_setback": 30.0},
+    "residential": {"label": "주거",                  "heat_setback": 18.0, "cool_setback": 28.0},
+    "lodging":     {"label": "숙박(객실/기숙)",       "heat_setback": 18.0, "cool_setback": 28.0},
+    "retail":      {"label": "판매시설",              "heat_setback": 16.0, "cool_setback": 30.0},
+    "restaurant":  {"label": "음식점",                "heat_setback": 16.0, "cool_setback": 30.0},
+    "education":   {"label": "교육연구(학교)",        "heat_setback": 16.0, "cool_setback": 30.0},
+    "healthcare":  {"label": "의료시설",              "heat_setback": 22.0, "cool_setback": 26.0},
+    "lab":         {"label": "연구/산업(실험·공정)",  "heat_setback": 18.0, "cool_setback": 28.0},
+    "assembly":    {"label": "집회/체육/공연",        "heat_setback": 16.0, "cool_setback": 30.0},
+    "auxiliary":   {"label": "보조공간(복도·창고·화장실·기계실)",
+                    "heat_setback": 15.0, "cool_setback": 32.0,
+                    # ASHRAE 프로파일 없음 → 복도 상시 저조도(0.1), 냉난방은 종일 setback
+                    "op_fraction": 0.1, "op_hours": (6, 24)},
 }
 
 DEFAULT_ARCHETYPE = "office"
+
+# ── 시간별 재실률 (출처: ASHRAE 90.1 / DOE Prototype, openstudio-standards) ─────
+# 각 아키타입의 평일/주말 24시간 재실 프로파일. op(조명/기기/재실)에 그대로 쓰고,
+# 냉난방은 이 값이 OCC_THRESHOLD 이상인 시간만 설정온도로 본다.
+OCC_THRESHOLD = 0.15
+ASHRAE_OCC = {
+    "office": {  # OfficeMedium BLDG_OCC_SCH
+        "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.95, 0.95, 0.95, 0.95, 0.5, 0.95, 0.95, 0.95, 0.95, 0.3, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05],
+        "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.3, 0.3, 0.3, 0.3, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0],
+    },
+    "residential": {  # ApartmentHighRise OCC_APT_SCH
+        "weekday": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.85, 0.39, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.3, 0.52, 0.87, 0.87, 0.87, 1.0, 1.0, 1.0],
+        "weekend": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.85, 0.39, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.3, 0.52, 0.87, 0.87, 0.87, 1.0, 1.0, 1.0],
+    },
+    "lodging": {  # SmallHotel GuestRoom Occ
+        "weekday": [0.65, 0.65, 0.65, 0.65, 0.65, 0.65, 0.5, 0.28, 0.28, 0.13, 0.13, 0.13, 0.13, 0.13, 0.13, 0.2, 0.35, 0.35, 0.35, 0.5, 0.5, 0.58, 0.65, 0.65],
+        "weekend": [0.65, 0.65, 0.65, 0.65, 0.65, 0.65, 0.5, 0.34, 0.34, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.34, 0.35, 0.65, 0.65, 0.5, 0.5, 0.5],
+    },
+    "retail": {  # RetailStandalone BLDG_OCC_SCH
+        "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.5, 0.5, 0.7, 0.7, 0.7, 0.7, 0.8, 0.7, 0.5, 0.5, 0.3, 0.3, 0.0, 0.0, 0.0],
+        "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.5, 0.6, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.6, 0.2, 0.2, 0.2, 0.1, 0.0, 0.0],
+    },
+    "restaurant": {  # FullServiceRestaurant Bldg Occ
+        "weekday": [0.05, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 0.4, 0.4, 0.4, 0.2, 0.5, 0.8, 0.7, 0.4, 0.2, 0.25, 0.5, 0.8, 0.8, 0.8, 0.5, 0.35, 0.2],
+        "weekend": [0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.5, 0.5, 0.4, 0.2, 0.45, 0.5, 0.5, 0.35, 0.3, 0.3, 0.3, 0.7, 0.9, 0.7, 0.65, 0.55, 0.35],
+    },
+    "education": {  # SecondarySchool Bldg Occ
+        "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.15, 0.15, 0.15, 0.15, 0.15, 0.0, 0.0, 0.0],
+        "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    },
+    "healthcare": {  # Hospital BLDG_OCC_SCH
+        "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.5, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.5, 0.3, 0.3, 0.2, 0.2, 0.0, 0.0],
+        "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.3, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+    },
+    "lab": {  # Lab_OCC_SCH
+        "weekday": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.2, 0.9, 0.9, 0.45, 0.45, 0.9, 0.9, 0.9, 0.9, 0.9, 0.3, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05],
+        "weekend": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1, 0.1, 0.3, 0.3, 0.3, 0.3, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
+    },
+    "assembly": {  # SecondarySchool Gym Occ
+        "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.95, 0.95, 0.95, 0.95, 0.95, 0.0, 0.0, 0.0],
+        "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.95, 0.95, 0.95, 0.95, 0.95, 0.0, 0.0, 0.0],
+    },
+}
 
 # ── 용도명 키워드 → 아키타입 (위에서부터 먼저 맞는 것 채택) ─────────────────────
 _KEYWORD_RULES = [
@@ -179,53 +180,63 @@ def load_activity_names(db_dir: str) -> dict:
     return names
 
 
-def _segments_for_day(periods, occ_val, setback_val):
-    """하루치 'Until:' 세그먼트 생성. periods=[(s,e)...], 운영=occ_val, 그 외=setback_val."""
-    if not periods:
-        return f"Until: 24:00, {setback_val}"
+def _hourly_to_compact_day(values24):
+    """24개 시간값 → 'Until: HH:00, v' 세그먼트(연속 동일값 압축)."""
     segs = []
-    cursor = 0
-    for (s, e) in sorted(periods):
-        s = max(0, min(24, int(s)))
-        e = max(0, min(24, int(e)))
-        if s > cursor:
-            segs.append(f"Until: {s:02d}:00, {setback_val}")
-        segs.append(f"Until: {e:02d}:00, {occ_val}")
-        cursor = e
-    if cursor < 24:
-        segs.append(f"Until: 24:00, {setback_val}")
+    i, n = 0, len(values24)
+    while i < n:
+        v = values24[i]
+        j = i
+        while j + 1 < n and values24[j + 1] == v:
+            j += 1
+        segs.append(f"Until: {j + 1:02d}:00, {v}")
+        i = j + 1
     return ", ".join(segs)
 
 
-def _compact_text(periods_by_day, occ, setback):
-    """요일유형별 운영시간(periods_by_day={daytype:[(s,e)..]})으로 Schedule:Compact 생성.
-    운영시간=occ, 그 외=setback."""
-    parts = ["Through: 12/31"]
-    for daytype, for_kw in _DAYTYPE_FOR.items():
-        seg = _segments_for_day(periods_by_day.get(daytype, []), occ, setback)
-        parts.append(f"For: {for_kw}, {seg}")
-    parts.append(f"For: AllOtherDays, Until: 24:00, {setback}")
-    return ", ".join(parts)
+def _weekly_compact(weekday24, weekend24):
+    """평일/주말 24h 배열 → Schedule:Compact 본문 (주말=공휴일=기타일)."""
+    wd = _hourly_to_compact_day(weekday24)
+    we = _hourly_to_compact_day(weekend24)
+    return (f"Through: 12/31, For: Weekdays, {wd}, "
+            f"For: Weekends, {we}, For: Holidays, {we}, "
+            f"For: AllOtherDays, {we}")
 
 
 def build_schedules(archetype_key: str, heat_set: float, cool_set: float) -> dict:
     """아키타입 + 존 설정온도로 운영/난방/냉방 Schedule:Compact 본문을 만든다.
 
-    반환: {op, heating, cooling} (각각 Schedule:Compact body 문자열)
-      op      : 재실/조명/기기 가동률 (운영시간=op_fraction, 그 외 0)
-      heating : 냉난방 운영시간(occupied)=heat_set, 그 외=heat_setback
-      cooling : occupied=cool_set, 그 외=cool_setback
-
-    난방/냉방은 'occupied'(쾌적 재실) 시간을 따르고, 조명/기기(op)는 별도
-    'op_periods'/'op_fraction'을 쓸 수 있다. (예: 복도는 난방 setback이지만
-    조명은 저조도로 상시 켜짐 → op_periods 길게, op_fraction 낮게)
+    반환: {op, heating, cooling}
+      op      : 시간별 재실률(ASHRAE) — 조명/기기/재실 구동
+      heating : 재실 ≥ OCC_THRESHOLD 시간만 heat_set, 그 외 heat_setback
+      cooling : 재실 ≥ OCC_THRESHOLD 시간만 cool_set, 그 외 cool_setback
+    (타이밍=ASHRAE 시간프로파일, 온도=사용자 존 설정. auxiliary는 상시 저조도)
     """
     arch = ARCHETYPES.get(archetype_key, ARCHETYPES[DEFAULT_ARCHETYPE])
-    comfort = {d: arch.get(d, []) for d in _DAYTYPE_FOR}
-    op_periods = arch.get("op_periods", comfort)   # 미지정 시 쾌적 재실시간과 동일
-    op_fraction = arch.get("op_fraction", 1.0)
+    occ = ASHRAE_OCC.get(archetype_key)
+
+    if occ is None:
+        # ASHRAE 프로파일 없는 보조공간: 상시 저조도, 냉난방은 종일 setback
+        frac = arch.get("op_fraction", 0.0)
+        s, e = arch.get("op_hours", (0, 24))
+        op_day = [frac if s <= h < e else 0.0 for h in range(24)]
+        hb = [arch["heat_setback"]] * 24
+        cb = [arch["cool_setback"]] * 24
+        return {
+            "op": _weekly_compact(op_day, op_day),
+            "heating": _weekly_compact(hb, hb),
+            "cooling": _weekly_compact(cb, cb),
+        }
+
+    wd, we = occ["weekday"], occ["weekend"]
+
+    def setp(occ_day, on, off):
+        return [on if v >= OCC_THRESHOLD else off for v in occ_day]
+
     return {
-        "op": _compact_text(op_periods, op_fraction, 0.0),
-        "heating": _compact_text(comfort, heat_set, arch["heat_setback"]),
-        "cooling": _compact_text(comfort, cool_set, arch["cool_setback"]),
+        "op": _weekly_compact(wd, we),
+        "heating": _weekly_compact(setp(wd, heat_set, arch["heat_setback"]),
+                                   setp(we, heat_set, arch["heat_setback"])),
+        "cooling": _weekly_compact(setp(wd, cool_set, arch["cool_setback"]),
+                                   setp(we, cool_set, arch["cool_setback"])),
     }
