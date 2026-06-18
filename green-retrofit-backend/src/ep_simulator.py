@@ -658,6 +658,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
     skipped_count = 0
     zone_to_zone_count = 0
+    air_boundary_count = 0
+    # 개방 경계(Air 표면)용 공유 AirBoundary construction (콘크리트 벽 대신 공기혼합)
+    idf.add_air_boundary_construction("AirBoundary_Const")
 
     for s in surfaces:
         z_id = s['zone'].replace(" ", "_")
@@ -692,16 +695,22 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             mirror_id = f"{s['id']}_mirror"
             mirror_verts = list(reversed(verts))  # 법선벡터 반전
 
+            # Air(개방 경계)면은 콘크리트 벽 대신 AirBoundary(공기혼합+복사교환) 사용
+            is_air = "air" in t
+            const_name = "AirBoundary_Const" if is_air else f"Const_{s['id']}"
+            if is_air:
+                air_boundary_count += 1
+
             # 원본: Zone A (gbXML에서 직접 연결된 Zone)
             idf.add_surface(
-                s['id'], ep_type, f"Const_{s['id']}", z_id,
+                s['id'], ep_type, const_name, z_id,
                 "Surface", "NoSun", "NoWind", verts,
                 adj_surface_id=mirror_id
             )
 
             # 미러: Zone B (인접 Zone) — 동일 Construction 재사용
             idf.add_surface(
-                mirror_id, ep_type, f"Const_{s['id']}", adj_zone_id,
+                mirror_id, ep_type, const_name, adj_zone_id,
                 "Surface", "NoSun", "NoWind", mirror_verts,
                 adj_surface_id=s['id']
             )

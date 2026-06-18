@@ -95,6 +95,14 @@ class IdfBuilder:
         """Construction 객체 추가"""
         return self.add("Construction", [name] + layers)
 
+    def add_air_boundary_construction(self, name: str, ach: float = 0.5,
+                                      mixing_schedule: str = "AlwaysOn"):
+        """Construction:AirBoundary — 물리적 벽이 없는 개방 경계(존간 공기혼합+복사교환).
+        Air 표면(문없는 방↔복도 등)에 사용. 전도저항 0."""
+        return self.add("Construction:AirBoundary", [
+            name, "SimpleMixing", ach, mixing_schedule
+        ])
+
     def add_glazing_simple(self, name: str, u_value: float, shgc: float, vt: float = 0.8):
         """SimpleGlazingSystem 유리 추가 (U값/SHGC 범위 검증)"""
         if u_value <= 0 or u_value > 10:
