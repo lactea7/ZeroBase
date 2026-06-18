@@ -1662,6 +1662,7 @@ export default function App() {
               selectedSurfaceData={selectedSurfaceData}
               currentPanes={currentPanes}
               currentType={currentType}
+              currentGlazing={currentGlazing}
               availableTypes={availableTypes}
               filteredGlazingList={filteredGlazingList}
               inactiveBtnClass={inactiveBtnClass}

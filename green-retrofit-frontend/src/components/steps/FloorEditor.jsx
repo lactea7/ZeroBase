@@ -27,7 +27,7 @@ export default function FloorEditor(props) {
     latitude, selectedRegion, lightCalc, setLightCalc, equipCalc, setEquipCalc,
     setStep,
     // 계산된 파생값 (App에서 전달)
-    displayFloors, selectedSurfaceData, currentPanes, currentType,
+    displayFloors, selectedSurfaceData, currentPanes, currentType, currentGlazing,
     availableTypes, filteredGlazingList, inactiveBtnClass,
     // 핸들러 / 헬퍼
     handleConstructionOverrideChange, handleResetInsulationOverride,
@@ -1114,6 +1114,58 @@ export default function FloorEditor(props) {
                                         </option>
                                       ))}
                                     </select>
+                                  </div>
+
+                                  {/* 4. 유리 단면 시각화 (단열재 단면과 동일 컨셉, 수평형) */}
+                                  <div className="animate-in fade-in slide-in-from-top-2 pt-2 border-t border-blue-500/10">
+                                    <label className="text-[10px] font-black uppercase opacity-60 mb-2 flex items-center gap-1">
+                                      <span className="bg-blue-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px]">4</span>{' '}
+                                      유리 단면 (Glazing Section)
+                                    </label>
+                                    {(() => {
+                                      const g = currentGlazing || {};
+                                      const paneCount = currentPanes === 'Single' ? 1 : currentPanes === 'Triple' ? 3 : currentPanes === 'Quadruple' ? 4 : 2;
+                                      const lowE = currentType === 'Low-E';
+                                      const smart = currentType === 'Smart';
+                                      const isArgon = /arg/i.test(g.name || '');
+                                      const gasLabel = isArgon ? '아르곤' : '공기';
+                                      // 외부→실내 순서로 유리/가스층 배열
+                                      const items = [];
+                                      for (let i = 0; i < paneCount; i++) {
+                                        // Low-E 코팅은 보통 실내측 유리 표면(가스층 접한 면)에 도포
+                                        items.push({ type: 'glass', lowE: (lowE || smart) && i === paneCount - 1 });
+                                        if (i < paneCount - 1) items.push({ type: 'gap' });
+                                      }
+                                      return (
+                                        <>
+                                          <div className="flex items-center gap-1">
+                                            <span className="text-[8px] font-black text-blue-500/70 [writing-mode:vertical-rl] rotate-180">바깥</span>
+                                            <div className="flex-1 flex items-stretch h-24 rounded-lg overflow-hidden border-2 border-slate-500/30 bg-gradient-to-b from-sky-50/30 to-transparent">
+                                              {items.map((it, idx) => it.type === 'glass' ? (
+                                                <div key={idx} className="relative flex-shrink-0 w-[16px] bg-gradient-to-r from-sky-300/80 to-sky-200/50 border-x border-sky-400/40" title="유리 (Glass)">
+                                                  <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.7) 0%, transparent 40%)' }}></div>
+                                                  {it.lowE && <div className="absolute inset-y-0 right-0 w-[3px] bg-amber-400 shadow" title="Low-E 코팅"></div>}
+                                                </div>
+                                              ) : (
+                                                <div key={idx} className="relative flex-1 flex items-center justify-center min-w-[28px]" title={`${gasLabel} 충전층`}>
+                                                  <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 4px, #64748b 4px, #64748b 5px)' }}></div>
+                                                  <span className="text-[8px] font-bold text-slate-500 -rotate-90 whitespace-nowrap">{gasLabel}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                            <span className="text-[8px] font-black text-red-500/70 [writing-mode:vertical-rl]">실내</span>
+                                          </div>
+                                          {/* 사양 칩 */}
+                                          <div className="flex flex-wrap gap-1.5 mt-2 justify-center">
+                                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">{paneCount}중 유리</span>
+                                            {(lowE || smart) && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">{smart ? '스마트' : 'Low-E'} 코팅</span>}
+                                            {paneCount > 1 && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-500 border border-slate-500/20">{gasLabel} 충전</span>}
+                                            {g.u != null && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">U {Number(g.u).toFixed(2)}</span>}
+                                            {g.shgc != null && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 border border-orange-500/20">SHGC {Number(g.shgc).toFixed(2)}</span>}
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               </div>
