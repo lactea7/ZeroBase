@@ -76,6 +76,29 @@ ARCHETYPES = {
 
 DEFAULT_ARCHETYPE = "office"
 
+# ── 용도별 표준 부하밀도·재실·급탕·설정온도 (존에 명시값 없을 때 기본값) ─────────
+# lighting/equipment: W/m², people: 인/m², dhw_lpd: L/인·일, heat/cool: ℃(운영중)
+# ⚠️ ECO2/ASHRAE 통상값 기반 근사 — 정확표 있으면 숫자만 교체.
+# (기존엔 용도무관 조명10·기기15 일괄 → 냉방 과대평가의 원인이었음)
+ARCHETYPE_LOADS = {
+    "office":      {"lighting": 9,  "equipment": 12, "people": 0.06, "dhw_lpd": 5,   "heat": 20, "cool": 26},
+    "residential": {"lighting": 6,  "equipment": 4,  "people": 0.03, "dhw_lpd": 100, "heat": 20, "cool": 26},
+    "lodging":     {"lighting": 8,  "equipment": 5,  "people": 0.05, "dhw_lpd": 120, "heat": 20, "cool": 26},
+    "retail":      {"lighting": 13, "equipment": 5,  "people": 0.15, "dhw_lpd": 5,   "heat": 20, "cool": 26},
+    "restaurant":  {"lighting": 11, "equipment": 25, "people": 0.50, "dhw_lpd": 40,  "heat": 20, "cool": 26},
+    "education":   {"lighting": 9,  "equipment": 8,  "people": 0.25, "dhw_lpd": 8,   "heat": 20, "cool": 26},
+    "university":  {"lighting": 10, "equipment": 12, "people": 0.20, "dhw_lpd": 10,  "heat": 20, "cool": 26},
+    "healthcare":  {"lighting": 11, "equipment": 18, "people": 0.10, "dhw_lpd": 90,  "heat": 22, "cool": 25},
+    "lab":         {"lighting": 12, "equipment": 25, "people": 0.10, "dhw_lpd": 15,  "heat": 20, "cool": 26},
+    "assembly":    {"lighting": 9,  "equipment": 5,  "people": 0.30, "dhw_lpd": 10,  "heat": 20, "cool": 26},
+    "auxiliary":   {"lighting": 4,  "equipment": 1,  "people": 0.02, "dhw_lpd": 2,   "heat": 18, "cool": 28},
+}
+
+
+def get_archetype_loads(archetype_key: str) -> dict:
+    """아키타입의 표준 부하/재실/급탕/설정온도 기본값."""
+    return ARCHETYPE_LOADS.get(archetype_key, ARCHETYPE_LOADS[DEFAULT_ARCHETYPE])
+
 # ── 시간별 재실률 (출처: ASHRAE 90.1 / DOE Prototype, openstudio-standards) ─────
 # 각 아키타입의 평일/주말 24시간 재실 프로파일. op(조명/기기/재실)에 그대로 쓰고,
 # 냉난방은 이 값이 OCC_THRESHOLD 이상인 시간만 설정온도로 본다.

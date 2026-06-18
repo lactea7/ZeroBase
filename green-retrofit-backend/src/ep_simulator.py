@@ -16,7 +16,7 @@ except ImportError:
     pd = None
 
 from src.cost_analyzer import LCCAnalyzer
-from src.activity_schedules import load_activity_names, classify_activity, build_schedules
+from src.activity_schedules import load_activity_names, classify_activity, build_schedules, get_archetype_loads
 
 # ---------------------------------------------------------
 # [상용 데이터베이스 동적 파싱 로직]
@@ -588,10 +588,12 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
                 z_id, "Temperature", f"{z_id}_CoolSch", 0.0, 0.0, 100.0, 0.0, 300000.0, "AlwaysOn"
             ])
         
+        activity = z.get("activityId", 1105)
+        arch_key = classify_activity(activity_names.get(activity, ""))
+        loads = get_archetype_loads(arch_key)   # 용도별 표준 부하/급탕 기본값
         heat_set = z.get("heatingSetpoint", 20.0)
         cool_set = z.get("coolingSetpoint", 26.0)
-        activity = z.get("activityId", 1105)
-        
+
         # 용도별 운영 스케줄 결정
         if use_custom:
             op_sch = "CustomOpSch"
@@ -606,8 +608,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             cool_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("cooling", [30]*24))
             cool_sch_text = f"Through: 12/31, {cool_wd}, {cool_we}, {cool_ho}, For: AllOtherDays, Until: 24:00, 30.0"
         else:
-            # 용도(activityId)명을 아키타입으로 분류해 표준 스케줄 적용 (ECO2 구조 기반)
-            arch_key = classify_activity(activity_names.get(activity, ""))
+            # 용도(activityId) 아키타입별 표준 스케줄 (ASHRAE/DOE 프로파일)
             sched = build_schedules(arch_key, heat_set, cool_set)
             op_sch = f"Op_{arch_key}"
             if op_sch not in created_op_sch:
@@ -622,10 +623,10 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             idf.add_schedule_compact(f"{z_id}_CoolSch", "AnyNumber", cool_sch_text)
             idf.add_thermostat(z_id, f"{z_id}_HeatSch", f"{z_id}_CoolSch")
 
-        ppl_dens = z.get("peopleDensity", 0.1)
-        light_p = z.get("lightingPower", 10.0)
-        
-        base_equip_p = z.get("equipmentPower", 15.0)
+        ppl_dens = z.get("peopleDensity", loads["people"])
+        light_p = z.get("lightingPower", loads["lighting"])
+
+        base_equip_p = z.get("equipmentPower", loads["equipment"])
         outlet_p = calc_outlet_power_density(z, z_area)
         load_type = z.get("outletLoadType", "sum")
         if load_type == "max":
@@ -638,11 +639,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         
         if ppl_dens > 0:
             idf.add_people(f"{z_id}_Ppl", z_id, op_sch, ppl_dens)
-            # 동적 급탕(DHW) 모델링 (재실자 기반)
-            # 가정: 1인당 일일 온수 사용량 30L(0.03m3), 피크 유량은 시간당 집중 가정
+            # 동적 급탕(DHW) 모델링 (재실자 기반) — 용도별 1인당 온수사용량(L/인·일)
+            # 주거·숙박·의료는 높고 사무·판매는 낮음 (기존 일괄 30L → 용도별)
             people_count = z_area * ppl_dens
             if people_count > 0:
-                peak_dhw_flow = people_count * (0.03 / 3600)  # m3/s
+                peak_dhw_flow = people_count * (loads["dhw_lpd"] / 1000.0 / 3600.0)  # m3/s 근사
                 idf.add_dhw(f"{z_id}_DHW", z_id, op_sch, peak_dhw_flow)
         if light_p > 0:
             idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, light_p)
