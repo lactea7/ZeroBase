@@ -52,6 +52,18 @@ ARCHETYPES = {
                             ("12/31", False),   # 12/24~    겨울방학
                         ],
                     }},
+    "university":  {"label": "대학교",                "heat_setback": 16.0, "cool_setback": 30.0,
+                    # 대학 학사일정: 1학기 3/2~6월중순, 2학기 9/1~12월중순 (여름방학 김)
+                    "academic_calendar": {
+                        "vacation_occ": 0.10,
+                        "segments": [
+                            ("3/1",   False),   # 1/1~3/1   겨울방학
+                            ("6/15",  True),    # 3/2~6/15  1학기
+                            ("8/31",  False),   # 6/16~8/31 여름방학
+                            ("12/15", True),    # 9/1~12/15 2학기
+                            ("12/31", False),   # 12/16~    겨울방학
+                        ],
+                    }},
     "healthcare":  {"label": "의료시설",              "heat_setback": 22.0, "cool_setback": 26.0},
     "lab":         {"label": "연구/산업(실험·공정)",  "heat_setback": 18.0, "cool_setback": 28.0},
     "assembly":    {"label": "집회/체육/공연",        "heat_setback": 16.0, "cool_setback": 30.0},
@@ -93,6 +105,10 @@ ASHRAE_OCC = {
         "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.15, 0.15, 0.15, 0.15, 0.15, 0.0, 0.0, 0.0],
         "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     },
+    "university": {  # College BLDG_OCC_SCH
+        "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.15, 0.15, 0.15, 0.15, 0.15, 0.0, 0.0, 0.0],
+        "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    },
     "healthcare": {  # Hospital BLDG_OCC_SCH
         "weekday": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.5, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.5, 0.3, 0.3, 0.2, 0.2, 0.0, 0.0],
         "weekend": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.3, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -113,6 +129,7 @@ _KEYWORD_RULES = [
     (["hotel", "guest", "dormitory", "기숙"], "lodging"),
     (["sales area", "shop", "retail", "store unit", "판매"], "retail"),
     (["food preparation", "eating", "drinking", "restaurant", "kitchen", "음식", "식당"], "restaurant"),
+    (["university", "college", "campus", "대학", "lecture theatre", "lecture theater"], "university"),
     (["classroom", "lecture", "teaching", "seminar", "library", "school", "교육", "강의"], "education"),
     (["ward", "surgery", "patient", "hospital", "treatment", "consulting", "post mortem", "medical", "의료", "병"], "healthcare"),
     (["laboratory", "industrial process", "workshop", "실험", "공정"], "lab"),
@@ -129,7 +146,13 @@ _KEYWORD_RULES = [
 # ── Space 이름 키워드 → 대표 SBEM activityId (parser의 용도 추론용) ─────────────
 # gbXML에 spaceType이 없을 때 Space 이름(예: "1 BATHROOM")으로 용도를 추정한다.
 # ⚠️ 순서 중요: 'room'은 다른 단어의 부분문자열(BATHROOM, STORE ROOM 등)이므로 맨 뒤.
+# 합성 용도(ActivityIdList에 없는 용도) — load_activity_names가 병합
+SYNTHETIC_ACTIVITIES = {
+    9001: "University Campus",   # → classify_activity: university
+}
+
 _NAME_TO_ACTIVITY = [
+    (["university", "college", "campus", "대학"], 9001),  # 대학 → 합성 용도
     (["bathroom", "washing"], 1185),   # Domestic Bathroom
     (["toilet", " wc", "restroom"], 1182),  # Domestic Toilet
     (["kitchen"], 1183),               # Domestic Kitchen
@@ -168,8 +191,9 @@ def classify_activity(name: str) -> str:
 
 
 def load_activity_names(db_dir: str) -> dict:
-    """ActivityIdList.txt(#ID #Name) → {activity_id(int): name(str)}."""
-    names = {}
+    """ActivityIdList.txt(#ID #Name) → {activity_id(int): name(str)}.
+    ActivityIdList에 없는 합성 용도(SYNTHETIC_ACTIVITIES)도 함께 병합한다."""
+    names = dict(SYNTHETIC_ACTIVITIES)
     if not db_dir:
         return names
     path = None
