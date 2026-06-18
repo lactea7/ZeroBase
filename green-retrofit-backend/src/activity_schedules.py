@@ -81,9 +81,13 @@ ARCHETYPES = {
     },
     "auxiliary": {
         "label": "보조공간(복도·창고·화장실·기계실)",
-        # 상시 최소 난방만, 적극 냉난방 없음
+        # 냉난방은 상시 최소(설정후퇴)만 — 적극 공조 없음
         "weekday": [], "weekend": [], "holiday": [],
         "heat_setback": 15.0, "cool_setback": 32.0,
+        # 단, 조명/기기는 복도 등 상시 저조도만 (op=0이면 복도 조명까지 꺼짐).
+        # 0.1 = 복도 상시 저조도 수준 (0.25는 과대 → 기기까지 부풀어 과교정됨)
+        "op_periods": {"weekday": [(6, 24)], "weekend": [(6, 24)], "holiday": [(6, 24)]},
+        "op_fraction": 0.1,
     },
 }
 
@@ -193,14 +197,13 @@ def _segments_for_day(periods, occ_val, setback_val):
     return ", ".join(segs)
 
 
-def _compact_text(arch, occ_val_map):
-    """요일유형별로 Schedule:Compact 본문 생성. occ_val_map={'occ':..,'setback':..}."""
-    occ, setback = occ_val_map["occ"], occ_val_map["setback"]
+def _compact_text(periods_by_day, occ, setback):
+    """요일유형별 운영시간(periods_by_day={daytype:[(s,e)..]})으로 Schedule:Compact 생성.
+    운영시간=occ, 그 외=setback."""
     parts = ["Through: 12/31"]
     for daytype, for_kw in _DAYTYPE_FOR.items():
-        seg = _segments_for_day(arch.get(daytype, []), occ, setback)
+        seg = _segments_for_day(periods_by_day.get(daytype, []), occ, setback)
         parts.append(f"For: {for_kw}, {seg}")
-    # 명시되지 않은 날(설계일 등)은 비운영 처리
     parts.append(f"For: AllOtherDays, Until: 24:00, {setback}")
     return ", ".join(parts)
 
@@ -209,13 +212,20 @@ def build_schedules(archetype_key: str, heat_set: float, cool_set: float) -> dic
     """아키타입 + 존 설정온도로 운영/난방/냉방 Schedule:Compact 본문을 만든다.
 
     반환: {op, heating, cooling} (각각 Schedule:Compact body 문자열)
-      op      : 재실/조명/기기 가동률 (운영=1.0, 비운영=0.0)
-      heating : 운영=heat_set, 비운영=heat_setback
-      cooling : 운영=cool_set, 비운영=cool_setback
+      op      : 재실/조명/기기 가동률 (운영시간=op_fraction, 그 외 0)
+      heating : 냉난방 운영시간(occupied)=heat_set, 그 외=heat_setback
+      cooling : occupied=cool_set, 그 외=cool_setback
+
+    난방/냉방은 'occupied'(쾌적 재실) 시간을 따르고, 조명/기기(op)는 별도
+    'op_periods'/'op_fraction'을 쓸 수 있다. (예: 복도는 난방 setback이지만
+    조명은 저조도로 상시 켜짐 → op_periods 길게, op_fraction 낮게)
     """
     arch = ARCHETYPES.get(archetype_key, ARCHETYPES[DEFAULT_ARCHETYPE])
+    comfort = {d: arch.get(d, []) for d in _DAYTYPE_FOR}
+    op_periods = arch.get("op_periods", comfort)   # 미지정 시 쾌적 재실시간과 동일
+    op_fraction = arch.get("op_fraction", 1.0)
     return {
-        "op": _compact_text(arch, {"occ": 1.0, "setback": 0.0}),
-        "heating": _compact_text(arch, {"occ": heat_set, "setback": arch["heat_setback"]}),
-        "cooling": _compact_text(arch, {"occ": cool_set, "setback": arch["cool_setback"]}),
+        "op": _compact_text(op_periods, op_fraction, 0.0),
+        "heating": _compact_text(comfort, heat_set, arch["heat_setback"]),
+        "cooling": _compact_text(comfort, cool_set, arch["cool_setback"]),
     }
