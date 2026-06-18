@@ -16,7 +16,7 @@ except ImportError:
     pd = None
 
 from src.cost_analyzer import LCCAnalyzer
-from src.activity_schedules import load_activity_names, classify_activity, build_schedules, get_archetype_loads
+from src.activity_schedules import load_activity_names, classify_activity, build_schedules, get_archetype_loads, daily_op_hours
 
 # ---------------------------------------------------------
 # [상용 데이터베이스 동적 파싱 로직]
@@ -639,11 +639,13 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         
         if ppl_dens > 0:
             idf.add_people(f"{z_id}_Ppl", z_id, op_sch, ppl_dens)
-            # 동적 급탕(DHW) 모델링 (재실자 기반) — 용도별 1인당 온수사용량(L/인·일)
-            # 주거·숙박·의료는 높고 사무·판매는 낮음 (기존 일괄 30L → 용도별)
+            # 동적 급탕(DHW) — 용도별 1인당 온수사용량(L/인·일).
+            # peak_flow는 op 스케줄로 변조되므로, 일일 사용량이 맞도록 '하루 운영시간 적분'
+            # 으로 나눈다 (기존엔 /3600으로 1시간 가정 → 스케줄 적분만큼 ~10배 과다였음).
             people_count = z_area * ppl_dens
             if people_count > 0:
-                peak_dhw_flow = people_count * (loads["dhw_lpd"] / 1000.0 / 3600.0)  # m3/s 근사
+                op_h = daily_op_hours(arch_key)
+                peak_dhw_flow = people_count * (loads["dhw_lpd"] / 1000.0) / (op_h * 3600.0)  # m3/s
                 idf.add_dhw(f"{z_id}_DHW", z_id, op_sch, peak_dhw_flow)
         if light_p > 0:
             idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, light_p)

@@ -464,7 +464,8 @@ class LCCAnalyzer:
             c_rate_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Cooling Rate' in c and '[W]' in c]
             l_cols = [c for c in df.columns if 'Lights' in c and 'Electricity Energy' in c and '[J]' in c]
             e_cols = [c for c in df.columns if 'Electric Equipment' in c and 'Electricity Energy' in c and '[J]' in c]
-            dhw_col = next((c for c in df.columns if 'Water Use Equipment Heating Energy' in c), None)
+            # ⚠️ 급탕은 존마다 컬럼이 따로 있으므로 전부 합산 (기존 next()는 1개 존만 잡아 과소)
+            dhw_cols = [c for c in df.columns if 'Water Use Equipment Heating Energy' in c]
             vent_cols = [c for c in df.columns if 'Mechanical Ventilation Mass Flow Rate' in c and '[kg/s]' in c]
             demand_col = next((c for c in df.columns if 'Facility Total Electric Demand Rate' in c), None)
 
@@ -525,8 +526,8 @@ class LCCAnalyzer:
             l_kwh = df[l_cols].sum(axis=1).values / 3600000.0 if l_cols else 0.0
             e_kwh = df[e_cols].sum(axis=1).values / 3600000.0 if e_cols else 0.0
             
-            dhw_j = df[dhw_col].values if dhw_col else np.zeros(total_rows)
-            dhw_kwh = (dhw_j / 3600000.0) * 1.1 
+            dhw_j = df[dhw_cols].sum(axis=1).values if dhw_cols else np.zeros(total_rows)
+            dhw_kwh = (dhw_j / 3600000.0) * 1.1
             
             v_flow = df[vent_cols].sum(axis=1).values if vent_cols else np.zeros(total_rows)
             vent_multiplier = 1.0 if is_hourly else 730.0
@@ -563,7 +564,7 @@ class LCCAnalyzer:
 
             a_h_req = np.sum(total_h_req_kwh)
             a_c_req = np.sum(total_c_req_kwh)
-            a_dhw_req = np.sum(dhw_j / 3600000.0) if dhw_col else 0.0
+            a_dhw_req = np.sum(dhw_j / 3600000.0) if dhw_cols else 0.0
             a_vent_req = np.sum((v_flow / 1.2) * vent_multiplier)
             
             a_h_con = np.sum(total_h_con_kwh)
@@ -824,8 +825,7 @@ class LCCAnalyzer:
                         if '고성능' in d["tier"] or 'premium' in d["tier"].lower() or '중성능' in d["tier"] or 'high' in d["tier"].lower():
                             high_tier_insul_cost += d["cost"]
                             std_insul_cost_sum += d["area"] * std_insul_price
-                            
-                print(f"DEBUG: high_tier_insul_cost={high_tier_insul_cost}, std_insul_cost_sum={std_insul_cost_sum}")
+
                 if high_tier_insul_cost > std_insul_cost_sum:
                     saved_insul = high_tier_insul_cost - std_insul_cost_sum
                     recommendations.append({

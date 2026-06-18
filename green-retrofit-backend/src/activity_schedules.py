@@ -99,6 +99,18 @@ def get_archetype_loads(archetype_key: str) -> dict:
     """아키타입의 표준 부하/재실/급탕/설정온도 기본값."""
     return ARCHETYPE_LOADS.get(archetype_key, ARCHETYPE_LOADS[DEFAULT_ARCHETYPE])
 
+
+def daily_op_hours(archetype_key: str) -> float:
+    """운영 스케줄의 하루 적분값(=등가 운영시간/일). 급탕 peak-flow 산정에 사용.
+    DHW가 op 스케줄로 변조되므로, 일일 사용량을 맞추려면 이 값으로 나눠야 한다."""
+    occ = ASHRAE_OCC.get(archetype_key)
+    if occ:
+        return max(sum(occ["weekday"]), 1.0)
+    arch = ARCHETYPES.get(archetype_key, {})
+    frac = arch.get("op_fraction", 0.1)
+    s, e = arch.get("op_hours", (0, 24))
+    return max(frac * (e - s), 1.0)
+
 # ── 시간별 재실률 (출처: ASHRAE 90.1 / DOE Prototype, openstudio-standards) ─────
 # 각 아키타입의 평일/주말 24시간 재실 프로파일. op(조명/기기/재실)에 그대로 쓰고,
 # 냉난방은 이 값이 OCC_THRESHOLD 이상인 시간만 설정온도로 본다.
