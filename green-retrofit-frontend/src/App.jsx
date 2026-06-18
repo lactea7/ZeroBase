@@ -127,7 +127,7 @@ export default function App() {
     },
     ledFixtureCount: 0,
     customSchedule: {
-      useCustom: true,
+      useCustom: false, // 기본=용도별 자동 스케줄, 켜면 전체 존에 커스텀 override
       mode: 'simplified', // 'simplified' | 'detailed'
       simplifiedParams: {
         weekday: { openTime: 8, closeTime: 18, heatOcc: 20, heatUnocc: 15, coolOcc: 26, coolUnocc: 30, opOcc: 1.0, opUnocc: 0.0 },

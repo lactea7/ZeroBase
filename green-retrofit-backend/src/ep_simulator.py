@@ -16,6 +16,7 @@ except ImportError:
     pd = None
 
 from src.cost_analyzer import LCCAnalyzer
+from src.activity_schedules import load_activity_names, classify_activity, build_schedules
 
 # ---------------------------------------------------------
 # [상용 데이터베이스 동적 파싱 로직]
@@ -526,7 +527,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
 
     # 스케줄
     idf.add_standard_schedules()
-    
+
+    # 용도(Activity)별 표준 스케줄용: ActivityIdList.txt 로드 + 아키타입 op 스케줄 캐시
+    activity_names = load_activity_names(db_dir)
+    created_op_sch = set()
+
     custom_sch = project_data.get("customSchedule", {})
     use_custom = custom_sch.get("useCustom", False)
     
@@ -601,22 +606,15 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             cool_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("cooling", [30]*24))
             cool_sch_text = f"Through: 12/31, {cool_wd}, {cool_we}, {cool_ho}, For: AllOtherDays, Until: 24:00, 30.0"
         else:
-            if activity in [1440, 1441, 1442, 1443, 1444, 1114, 1115, 1107, 1112, 1120, 1121, 1445]:
-                op_sch = "Sch_Res"
-                heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {heat_set}, Until: 18:00, 15.0, Until: 24:00, {heat_set}, For: AllOtherDays, Until: 24:00, {heat_set}"
-                cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, {cool_set}, Until: 18:00, 30.0, Until: 24:00, {cool_set}, For: AllOtherDays, Until: 24:00, {cool_set}"
-            elif activity in [1108, 1109, 1117, 1118]:
-                op_sch = "Sch_Rest"
-                heat_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 15.0, Until: 21:00, {heat_set}, Until: 24:00, 15.0"
-                cool_sch_text = f"Through: 12/31, For: AllDays, Until: 10:00, 30.0, Until: 21:00, {cool_set}, Until: 24:00, 30.0"
-            elif activity in [1447, 1448, 1449, 1104, 1457, 1458, 1452]:
-                op_sch = "Sch_Lab"
-                heat_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {heat_set}"
-                cool_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {cool_set}"
-            else:
-                op_sch = "Sch_Office"
-                heat_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 15.0, Until: 18:00, {heat_set}, Until: 24:00, 15.0, For: AllOtherDays, Until: 24:00, 15.0"
-                cool_sch_text = f"Through: 12/31, For: Weekdays, Until: 08:00, 30.0, Until: 18:00, {cool_set}, Until: 24:00, 30.0, For: AllOtherDays, Until: 24:00, 30.0"
+            # 용도(activityId)명을 아키타입으로 분류해 표준 스케줄 적용 (ECO2 구조 기반)
+            arch_key = classify_activity(activity_names.get(activity, ""))
+            sched = build_schedules(arch_key, heat_set, cool_set)
+            op_sch = f"Op_{arch_key}"
+            if op_sch not in created_op_sch:
+                idf.add_schedule_compact(op_sch, "Fraction", sched["op"])
+                created_op_sch.add(op_sch)
+            heat_sch_text = sched["heating"]
+            cool_sch_text = sched["cooling"]
 
         if z.get("isConditioned", True):
             idf.add_ideal_hvac(z_id, op_sch)
