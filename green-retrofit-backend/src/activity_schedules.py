@@ -39,7 +39,19 @@ ARCHETYPES = {
     "lodging":     {"label": "숙박(객실/기숙)",       "heat_setback": 18.0, "cool_setback": 28.0},
     "retail":      {"label": "판매시설",              "heat_setback": 16.0, "cool_setback": 30.0},
     "restaurant":  {"label": "음식점",                "heat_setback": 16.0, "cool_setback": 30.0},
-    "education":   {"label": "교육연구(학교)",        "heat_setback": 16.0, "cool_setback": 30.0},
+    "education":   {"label": "교육연구(학교)",        "heat_setback": 16.0, "cool_setback": 30.0,
+                    # 한국 학사일정: 3/2 개학(1학기), 9/1 개학(2학기) → 방학 구간 저점유
+                    "academic_calendar": {
+                        "vacation_occ": 0.10,   # 방학 중 점유(행정·돌봄·시설관리)
+                        # (Through 날짜, 재학여부) — 달력 순서, 마지막은 12/31
+                        "segments": [
+                            ("3/1",   False),   # 1/1~3/1   겨울방학
+                            ("7/20",  True),    # 3/2~7/20  1학기
+                            ("8/31",  False),   # 7/21~8/31 여름방학
+                            ("12/23", True),    # 9/1~12/23 2학기
+                            ("12/31", False),   # 12/24~    겨울방학
+                        ],
+                    }},
     "healthcare":  {"label": "의료시설",              "heat_setback": 22.0, "cool_setback": 26.0},
     "lab":         {"label": "연구/산업(실험·공정)",  "heat_setback": 18.0, "cool_setback": 28.0},
     "assembly":    {"label": "집회/체육/공연",        "heat_setback": 16.0, "cool_setback": 30.0},
@@ -195,13 +207,29 @@ def _hourly_to_compact_day(values24):
     return ", ".join(segs)
 
 
-def _weekly_compact(weekday24, weekend24):
-    """평일/주말 24h 배열 → Schedule:Compact 본문 (주말=공휴일=기타일)."""
+def _day_block(weekday24, weekend24):
+    """한 'Through' 구간의 For: 블록들 (평일/주말·공휴일·기타일)."""
     wd = _hourly_to_compact_day(weekday24)
     we = _hourly_to_compact_day(weekend24)
-    return (f"Through: 12/31, For: Weekdays, {wd}, "
-            f"For: Weekends, {we}, For: Holidays, {we}, "
-            f"For: AllOtherDays, {we}")
+    return (f"For: Weekdays, {wd}, For: Weekends, {we}, "
+            f"For: Holidays, {we}, For: AllOtherDays, {we}")
+
+
+def _weekly_compact(weekday24, weekend24):
+    """연중 동일 평일/주말 24h 배열 → Schedule:Compact 본문."""
+    return f"Through: 12/31, {_day_block(weekday24, weekend24)}"
+
+
+def _seasonal_compact(segments, session_wd, session_we, vac_day):
+    """학기/방학 등 날짜구간별 Schedule:Compact. segments=[(through, 재학여부)...].
+    재학=session 평일/주말 배열, 방학=vac_day 종일."""
+    parts = []
+    for through, in_session in segments:
+        if in_session:
+            parts.append(f"Through: {through}, {_day_block(session_wd, session_we)}")
+        else:
+            parts.append(f"Through: {through}, {_day_block(vac_day, vac_day)}")
+    return ", ".join(parts)
 
 
 def build_schedules(archetype_key: str, heat_set: float, cool_set: float) -> dict:
@@ -233,6 +261,23 @@ def build_schedules(archetype_key: str, heat_set: float, cool_set: float) -> dic
 
     def setp(occ_day, on, off):
         return [on if v >= OCC_THRESHOLD else off for v in occ_day]
+
+    cal = arch.get("academic_calendar")
+    if cal:
+        # 학교: 학기엔 ASHRAE 프로파일, 방학엔 저점유(vacation_occ)
+        segs = cal["segments"]
+        vac = cal.get("vacation_occ", 0.1)
+        op_vac = [vac] * 24
+        # 방학 점유가 임계 미만이면 냉난방은 종일 setback
+        heat_vac = [(heat_set if vac >= OCC_THRESHOLD else arch["heat_setback"])] * 24
+        cool_vac = [(cool_set if vac >= OCC_THRESHOLD else arch["cool_setback"])] * 24
+        return {
+            "op": _seasonal_compact(segs, wd, we, op_vac),
+            "heating": _seasonal_compact(segs, setp(wd, heat_set, arch["heat_setback"]),
+                                         setp(we, heat_set, arch["heat_setback"]), heat_vac),
+            "cooling": _seasonal_compact(segs, setp(wd, cool_set, arch["cool_setback"]),
+                                         setp(we, cool_set, arch["cool_setback"]), cool_vac),
+        }
 
     return {
         "op": _weekly_compact(wd, we),
