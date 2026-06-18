@@ -115,6 +115,7 @@ export default function App() {
     activityId: 1105,
     location: 'KOR_SQ_Seoul',
     pvCapacity: 0,
+    heatSource: 11, // 난방 열원: 1가스 2전기 4등유 11지역난방
     geothermalApplied: false,
     hvacUpgradeActive: false,
     orientation: 0,
@@ -1382,6 +1383,28 @@ export default function App() {
                           onChange={(e) => setProjectData({ ...projectData, pvCapacity: parseInt(e.target.value) })}
                           className="w-full h-3 rounded-full appearance-none accent-blue-500 bg-slate-700 cursor-pointer"
                         />
+                      </div>
+
+                      {/* 난방 열원 선택 — 요금·1차에너지·CO2가 열원별로 달라짐 */}
+                      <div>
+                        <label className={`flex items-center gap-2 text-sm font-black mb-3 ${theme.textMain}`}>
+                          <Flame className="text-orange-500" size={16} /> 난방 열원 (Heating Source)
+                        </label>
+                        <select
+                          value={projectData.heatSource}
+                          onChange={(e) => setProjectData({ ...projectData, heatSource: parseInt(e.target.value) })}
+                          disabled={projectData.geothermalApplied}
+                          className={`w-full p-3 text-sm font-bold rounded-xl border outline-none ${theme.input} focus:border-orange-500 ${projectData.geothermalApplied ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        >
+                          {FUEL_TYPES.map((f) => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] opacity-60 mt-1">
+                          {projectData.geothermalApplied
+                            ? '지열 적용 시 난방은 전기(히트펌프)로 계산됩니다.'
+                            : '열원에 따라 난방 요금·1차에너지·CO2 계수가 달라집니다.'}
+                        </p>
                       </div>
                       <div
                         className={`p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.geothermalApplied ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-500/30 bg-black/5'}`}

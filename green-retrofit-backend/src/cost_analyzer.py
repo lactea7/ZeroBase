@@ -13,12 +13,25 @@ class LCCAnalyzer:
     Building Energy Modeling (BEM) 경제성 및 요금(LCC) 분석 오픈소스 모듈
     EnergyPlus 결과와 독립적으로 계산을 수행합니다.
     """
-    ELEC_RATE_SUMMER = (183.6 + 128.9 + 98.1) / 3   # 6~8월 가중평균
-    ELEC_RATE_WINTER = (138.5 + 112.2 + 98.1) / 3   # 11~2월 가중평균
-    ELEC_RATE_SPRING = (121.7 + 103.9 + 98.1) / 3   # 3~5, 9~10월 가중평균
-    ELEC_BASE_CHARGE = 4910    # 기본요금 (원/kW)
+    # ── 전기요금: 2026.4.16 시행 '일반용(갑) 저압' 계절 요금 (원/kWh) ──
+    # (한전 전기요금표 종합 기준 — 일반 비주거 건물 적용. 저압은 시간대별 차등 없이 계절 평탄)
+    ELEC_RATE_SUMMER = 123.6   # 여름철 6~8월
+    ELEC_RATE_WINTER = 110.8   # 겨울철 11~2월
+    ELEC_RATE_SPRING = 86.4    # 봄·가을철 3~5, 9~10월
+    ELEC_BASE_CHARGE = 5230    # 일반용 저압 기본요금 (원/kW)
     HEAT_RATE_MCAL = 145.82
-    HEAT_RATE_KWH = HEAT_RATE_MCAL * 0.8604
+    HEAT_RATE_KWH = HEAT_RATE_MCAL * 0.8604   # 지역난방 환산 ≈ 125.5원/kWh
+
+    # ── 난방 열원별 {요금(원/kWh), 1차에너지계수, CO2계수(kgCO2/kWh)} ──
+    # 열원에 따라 요금·1차·CO2가 모두 달라진다. 지열/히트펌프는 전기로 본다.
+    # ⚠️ 가스·등유 요금은 추정치(공식 단가 확보 시 교체). 지역난방=현 HEAT_RATE_KWH.
+    HEAT_SOURCE_DB = {
+        1:  {"label": "천연가스",       "rate": 85.0,             "primary": 1.10,  "co2": 0.232},
+        2:  {"label": "전기(히트펌프)", "rate": ELEC_RATE_WINTER, "primary": 2.75,  "co2": 0.466},
+        4:  {"label": "등유",           "rate": 110.0,            "primary": 1.10,  "co2": 0.270},
+        11: {"label": "지역난방",       "rate": HEAT_RATE_KWH,    "primary": 0.728, "co2": 0.200},
+    }
+    DEFAULT_HEAT_SOURCE = 11   # 미지정 시 지역난방(기존 동작과 동일)
 
     # ── 비교 기준이 되는 '기존 노후 건물' 운영비 추정 ──
     # ⚠️ 실측 데이터가 없으므로 단일·투명·보수적 가정을 쓴다.
@@ -557,7 +570,10 @@ class LCCAnalyzer:
                 df['elec_rate'] = df['month'].apply(lambda m: self.ELEC_RATE_SUMMER if m in [6,7,8] else (self.ELEC_RATE_WINTER if m in [11,12,1,2] else self.ELEC_RATE_SPRING))
 
             df['elec_cost'] = df['total_elec_kwh'] * df['elec_rate']
-            df['heat_cost'] = df['total_heat_kwh'] * self.HEAT_RATE_KWH
+            # 난방 열원 결정: 지열/히트펌프면 전기(2), 아니면 프로젝트 선택값(기본 지역난방)
+            heat_source_id = 2 if is_geothermal else kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
+            heat_src = self.HEAT_SOURCE_DB.get(heat_source_id, self.HEAT_SOURCE_DB[self.DEFAULT_HEAT_SOURCE])
+            df['heat_cost'] = df['total_heat_kwh'] * heat_src["rate"]
 
             annual_elec_bill = df['elec_cost'].sum()
             annual_heat_bill = df['heat_cost'].sum()
@@ -782,8 +798,8 @@ class LCCAnalyzer:
             heat_con     = matrix["heating"]["con"] + matrix["hotwater"]["con"]
             elec_con_actual = elec_con_zeb + matrix["equipment"]["con"]
 
-            primary_per_m2 = elec_con_zeb * self.PRIMARY_FACTOR_ELEC + heat_con * self.PRIMARY_FACTOR_HEAT
-            co2_per_m2     = elec_con_actual * self.CO2_FACTOR_ELEC + heat_con * self.CO2_FACTOR_HEAT
+            primary_per_m2 = elec_con_zeb * self.PRIMARY_FACTOR_ELEC + heat_con * heat_src["primary"]
+            co2_per_m2     = elec_con_actual * self.CO2_FACTOR_ELEC + heat_con * heat_src["co2"]
 
             summary = {
                 "demand_per_m2": sum(v["req"] for k,v in matrix.items() if k != "renewable"),
@@ -942,6 +958,7 @@ class LCCAnalyzer:
                 "total_lcc": int(lcc_pv),
                 "irr": round(irr_val, 2),
                 "cost_warnings": cost_warnings,
+                "heat_source": heat_src["label"],   # 적용된 난방 열원 (UI 표기용)
                 # NPV/IRR/절감액이 비교한 '기존 노후 건물' 추정 가정 (UI 표기용)
                 "baseline_assumptions": {
                     "running_cost_multiplier": self.BASELINE_RUNNING_COST_MULTIPLIER,

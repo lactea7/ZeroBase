@@ -774,6 +774,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         # 💡 hvacUpgradeActive / lccParameters는 projectData 안에 있다.
         # (payload 최상위로 보내도 SimulationPayload 모델에 없어 Pydantic이 떨궈 항상 기본값이 됨)
         hvac_upgrade_active = project_data.get('hvacUpgradeActive', False)
+        heat_source = int(project_data.get('heatSource', 11))   # 난방 열원(1가스/2전기/4등유/11지역난방)
 
         lcc_parameters = project_data.get('lccParameters', {})
         
@@ -795,6 +796,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             led_fixture_count=sum(int(z.get('ledFixtureCount', 0)) for z in zones),
             led_reduction_active=led_reduction_active,
             hvac_upgrade_active=hvac_upgrade_active,
+            heat_source=heat_source,
             discount_rate=float(lcc_parameters.get('discountRate', 5.0)) / 100.0,
             inflation_rate=float(lcc_parameters.get('inflationRate', 3.0)) / 100.0,
             utility_inflation=float(lcc_parameters.get('utilityInflation', 4.0)) / 100.0,
