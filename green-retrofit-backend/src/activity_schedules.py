@@ -43,10 +43,11 @@ ARCHETYPES = {
     "healthcare":  {"label": "의료시설",              "heat_setback": 22.0, "cool_setback": 26.0},
     "lab":         {"label": "연구/산업(실험·공정)",  "heat_setback": 18.0, "cool_setback": 28.0},
     "assembly":    {"label": "집회/체육/공연",        "heat_setback": 16.0, "cool_setback": 30.0},
-    "auxiliary":   {"label": "보조공간(복도·창고·화장실·기계실)",
+    "auxiliary":   {"label": "보조공간(복도·계단·승강기·기계실)",
                     "heat_setback": 15.0, "cool_setback": 32.0,
-                    # ASHRAE 프로파일 없음 → 복도 상시 저조도(0.1), 냉난방은 종일 setback
-                    "op_fraction": 0.1, "op_hours": (6, 24)},
+                    # 복도·계단·승강기는 안전/피난용으로 24시간 상시 저조도 점등.
+                    # 냉난방은 종일 setback (적극 공조 없음).
+                    "op_fraction": 0.1, "op_hours": (0, 24)},
 }
 
 DEFAULT_ARCHETYPE = "office"
