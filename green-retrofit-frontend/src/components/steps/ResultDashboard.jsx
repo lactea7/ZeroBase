@@ -566,7 +566,12 @@ export default function ResultDashboard({
                         borderClass: 'border-amber-500/20',
                         hoverClass: 'hover:border-amber-500/50',
                         icon: <Wallet className="text-amber-500" size={24} />,
-                        desc: '에너지 성능 개선(창호, 단열, 조명 등)을 위해 투입되는 1회성 공사비입니다.'
+                        desc: '에너지 성능 개선(창호, 단열, 조명 등)을 위해 투입되는 1회성 공사비입니다.',
+                        // 목표 예산 대비 초과 여부 배지 (예산 미설정 시 표시 안 함)
+                        badge: res.financial.target_budget > 0 && res.financial.capital_cost > res.financial.target_budget
+                          ? `목표 예산 ${formatWon(res.financial.capital_cost - res.financial.target_budget)} 초과`
+                          : (res.financial.target_budget > 0 ? '목표 예산 이내' : null),
+                        badgeOver: res.financial.target_budget > 0 && res.financial.capital_cost > res.financial.target_budget,
                       },
                       {
                         label: '순현재가치 (NPV)',
@@ -641,6 +646,11 @@ export default function ResultDashboard({
                           <motion.div layoutId={`${stat.layoutId}-val`} className={`text-3xl font-black ${stat.colorClass} tracking-tighter flex items-end gap-1`}>
                             {stat.val} <span className="text-sm font-bold opacity-50 mb-1">{stat.unit}</span>
                           </motion.div>
+                          {stat.badge && (
+                            <span className={`inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[10px] font-black ${stat.badgeOver ? 'bg-rose-500/15 text-rose-500' : 'bg-emerald-500/15 text-emerald-500'}`}>
+                              {stat.badgeOver ? <AlertTriangle size={11} /> : <Check size={11} />} {stat.badge}
+                            </span>
+                          )}
                         </div>
                       </motion.div>
                     ))}
