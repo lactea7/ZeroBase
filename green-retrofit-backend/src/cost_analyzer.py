@@ -19,12 +19,15 @@ class LCCAnalyzer:
     ELEC_RATE_WINTER = 110.8   # 겨울철 11~2월
     ELEC_RATE_SPRING = 86.4    # 봄·가을철 3~5, 9~10월
     ELEC_BASE_CHARGE = 5230    # 일반용 저압 기본요금 (원/kW)
-    HEAT_RATE_MCAL = 145.82
-    HEAT_RATE_KWH = HEAT_RATE_MCAL * 0.8604   # 지역난방 환산 ≈ 125.5원/kWh
+    # 지역난방: KDHC 공식 열요금표(2024.7.1, 부가세 별도) — 주택용 난방 사용요금
+    #   단일요금 112.32원/Mcal 적용. (참고: 업무용 145.82 / 공공용 127.34 원/Mcal)
+    #   1 Mcal = 1.163 kWh → 원/kWh = 원/Mcal ÷ 1.163 (≈ ×0.8598)
+    HEAT_RATE_MCAL = 112.32     # 주택용 난방 단일요금
+    HEAT_RATE_KWH = HEAT_RATE_MCAL / 1.163   # ≈ 96.6원/kWh
 
     # ── 난방 열원별 {요금(원/kWh), 1차에너지계수, CO2계수(kgCO2/kWh)} ──
     # 열원에 따라 요금·1차·CO2가 모두 달라진다. 지열/히트펌프는 전기로 본다.
-    # ⚠️ 가스·등유 요금은 추정치(공식 단가 확보 시 교체). 지역난방=현 HEAT_RATE_KWH.
+    # ⚠️ 가스·등유 요금은 추정치(공식 단가 확보 시 교체). 지역난방=KDHC 공식값.
     HEAT_SOURCE_DB = {
         1:  {"label": "천연가스",       "rate": 85.0,             "primary": 1.10,  "co2": 0.232},
         2:  {"label": "전기(히트펌프)", "rate": ELEC_RATE_WINTER, "primary": 2.75,  "co2": 0.466},
