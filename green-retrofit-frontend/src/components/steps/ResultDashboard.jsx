@@ -646,18 +646,36 @@ export default function ResultDashboard({
                     ))}
                   </div>
 
-                  {/* NPV/IRR/회수기간 산정 기준 안내 (추정 baseline) */}
-                  {lccAnalysis.baselineAssumptions && (
-                    <p className={`text-[11px] leading-relaxed flex items-start gap-1.5 px-1 ${theme.textSub} opacity-70`}>
-                      <Info size={13} className="shrink-0 mt-0.5 text-indigo-400" />
-                      <span>
-                        NPV·IRR·회수기간은 <b>추정 기준 건물</b>(기존 노후 건물의 운영비를 리모델링 후의{' '}
-                        {lccAnalysis.baselineAssumptions.running_cost_multiplier}배 ≈ 절감률{' '}
-                        {lccAnalysis.baselineAssumptions.savings_pct}%로 가정) 대비 절감액으로 산출된
-                        값입니다. 실제 건물의 사용량과 다를 수 있으며, 절대 수치보다 상대 비교 지표로 활용하세요.
-                      </span>
-                    </p>
-                  )}
+                  {/* NPV/IRR/회수기간 산정 기준 안내 (실측 vs 추정 명시 고지) */}
+                  {lccAnalysis.baselineAssumptions && (() => {
+                    const ba = lccAnalysis.baselineAssumptions;
+                    const isActual = ba.source === 'actual_bill' || ba.source === 'actual_usage';
+                    const srcLabel = ba.source === 'actual_bill' ? '실측(요금 입력)'
+                      : ba.source === 'actual_usage' ? '실측(사용량 입력)' : '추정';
+                    return (
+                      <div className={`text-[11px] leading-relaxed px-1 ${theme.textSub} opacity-80`}>
+                        <span className={`inline-block px-2 py-0.5 mb-1.5 rounded-full text-[10px] font-black ${isActual ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}>
+                          기준 건물: {srcLabel}
+                        </span>
+                        <p className="flex items-start gap-1.5">
+                          <Info size={13} className="shrink-0 mt-0.5 text-indigo-400" />
+                          {isActual ? (
+                            <span>
+                              NPV·IRR·회수기간은 입력하신 <b>실제 기존 건물 운영비</b>
+                              (연 {Math.round((ba.base_running_cost || 0) / 10000).toLocaleString()}만원,
+                              절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다.
+                            </span>
+                          ) : (
+                            <span>
+                              실측값 미입력 — <b>추정 기준 건물</b>(기존 운영비를 리모델링 후의{' '}
+                              {ba.running_cost_multiplier}배 ≈ 절감률 {ba.savings_pct}%로 가정) 대비 산출된
+                              값입니다. 정확한 분석을 원하면 설정에서 기존 건물 실제 사용량을 입력하세요.
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    );
+                  })()}
 
                   {/* 세부 내역 2분할 */}
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

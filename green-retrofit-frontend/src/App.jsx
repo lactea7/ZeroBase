@@ -42,6 +42,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Flame,
+  DollarSign,
   Thermometer,
   Lightbulb,
   Monitor,
@@ -115,7 +116,10 @@ export default function App() {
     activityId: 1105,
     location: 'KOR_SQ_Seoul',
     pvCapacity: 0,
-    heatSource: 11, // 난방 열원: 1가스 2전기 4등유 11지역난방
+    heatSource: 11, // 난방 열원: 2전기 11지역난방
+    // 기존 건물 실측 운영비(선택). 비우면 1.6배 추정으로 계산됨을 결과에 명시 고지.
+    //   mode 'bill'=연간 요금(원), 'usage'=연간 사용량(kWh). 빈칸은 백엔드에서 무시.
+    baselineActual: { mode: 'bill', elecBill: '', heatBill: '', elecKwh: '', heatKwh: '' },
     geothermalApplied: false,
     hvacUpgradeActive: false,
     orientation: 0,
@@ -748,8 +752,14 @@ export default function App() {
       setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
     }, 1500);
     try {
+      // 선택된 모드의 실측 필드만 전송 (다른 모드의 잔여값이 우선순위를 뒤집지 않도록)
+      const _ba = projectData.baselineActual || {};
+      const baselineActual =
+        _ba.mode === 'usage'
+          ? { mode: 'usage', elecKwh: _ba.elecKwh, heatKwh: _ba.heatKwh }
+          : { mode: 'bill', elecBill: _ba.elecBill, heatBill: _ba.heatBill };
       const payload = {
-        projectData: projectData,
+        projectData: { ...projectData, baselineActual },
         zones: zones,
         surfaces: surfaces,
         materials: materials,
@@ -869,9 +879,11 @@ export default function App() {
     const f = res.financial;
     const retrofitRunningCost = f.total_energy_bill;
     const capitalCost = f.capital_cost;
-    // 기준 건물 운영비 배수는 백엔드(baseline_assumptions)와 단일 소스로 공유 → 차트/NPV/IRR 일관
-    const baseMultiplier = f.baseline_assumptions?.running_cost_multiplier || 1.6;
-    const baseRunningCost = retrofitRunningCost * baseMultiplier;
+    // 기준 건물 운영비: 백엔드 baseline_assumptions와 단일 소스로 공유 → 차트/NPV/IRR 일관.
+    //   실측 입력 시 base_running_cost가 내려오고, 없으면 1.6배 추정으로 환산.
+    const ba = f.baseline_assumptions || {};
+    const baseMultiplier = ba.running_cost_multiplier || 1.6;
+    const baseRunningCost = ba.base_running_cost > 0 ? ba.base_running_cost : retrofitRunningCost * baseMultiplier;
     const annualSavings = baseRunningCost - retrofitRunningCost;
     
     const params = f.lcc_parameters || { inflation_rate: 2, lifecycle_years: 15 };
@@ -1405,6 +1417,47 @@ export default function App() {
                             ? '지열 적용 시 난방은 전기(히트펌프)로 계산됩니다.'
                             : '열원에 따라 난방 요금·1차에너지·CO2 계수가 달라집니다.'}
                         </p>
+                      </div>
+
+                      {/* 기존 건물 실측 운영비(선택) — 비우면 1.6배 추정으로 계산됨을 결과에 고지 */}
+                      <div>
+                        <label className={`flex items-center gap-2 text-sm font-black mb-2 ${theme.textMain}`}>
+                          <DollarSign className="text-emerald-500" size={16} /> 기존 건물 실제 사용량 (선택)
+                        </label>
+                        <p className="text-[10px] opacity-60 mb-3">
+                          리모델링 전 건물의 작년 값을 입력하면 절감액·NPV·IRR을 실측 기준으로 계산합니다.
+                          비워두면 <b>리모델링 후 운영비의 1.6배</b>로 추정합니다.
+                        </p>
+                        <div className="flex gap-2 mb-3">
+                          {[{ k: 'bill', t: '연간 요금(원)' }, { k: 'usage', t: '연간 사용량(kWh)' }].map((m) => (
+                            <button
+                              key={m.k}
+                              type="button"
+                              onClick={() => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, mode: m.k } }))}
+                              className={`flex-1 py-2 text-xs font-black rounded-lg border-2 transition-all ${projectData.baselineActual.mode === m.k ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : 'border-slate-500/30 opacity-60'}`}
+                            >
+                              {m.t}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(projectData.baselineActual.mode === 'bill'
+                            ? [{ f: 'elecBill', t: '전기요금 (원/년)' }, { f: 'heatBill', t: '난방요금 (원/년)' }]
+                            : [{ f: 'elecKwh', t: '전기 (kWh/년)' }, { f: 'heatKwh', t: '난방 (kWh/년)' }]
+                          ).map((x) => (
+                            <div key={x.f}>
+                              <span className="text-[10px] opacity-70 block mb-1">{x.t}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="미입력 시 추정"
+                                value={projectData.baselineActual[x.f]}
+                                onChange={(e) => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, [x.f]: e.target.value } }))}
+                                className={`w-full p-2.5 text-sm font-bold rounded-lg border outline-none ${theme.input} focus:border-emerald-500`}
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </div>
                       <div
                         className={`p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.geothermalApplied ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-500/30 bg-black/5'}`}

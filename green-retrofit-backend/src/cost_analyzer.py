@@ -901,7 +901,31 @@ class LCCAnalyzer:
             # ⚠️ 기준 건물 운영비 = 리모델링 후 운영비 × 배수 (단일·투명 가정).
             #    프론트 LCC 차트와 동일한 모델을 사용해 NPV/IRR과 차트가 일관되게 한다.
             retrofit_running_cost = annual_elec_bill + annual_heat_bill
-            base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
+
+            # ── 기준 건물(리모델링 전) 연간 운영비 산정 ──
+            # 우선순위: ① 실측 요금 → ② 실측 사용량(공식 단가 환산) → ③ 1.6배 추정(fallback)
+            #   어떤 기준을 썼는지 baseline_source로 내려보내 UI가 명시 고지한다.
+            act_elec_bill = kwargs.get("actual_elec_bill")
+            act_heat_bill = kwargs.get("actual_heat_bill")
+            act_elec_kwh  = kwargs.get("actual_elec_kwh")
+            act_heat_kwh  = kwargs.get("actual_heat_kwh")
+            avg_elec_rate = (self.ELEC_RATE_SUMMER + self.ELEC_RATE_WINTER + self.ELEC_RATE_SPRING) / 3.0
+
+            if act_elec_bill or act_heat_bill:
+                base_running_cost = (act_elec_bill or 0.0) + (act_heat_bill or 0.0)
+                baseline_source = "actual_bill"          # 실측(요금)
+            elif act_elec_kwh or act_heat_kwh:
+                base_running_cost = (act_elec_kwh or 0.0) * avg_elec_rate + (act_heat_kwh or 0.0) * heat_src["rate"]
+                baseline_source = "actual_usage"         # 실측(사용량 환산)
+            else:
+                base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
+                baseline_source = "estimate"             # 추정(1.6배)
+
+            if baseline_source != "estimate" and base_running_cost <= retrofit_running_cost:
+                cost_warnings.append(
+                    "입력한 기존 건물 운영비가 리모델링 후 운영비보다 낮거나 같습니다 — 절감액이 음수가 될 수 있으니 입력값을 확인하세요"
+                )
+
             cash_flows = [-total_capital_cost]
             for y in range(1, years + 1):
                 base_cost_y = base_running_cost * ((1 + utility_inflation) ** y)
@@ -960,10 +984,12 @@ class LCCAnalyzer:
                 "irr": round(irr_val, 2),
                 "cost_warnings": cost_warnings,
                 "heat_source": heat_src["label"],   # 적용된 난방 열원 (UI 표기용)
-                # NPV/IRR/절감액이 비교한 '기존 노후 건물' 추정 가정 (UI 표기용)
+                # NPV/IRR/절감액이 비교한 '기존 건물' 기준 (UI 명시 고지용)
                 "baseline_assumptions": {
+                    "source": baseline_source,                       # actual_bill | actual_usage | estimate
+                    "base_running_cost": int(base_running_cost),      # 적용된 기존 건물 연간 운영비
                     "running_cost_multiplier": self.BASELINE_RUNNING_COST_MULTIPLIER,
-                    "savings_pct": round((1 - 1 / self.BASELINE_RUNNING_COST_MULTIPLIER) * 100)
+                    "savings_pct": round((1 - retrofit_running_cost / base_running_cost) * 100) if base_running_cost > 0 else 0
                 }
             }
             

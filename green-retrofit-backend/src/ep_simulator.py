@@ -777,7 +777,16 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         heat_source = int(project_data.get('heatSource', 11))   # 난방 열원(1가스/2전기/4등유/11지역난방)
 
         lcc_parameters = project_data.get('lccParameters', {})
-        
+
+        # 기존 건물 실측 기준값 (선택): 비어 있으면 cost_analyzer가 1.6배 추정으로 fallback
+        baseline_actual = project_data.get('baselineActual', {}) or {}
+        def _pos_num(v):
+            try:
+                n = float(v)
+                return n if n > 0 else None
+            except (TypeError, ValueError):
+                return None
+
         result_data = analyzer.calculate(
             eplus_csv_path=csv_path,
             zones=zones,
@@ -800,7 +809,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             discount_rate=float(lcc_parameters.get('discountRate', 5.0)) / 100.0,
             inflation_rate=float(lcc_parameters.get('inflationRate', 3.0)) / 100.0,
             utility_inflation=float(lcc_parameters.get('utilityInflation', 4.0)) / 100.0,
-            lifecycle_years=int(lcc_parameters.get('lifecycleYears', 20))
+            lifecycle_years=int(lcc_parameters.get('lifecycleYears', 20)),
+            actual_elec_bill=_pos_num(baseline_actual.get('elecBill')),
+            actual_heat_bill=_pos_num(baseline_actual.get('heatBill')),
+            actual_elec_kwh=_pos_num(baseline_actual.get('elecKwh')),
+            actual_heat_kwh=_pos_num(baseline_actual.get('heatKwh'))
         )
         return result_data
 
