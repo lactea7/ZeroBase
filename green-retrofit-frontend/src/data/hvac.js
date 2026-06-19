@@ -8,9 +8,7 @@ export const HVAC_SYSTEMS = [
 ];
 
 export const FUEL_TYPES = [
-  { id: 1, name: '천연 가스 (Natural gas)' },
   { id: 2, name: '전기 (Electricity)' },
-  { id: 4, name: '보일러 등유 (Fuel oil No.1)' },
   { id: 11, name: '지역 난방 (District Heating)' },
 ];
 

@@ -27,11 +27,9 @@ class LCCAnalyzer:
 
     # ── 난방 열원별 {요금(원/kWh), 1차에너지계수, CO2계수(kgCO2/kWh)} ──
     # 열원에 따라 요금·1차·CO2가 모두 달라진다. 지열/히트펌프는 전기로 본다.
-    # ⚠️ 가스·등유 요금은 추정치(공식 단가 확보 시 교체). 지역난방=KDHC 공식값.
+    # 전기=한전 공식, 지역난방=KDHC 공식. (가스·등유는 미사용으로 제외)
     HEAT_SOURCE_DB = {
-        1:  {"label": "천연가스",       "rate": 85.0,             "primary": 1.10,  "co2": 0.232},
         2:  {"label": "전기(히트펌프)", "rate": ELEC_RATE_WINTER, "primary": 2.75,  "co2": 0.466},
-        4:  {"label": "등유",           "rate": 110.0,            "primary": 1.10,  "co2": 0.270},
         11: {"label": "지역난방",       "rate": HEAT_RATE_KWH,    "primary": 0.728, "co2": 0.200},
     }
     DEFAULT_HEAT_SOURCE = 11   # 미지정 시 지역난방(기존 동작과 동일)
