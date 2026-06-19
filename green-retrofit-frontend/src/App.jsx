@@ -19,6 +19,7 @@ import {
 import {
   Settings2,
   ArrowRight,
+  ArrowLeft,
   FileText,
   Loader2,
   LayoutDashboard,
@@ -87,6 +88,42 @@ import ResultDashboard from './components/steps/ResultDashboard';
 // --- 분리된 평면도/속성 편집기 (STEP 3 & 4) ---
 import FloorEditor from './components/steps/FloorEditor';
 
+
+// --- 설정 위저드 공통 셸 (스텝별 페이지 래퍼: 헤더 + 이전/다음 네비게이션) ---
+// 모듈 스코프에 정의해야 매 렌더마다 재생성되어 입력 포커스를 잃는 문제를 피할 수 있다.
+function WizardShell({ theme, isDarkMode, setStep, icon, title, subtitle, back, next, nextLabel = '다음', nextDisabled = false, children }) {
+  return (
+    <div className="w-full h-full mx-auto px-6 pt-8 pb-28 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto custom-scrollbar">
+      <div className="max-w-3xl mx-auto">
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-500 mb-4">{icon}</div>
+          <h2 className={`text-3xl font-black mb-2 tracking-tight ${theme.textMain}`}>{title}</h2>
+          {subtitle && <p className={`text-sm ${theme.textSub}`}>{subtitle}</p>}
+        </div>
+        {children}
+        <div className="mt-10 flex justify-between items-center gap-4">
+          {back ? (
+            <button
+              onClick={() => setStep(back)}
+              className={`px-6 py-3 rounded-2xl font-bold text-sm border-2 transition-all flex items-center gap-2 ${isDarkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-300 hover:bg-slate-200 text-slate-600'}`}
+            >
+              <ArrowLeft size={18} /> 이전
+            </button>
+          ) : <span />}
+          {next ? (
+            <button
+              onClick={() => { if (!nextDisabled) setStep(next); }}
+              disabled={nextDisabled}
+              className={`px-8 py-3 rounded-2xl font-black text-sm shadow-lg flex items-center gap-2 transition-all ${nextDisabled ? 'bg-slate-400/30 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:scale-105 shadow-emerald-500/30'}`}
+            >
+              {nextLabel} <ArrowRight size={18} />
+            </button>
+          ) : <span />}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // --- [메인 애플리케이션] ---
 export default function App() {
@@ -536,8 +573,9 @@ export default function App() {
         }
       ]
     });
-    
-    setStep('buildingView');
+
+    // 샘플도 업로드와 동일하게 설정 위저드 첫 페이지로 진입
+    setStep('projectInfo');
   };
 
   const handleFileUpload = async (e) => {
@@ -1164,10 +1202,10 @@ export default function App() {
             <h1 className="text-lg font-black tracking-tighter uppercase">ZeroBase</h1>
           </div>
           <div className="hidden md:flex items-center gap-4 text-[10px] font-black tracking-widest uppercase opacity-60">
-            <span className={step === 'upload' ? 'text-emerald-500' : ''}>1. Project Setup</span> <ArrowRight size={10} />
-            <span className={step === 'buildingView' || step === 'floorView' ? 'text-emerald-500' : ''}>2. 3D Model</span> <ArrowRight size={10} />
-            <span className={step === 'floorView' && selectedId ? 'text-emerald-500' : ''}>3. Property Editor</span> <ArrowRight size={10} />
-            <span className={step === 'result' ? 'text-emerald-500' : ''}>4. Analysis</span>
+            <span className={step === 'upload' ? 'text-emerald-500' : ''}>1. 업로드</span> <ArrowRight size={10} />
+            <span className={['projectInfo','renewable','budget','financial'].includes(step) ? 'text-emerald-500' : ''}>2. 설정</span> <ArrowRight size={10} />
+            <span className={step === 'buildingView' || step === 'floorView' ? 'text-emerald-500' : ''}>3. 3D 모델</span> <ArrowRight size={10} />
+            <span className={step === 'result' ? 'text-emerald-500' : ''}>4. 분석</span>
           </div>
           <div className="toggle-switch" style={{ transform: 'scale(0.6)', transformOrigin: 'right center' }}>
             <label className="switch-label">
@@ -1185,31 +1223,14 @@ export default function App() {
         <main className="flex-1 flex overflow-hidden relative w-full h-full">
           {/* STEP 1: Upload & Project Setup */}
           {step === 'upload' && (
-            <div className="w-full h-full mx-auto px-6 pt-8 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto custom-scrollbar">
-              <div className="text-center mb-12">
-                <h2 className={`text-5xl font-black mb-6 tracking-tight ${theme.textMain}`}>BEM 에너지 시뮬레이션</h2>
-                <p className={`text-lg ${theme.textSub}`}>BIM 형상 데이터를 분석하고 각 객체의 열역학적 속성과 신재생 설비를 튜닝하세요.</p>
-              </div>
-
-              <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* 툴팁 아이콘 - 두 컬럼 사이 중앙 상단에 위치 */}
-                <div className="hidden lg:flex absolute left-1/2 -translate-x-1/2 top-4 z-50">
-                  <div 
-                    className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm cursor-help relative group shadow-sm hover:scale-110 transition-transform"
-                    onMouseEnter={handleMouseEnterTooltip}
-                    onMouseLeave={handleMouseLeaveTooltip}
-                  >
-                    ?
-                    {showVideoTooltip && (
-                      <div className="absolute top-10 left-1/2 -translate-x-1/2 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-2 z-[100] animate-in fade-in zoom-in duration-200 cursor-default" onClick={(e) => e.stopPropagation()}>
-                        <p className="text-xs font-bold mb-2 text-slate-800 dark:text-slate-200 px-1 text-center">Revit gbXML 추출 가이드</p>
-                        <video src="/gbXML_manual.mp4" autoPlay loop muted playsInline className="w-full rounded-lg" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 왼쪽: 파일 업로드 */}
+            <WizardShell
+              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
+              icon={<UploadCloud size={32} />}
+              title="gbXML 모델 업로드"
+              subtitle="분석할 BIM 모델 파일을 올리거나, 샘플 건물로 바로 시작하세요."
+              next="projectInfo"
+              nextDisabled={surfaces.length === 0}
+            >
                 <div className="flex flex-col gap-4">
                   {!uploadedFile || surfaces.length === 0 ? (
                     <>
@@ -1270,14 +1291,19 @@ export default function App() {
                     </div>
                   )}
                 </div>
+            </WizardShell>
+          )}
 
-                {/* 오른쪽: 프로젝트 및 신재생 환경 설정 */}
-                <div className="flex flex-col gap-6">
-                  {/* 프로젝트 기본 설정 */}
-                  <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
-                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2 border-b border-emerald-500/20 pb-3 text-emerald-500">
-                      <Building size={20} /> 프로젝트 기본 정보
-                    </h3>
+          {/* STEP: 프로젝트 기본 정보 */}
+          {step === 'projectInfo' && (
+            <WizardShell
+              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
+              icon={<Building size={32} />}
+              title="프로젝트 기본 정보"
+              subtitle="건물 이름·용도·기상 지역·정북 방향을 설정하세요."
+              back="upload" next="renewable"
+            >
+              <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
                     <div className="space-y-4">
                       <div>
                         <label className={`block text-[10px] font-black uppercase tracking-widest mb-2 ${theme.textSub}`}>Project Name</label>
@@ -1370,12 +1396,20 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                  </div>
+              </div>
+            </WizardShell>
+          )}
 
-                  <div className={`p-8 rounded-[2rem] border ${theme.card} shadow-lg shadow-blue-500/5 border-blue-500/20`}>
-                    <h3 className="text-lg font-bold mb-6 flex items-center gap-2 border-b border-blue-500/20 pb-3 text-blue-500">
-                      <Sun size={20} /> 신재생 에너지 시스템 (Renewable)
-                    </h3>
+          {/* STEP: 신재생 & 에너지 설비 */}
+          {step === 'renewable' && (
+            <WizardShell
+              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
+              icon={<Sun size={32} />}
+              title="신재생 에너지 & 설비"
+              subtitle="태양광·지열·난방 열원·설비 교체 여부를 설정하세요."
+              back="projectInfo" next="budget"
+            >
+              <div className={`p-8 rounded-[2rem] border ${theme.card} border-blue-500/20`}>
                     <div className="space-y-6">
                       <div>
                         <label className={`flex justify-between items-center text-sm font-black mb-3 ${theme.textMain}`}>
@@ -1419,46 +1453,6 @@ export default function App() {
                         </p>
                       </div>
 
-                      {/* 기존 건물 실측 운영비(선택) — 비우면 1.6배 추정으로 계산됨을 결과에 고지 */}
-                      <div>
-                        <label className={`flex items-center gap-2 text-sm font-black mb-2 ${theme.textMain}`}>
-                          <DollarSign className="text-emerald-500" size={16} /> 기존 건물 실제 사용량 (선택)
-                        </label>
-                        <p className="text-[10px] opacity-60 mb-3">
-                          리모델링 전 건물의 작년 값을 입력하면 절감액·NPV·IRR을 실측 기준으로 계산합니다.
-                          비워두면 <b>리모델링 후 운영비의 1.6배</b>로 추정합니다.
-                        </p>
-                        <div className="flex gap-2 mb-3">
-                          {[{ k: 'bill', t: '연간 요금(원)' }, { k: 'usage', t: '연간 사용량(kWh)' }].map((m) => (
-                            <button
-                              key={m.k}
-                              type="button"
-                              onClick={() => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, mode: m.k } }))}
-                              className={`flex-1 py-2 text-xs font-black rounded-lg border-2 transition-all ${projectData.baselineActual.mode === m.k ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : 'border-slate-500/30 opacity-60'}`}
-                            >
-                              {m.t}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {(projectData.baselineActual.mode === 'bill'
-                            ? [{ f: 'elecBill', t: '전기요금 (원/년)' }, { f: 'heatBill', t: '난방요금 (원/년)' }]
-                            : [{ f: 'elecKwh', t: '전기 (kWh/년)' }, { f: 'heatKwh', t: '난방 (kWh/년)' }]
-                          ).map((x) => (
-                            <div key={x.f}>
-                              <span className="text-[10px] opacity-70 block mb-1">{x.t}</span>
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="미입력 시 추정"
-                                value={projectData.baselineActual[x.f]}
-                                onChange={(e) => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, [x.f]: e.target.value } }))}
-                                className={`w-full p-2.5 text-sm font-bold rounded-lg border outline-none ${theme.input} focus:border-emerald-500`}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                       <div
                         className={`p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.geothermalApplied ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-500/30 bg-black/5'}`}
                         onClick={() => setProjectData((prev) => ({ ...prev, geothermalApplied: !prev.geothermalApplied }))}
@@ -1502,7 +1496,23 @@ export default function App() {
                           <ToggleLeft size={32} className="text-slate-500" />
                         )}
                       </div>
-                      <div className="mt-4 p-4 rounded-xl border-2 border-slate-500/30 bg-black/5">
+                    </div>
+              </div>
+            </WizardShell>
+          )}
+
+          {/* STEP: 목표 예산 & 기존 건물 사용량 */}
+          {step === 'budget' && (
+            <WizardShell
+              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
+              icon={<PiggyBank size={32} />}
+              title="목표 예산 & 기존 건물 사용량"
+              subtitle="목표 공사비와, 리모델링 전 실제 사용량을 입력하세요."
+              back="renewable" next="financial"
+            >
+              <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
+                <div className="space-y-6">
+                      <div className="p-4 rounded-xl border-2 border-slate-500/30 bg-black/5">
                         <label className="flex items-center justify-between mb-2">
                           <span className={`font-black flex items-center gap-2 ${theme.textMain}`}>
                             <PiggyBank className="text-pink-500" size={18} /> 목표 공사 예산 (단위: 만 원)
@@ -1525,17 +1535,62 @@ export default function App() {
                         </p>
                       </div>
 
-                      {/* 고급 LCC 재무 설정 아코디언 */}
-                      <details className="mt-4 p-4 rounded-xl border-2 border-indigo-500/30 bg-black/5 group">
-                        <summary className="font-black flex items-center justify-between cursor-pointer outline-none">
-                          <div className={`flex items-center gap-2 ${theme.textMain}`}>
-                            <Calculator className="text-indigo-500" size={18} /> 고급 재무 분석 설정
-                          </div>
-                          <span className="text-indigo-500 bg-indigo-500/10 px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest group-open:hidden">
-                            기본값 사용 중
-                          </span>
-                        </summary>
-                        <div className="pt-4 mt-4 border-t border-indigo-500/20 grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* 기존 건물 실측 운영비(선택) — 비우면 1.6배 추정으로 계산됨을 결과에 고지 */}
+                      <div>
+                        <label className={`flex items-center gap-2 text-sm font-black mb-2 ${theme.textMain}`}>
+                          <DollarSign className="text-emerald-500" size={16} /> 기존 건물 실제 사용량 (선택)
+                        </label>
+                        <p className="text-[10px] opacity-60 mb-3">
+                          리모델링 전 건물의 작년 값을 입력하면 절감액·NPV·IRR을 실측 기준으로 계산합니다.
+                          비워두면 <b>리모델링 후 운영비의 1.6배</b>로 추정합니다.
+                        </p>
+                        <div className="flex gap-2 mb-3">
+                          {[{ k: 'bill', t: '연간 요금(원)' }, { k: 'usage', t: '연간 사용량(kWh)' }].map((m) => (
+                            <button
+                              key={m.k}
+                              type="button"
+                              onClick={() => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, mode: m.k } }))}
+                              className={`flex-1 py-2 text-xs font-black rounded-lg border-2 transition-all ${projectData.baselineActual.mode === m.k ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : 'border-slate-500/30 opacity-60'}`}
+                            >
+                              {m.t}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(projectData.baselineActual.mode === 'bill'
+                            ? [{ f: 'elecBill', t: '전기요금 (원/년)' }, { f: 'heatBill', t: '난방요금 (원/년)' }]
+                            : [{ f: 'elecKwh', t: '전기 (kWh/년)' }, { f: 'heatKwh', t: '난방 (kWh/년)' }]
+                          ).map((x) => (
+                            <div key={x.f}>
+                              <span className="text-[10px] opacity-70 block mb-1">{x.t}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="미입력 시 추정"
+                                value={projectData.baselineActual[x.f]}
+                                onChange={(e) => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, [x.f]: e.target.value } }))}
+                                className={`w-full p-2.5 text-sm font-bold rounded-lg border outline-none ${theme.input} focus:border-emerald-500`}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                </div>
+              </div>
+            </WizardShell>
+          )}
+
+          {/* STEP: 재무 분석 설정 (LCC) */}
+          {step === 'financial' && (
+            <WizardShell
+              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
+              icon={<Calculator size={32} />}
+              title="재무 분석 설정 (LCC)"
+              subtitle="할인율·물가상승률·수명주기 기간을 설정합니다. (기본값 권장)"
+              back="budget" next="buildingView" nextLabel="3D 모델 렌더링"
+            >
+              <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>인플레이션율 (%)</label>
                             <input
@@ -1576,23 +1631,8 @@ export default function App() {
                             수명주기비용(LCC) 분석 모형에 따라 각 항목별 물가상승률을 복리로 적용하여 순현재가치(NPV) 및 내부수익률(IRR)을 계산합니다.
                           </p>
                         </div>
-                      </details>
-                                          </div>
-                  </div>
-                </div>
               </div>
-
-              {uploadedFile && surfaces.length > 0 && (
-                <div className="mt-8 flex justify-end animate-in fade-in slide-in-from-bottom-4">
-                  <button
-                    onClick={() => setStep('buildingView')}
-                    className="px-10 py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[1.5rem] font-black text-lg shadow-xl shadow-emerald-500/30 flex items-center gap-3 transition-transform hover:scale-105"
-                  >
-                    <CheckCircle2 size={24} /> 프로젝트 설정 완료 및 3D 모델 렌더링 <ArrowRight size={24} />
-                  </button>
-                </div>
-              )}
-            </div>
+            </WizardShell>
           )}
 
           {/* STEP 1.5: Parsing gbXML */}
