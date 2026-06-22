@@ -1127,38 +1127,109 @@ export default function FloorEditor(props) {
                                       const paneCount = currentPanes === 'Single' ? 1 : currentPanes === 'Triple' ? 3 : currentPanes === 'Quadruple' ? 4 : 2;
                                       const lowE = currentType === 'Low-E';
                                       const smart = currentType === 'Smart';
+                                      const coated = lowE || smart;
                                       const isArgon = /arg/i.test(g.name || '');
                                       const gasLabel = isArgon ? '아르곤' : '공기';
-                                      // 외부→실내 순서로 유리/가스층 배열
-                                      const items = [];
+                                      const coatLabel = smart ? '스마트' : 'Low-E';
+
+                                      // ── 아이소메트릭 단면 지오메트리 (사진 스타일: 비스듬한 유리 + PVC 프레임 코너) ──
+                                      const baseY = 176, topY = 40;     // 유리 하단/상단 y
+                                      const SH = 58;                     // 상단이 우측으로 기우는 양(입체감)
+                                      const pw = 8;                      // 유리 한 장 두께
+                                      const gap = Math.max(14, Math.min(26, 150 / (paneCount + 1)));
+                                      const startX = 78;                 // 첫(바깥) 유리 하단 x
+                                      const dep = 9, depY = -6;          // 유리 상단 두께(입체)
+
+                                      const panes = [];
                                       for (let i = 0; i < paneCount; i++) {
-                                        // Low-E 코팅은 보통 실내측 유리 표면(가스층 접한 면)에 도포
-                                        items.push({ type: 'glass', lowE: (lowE || smart) && i === paneCount - 1 });
-                                        if (i < paneCount - 1) items.push({ type: 'gap' });
+                                        const x = startX + i * (pw + gap);
+                                        let isLowEpane = false;
+                                        if (coated) isLowEpane = paneCount >= 3 ? (i === 0 || i === paneCount - 1) : (i === paneCount - 1);
+                                        panes.push({ x, isLowEpane, label: isLowEpane ? coatLabel + '유리' : '일반유리' });
                                       }
+                                      const front = (x) => `${x},${baseY} ${x + pw},${baseY} ${x + pw + SH},${topY} ${x + SH},${topY}`;
+                                      const cap = (x) => `${x + SH},${topY} ${x + pw + SH},${topY} ${x + pw + SH + dep},${topY + depY} ${x + SH + dep},${topY + depY}`;
+                                      const gasPoly = (x) => { const a = x + pw, b = x + pw + gap; return `${a},${baseY} ${b},${baseY} ${b + SH},${topY} ${a + SH},${topY}`; };
+                                      const unitR = startX + (paneCount - 1) * (pw + gap) + pw; // 안쪽 유리 하단 우측 x
+
+                                      // 라벨 타겟(유리 표면 중앙 부근)
+                                      const mid = (x) => ({ x: x + pw / 2 + SH * 0.45, y: (baseY + topY) / 2 + 6 });
+                                      const outer = mid(panes[0].x);
+                                      const labelRows = [];
+                                      const pushPane = (p) => labelRows.push({ t: p.label, ...mid(p.x), c: p.isLowEpane ? '#d97706' : '#3b82f6' });
+                                      pushPane(panes[0]);                                            // 바깥 유리
+                                      if (paneCount >= 3) pushPane(panes[Math.floor((paneCount - 1) / 2)]); // 가운데 유리
+                                      if (paneCount >= 2) pushPane(panes[paneCount - 1]);            // 실내 유리
+                                      if (paneCount > 1) { const gx = panes[0].x; const a = gx + pw + gap / 2 + SH * 0.5; labelRows.push({ t: gasLabel + '가스', x: a, y: topY + 18, c: '#0ea5e9' }); }
+                                      if (paneCount > 1) labelRows.push({ t: '단열간봉', x: panes[0].x + pw + gap / 2 + 4, y: baseY - 8, c: '#64748b' });
+
                                       return (
                                         <>
-                                          <div className="flex items-center gap-1">
-                                            <span className="text-[8px] font-black text-blue-500/70 [writing-mode:vertical-rl] rotate-180">바깥</span>
-                                            <div className="flex-1 flex items-stretch h-24 rounded-lg overflow-hidden border-2 border-slate-500/30 bg-gradient-to-b from-sky-50/30 to-transparent">
-                                              {items.map((it, idx) => it.type === 'glass' ? (
-                                                <div key={idx} className="relative flex-shrink-0 w-[16px] bg-gradient-to-r from-sky-300/80 to-sky-200/50 border-x border-sky-400/40" title="유리 (Glass)">
-                                                  <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.7) 0%, transparent 40%)' }}></div>
-                                                  {it.lowE && <div className="absolute inset-y-0 right-0 w-[3px] bg-amber-400 shadow" title="Low-E 코팅"></div>}
-                                                </div>
-                                              ) : (
-                                                <div key={idx} className="relative flex-1 flex items-center justify-center min-w-[28px]" title={`${gasLabel} 충전층`}>
-                                                  <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 4px, #64748b 4px, #64748b 5px)' }}></div>
-                                                  <span className="text-[8px] font-bold text-slate-500 -rotate-90 whitespace-nowrap">{gasLabel}</span>
-                                                </div>
+                                          <div className="rounded-xl overflow-hidden border border-slate-500/15 bg-gradient-to-b from-sky-50/40 to-transparent text-slate-600 dark:text-slate-300">
+                                            <svg viewBox="0 0 340 210" className="w-full h-auto" style={{ display: 'block' }}>
+                                              <defs>
+                                                <linearGradient id="glz-glass" x1="0" y1="0" x2="1" y2="1">
+                                                  <stop offset="0%" stopColor="#dcefff" stopOpacity="0.95" />
+                                                  <stop offset="45%" stopColor="#9fd4f0" stopOpacity="0.85" />
+                                                  <stop offset="100%" stopColor="#7cc3e8" stopOpacity="0.9" />
+                                                </linearGradient>
+                                                <linearGradient id="glz-frame" x1="0" y1="0" x2="0" y2="1">
+                                                  <stop offset="0%" stopColor="#f3efe1" />
+                                                  <stop offset="100%" stopColor="#ddd5bd" />
+                                                </linearGradient>
+                                              </defs>
+
+                                              {/* 하단 프레임(sill) — 3D 비드 */}
+                                              <polygon points={`44,${baseY + 2} ${unitR + SH + 26},${baseY + 2} ${unitR + SH + 40},${baseY - 8} 58,${baseY - 8}`} fill="#eee8d6" stroke="#c9c0a3" strokeWidth="1" />
+                                              <rect x="44" y={baseY + 2} width={unitR + SH - 18} height="26" rx="3" fill="url(#glz-frame)" stroke="#c9c0a3" strokeWidth="1" />
+                                              <rect x="64" y={baseY + 9} width="120" height="6" rx="3" fill="#cfc6a8" opacity="0.7" />
+                                              <circle cx={unitR + SH - 2} cy={baseY + 16} r="7" fill="#e7e0cb" stroke="#bfb595" strokeWidth="1" />
+                                              <circle cx={unitR + SH - 2} cy={baseY + 16} r="2.5" fill="#bfb595" />
+
+                                              {/* 좌측 프레임(jamb) */}
+                                              <polygon points={`52,${baseY} 66,${baseY} ${66 + SH},${topY} ${52 + SH},${topY}`} fill="url(#glz-frame)" stroke="#c9c0a3" strokeWidth="1" />
+
+                                              {/* 가스 충전층 */}
+                                              {panes.slice(0, -1).map((p, i) => (
+                                                <polygon key={'g' + i} points={gasPoly(p.x)} fill="#eaf7ff" stroke="#bcdcef" strokeWidth="0.6" opacity="0.55" />
                                               ))}
-                                            </div>
-                                            <span className="text-[8px] font-black text-red-500/70 [writing-mode:vertical-rl]">실내</span>
+                                              {/* 단열간봉(스페이서) — 각 가스층 하단 */}
+                                              {panes.slice(0, -1).map((p, i) => (
+                                                <polygon key={'s' + i} points={`${p.x + pw},${baseY} ${p.x + pw + gap},${baseY} ${p.x + pw + gap - 2},${baseY - 11} ${p.x + pw + 2},${baseY - 11}`} fill="#3f3f46" stroke="#27272a" strokeWidth="0.6" rx="2" />
+                                              ))}
+
+                                              {/* 유리판 (바깥→실내) */}
+                                              {panes.map((p, i) => (
+                                                <g key={'p' + i}>
+                                                  <polygon points={cap(p.x)} fill="#cfe9fb" stroke="#8fb9d6" strokeWidth="0.6" />
+                                                  <polygon points={front(p.x)} fill="url(#glz-glass)" stroke="#6fb0d6" strokeWidth="0.8" />
+                                                  {/* 유리 반사 하이라이트 */}
+                                                  <polygon points={`${p.x},${baseY} ${p.x + 2.5},${baseY} ${p.x + 2.5 + SH},${topY} ${p.x + SH},${topY}`} fill="#ffffff" opacity="0.35" />
+                                                  {/* Low-E 코팅면(실내측 표면) */}
+                                                  {p.isLowEpane && <polygon points={`${p.x + pw - 1.4},${baseY} ${p.x + pw},${baseY} ${p.x + pw + SH},${topY} ${p.x + pw - 1.4 + SH},${topY}`} fill="#f5b942" opacity="0.85" />}
+                                                </g>
+                                              ))}
+
+                                              {/* 라벨 + 리더선 (오른쪽 정렬) */}
+                                              {labelRows.map((r, i) => {
+                                                const lx = 250, ly = 30 + i * 23;
+                                                return (
+                                                  <g key={'l' + i} fontSize="10" fontWeight="700">
+                                                    <path d={`M${r.x},${r.y} L${lx - 6},${ly}`} stroke={r.c} strokeWidth="1" fill="none" opacity="0.55" />
+                                                    <circle cx={r.x} cy={r.y} r="1.8" fill={r.c} />
+                                                    <text x={lx} y={ly + 3} fill="currentColor">{r.t}{/^아|^공/.test(r.t) ? '' : ''}</text>
+                                                  </g>
+                                                );
+                                              })}
+                                              {/* 방향 표기 */}
+                                              <text x="40" y="24" fontSize="9" fontWeight="800" fill="#3b82f6" opacity="0.7">바깥</text>
+                                              <text x={unitR + SH - 6} y="24" fontSize="9" fontWeight="800" fill="#ef4444" opacity="0.7">실내</text>
+                                            </svg>
                                           </div>
                                           {/* 사양 칩 */}
                                           <div className="flex flex-wrap gap-1.5 mt-2 justify-center">
                                             <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20">{paneCount}중 유리</span>
-                                            {(lowE || smart) && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">{smart ? '스마트' : 'Low-E'} 코팅</span>}
+                                            {coated && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">{coatLabel} 코팅</span>}
                                             {paneCount > 1 && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-500 border border-slate-500/20">{gasLabel} 충전</span>}
                                             {g.u != null && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">U {Number(g.u).toFixed(2)}</span>}
                                             {g.shgc != null && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 border border-orange-500/20">SHGC {Number(g.shgc).toFixed(2)}</span>}
