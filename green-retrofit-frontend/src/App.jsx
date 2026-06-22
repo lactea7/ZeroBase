@@ -215,6 +215,7 @@ export default function App() {
   const [sunHour, setSunHour] = useState(12);
 
   const fileInputRef = useRef(null);
+  const scheduleEditorRef = useRef(null);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadError, setUploadError] = useState(null);
 
@@ -680,15 +681,24 @@ export default function App() {
   // (alert/화면이동은 호출하는 쪽에서 일괄 처리 → 여러 제안을 한 번에 적용 가능)
   const applyRecommendationChanges = (type) => {
     if (type === 'window') {
+      // gbXML 모델은 별도 Window 면이 없고 벽면의 WWR/glazingId로 창을 표현한다.
+      // 따라서 Window/Skylight 면뿐 아니라 '창을 가진 면'(glazingId 지정 or wwr>0)도 하향해야
+      // 백엔드 창호비가 실제로 줄어든다. (기존엔 type 체크만 해 gbXML에서 무반응이었음)
+      let changed = 0;
       setSurfaces((prev) =>
         prev.map((s) => {
-          if (s.type === 'Window' || s.type === 'Skylight') {
+          const hasGlass =
+            s.type === 'Window' || s.type === 'Skylight' ||
+            s.glazingId != null ||
+            ((s.wwr && s.wwr > 0) && /wall/i.test(s.type || ''));
+          if (hasGlass && s.glazingId !== 42) {
+            changed++;
             return { ...s, glazingId: 42 }; // 일반 복층 유리(ID 42)로 하향
           }
           return s;
         })
       );
-      return '창호를 일반 복층유리로 하향';
+      return changed > 0 ? `창호 ${changed}개 면을 일반 복층유리로 하향` : null;
     } else if (type === 'insulation') {
       // 모든 구조체의 단열재를 일반 등급 제품(비드법 1종 1호, ID 1)으로 일괄 교체
       const stdProduct = INSULATION_TYPES.find(p => p.tier === 'standard') || INSULATION_TYPES[0];
@@ -746,7 +756,7 @@ export default function App() {
         ));
       }
       
-      return `단열재 ${changedCount}개 외벽을 일반 등급(EPS/미네랄울)으로 하향`;
+      return changedCount > 0 ? `단열재 ${changedCount}개 외벽을 일반 등급(EPS/미네랄울)으로 하향` : null;
     } else if (type === 'hvac') {
       setProjectData((prev) => ({ ...prev, geothermalApplied: false }));
       return '지열(Geothermal) 시스템 도입 취소';
@@ -774,6 +784,14 @@ export default function App() {
   const handleApplyRecommendations = (types) => {
     if (!types || types.length === 0) return;
     const summaries = types.map(applyRecommendationChanges).filter(Boolean);
+    // 실제로 바뀐 항목이 하나도 없으면(이미 최소 사양 등) 안내만 하고 머무른다 — 재시뮬해도 동일하므로
+    if (summaries.length === 0) {
+      alert(
+        '선택한 제안은 현재 모델에 적용할 변경 사항이 없습니다.\n' +
+        '(이미 최저 사양이거나 해당 요소가 모델에 없어 비용이 더 줄지 않습니다.)'
+      );
+      return;
+    }
     alert(
       `✅ ${summaries.length}개 제안을 적용했습니다.\n\n` +
       summaries.map((s) => `· ${s}`).join('\n') +
@@ -1366,7 +1384,14 @@ export default function App() {
 
                       <div
                         className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.customSchedule.useCustom ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-500/30 bg-black/5'}`}
-                        onClick={() => setProjectData((prev) => ({ ...prev, customSchedule: { ...prev.customSchedule, useCustom: !prev.customSchedule.useCustom } }))}
+                        onClick={() => {
+                          const turningOn = !projectData.customSchedule.useCustom;
+                          setProjectData((prev) => ({ ...prev, customSchedule: { ...prev.customSchedule, useCustom: turningOn } }));
+                          // 켜질 때 인라인 편집기로 부드럽게 스크롤
+                          if (turningOn) {
+                            setTimeout(() => scheduleEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-3">
                           <div className={`p-2 rounded-lg ${projectData.customSchedule.useCustom ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
@@ -1376,25 +1401,28 @@ export default function App() {
                             <span className={`block font-black text-sm ${projectData.customSchedule.useCustom ? 'text-indigo-500' : theme.textSub}`}>
                               사용자 스케줄 적용
                             </span>
-                            <span className="text-[10px] opacity-60">용도별 스케줄 대신 직접 수정합니다.</span>
+                            <span className="text-[10px] opacity-60">용도별 스케줄 대신 직접 수정합니다. (켜면 아래에서 바로 편집)</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          {projectData.customSchedule.useCustom && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setShowScheduleModal(true); }}
-                              className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
-                            >
-                              스케줄 수정
-                            </button>
-                          )}
-                          {projectData.customSchedule.useCustom ? (
-                            <ToggleRight size={32} className="text-indigo-500" />
-                          ) : (
-                            <ToggleLeft size={32} className="text-slate-500" />
-                          )}
-                        </div>
+                        {projectData.customSchedule.useCustom ? (
+                          <ToggleRight size={32} className="text-indigo-500" />
+                        ) : (
+                          <ToggleLeft size={32} className="text-slate-500" />
+                        )}
                       </div>
+
+                      {/* 사용자 스케줄 인라인 편집기 — 토글 ON 시 펼쳐지며 스크롤 */}
+                      {projectData.customSchedule.useCustom && (
+                        <div
+                          ref={scheduleEditorRef}
+                          className="mt-2 p-5 rounded-2xl border-2 border-indigo-500/30 bg-indigo-500/5 animate-in fade-in slide-in-from-top-2 duration-300"
+                        >
+                          <ScheduleEditor
+                            value={projectData.customSchedule}
+                            onChange={(newSchedule) => setProjectData({ ...projectData, customSchedule: newSchedule })}
+                          />
+                        </div>
+                      )}
                     </div>
               </div>
             </WizardShell>
