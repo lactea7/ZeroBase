@@ -532,6 +532,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     activity_names = load_activity_names(db_dir)
     created_op_sch = set()
 
+    # ── 실기기 HVAC 모드 선택 ──
+    # 전기 열원(2) 또는 지열 → PTHP(실제 히트펌프, 실소비+COP). 그 외(지역난방 등)는
+    # 이상부하로 폴백(난방 소비는 cost_analyzer가 열원 단가로 환산). 지열은 고COP.
+    _heat_src_id = int(project_data.get("heatSource", 11))
+    use_pthp = bool(is_geothermal or _heat_src_id == 2)
+    pthp_ccop, pthp_hcop = (5.0, 4.5) if is_geothermal else (4.2, 3.5)
+    if use_pthp:
+        idf.enable_sizing()   # PTHP autosize용 사이징 활성화(1회)
+    print(f"🌀 HVAC 모드: {'PTHP 실기기(전기/지열)' if use_pthp else '이상부하(폴백)'} "
+          f"(heatSource={_heat_src_id}, geo={is_geothermal})")
+
     custom_sch = project_data.get("customSchedule", {})
     use_custom = custom_sch.get("useCustom", False)
     
@@ -618,7 +629,12 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             cool_sch_text = sched["cooling"]
 
         if z.get("isConditioned", True):
-            idf.add_ideal_hvac(z_id, op_sch)
+            if use_pthp:
+                idf.add_zone_sizing(z_id)
+                idf.add_pthp(z_id, cooling_cop=pthp_ccop, heating_cop=pthp_hcop,
+                             op_schedule=op_sch)
+            else:
+                idf.add_ideal_hvac(z_id, op_sch)
             idf.add_schedule_compact(f"{z_id}_HeatSch", "AnyNumber", heat_sch_text)
             idf.add_schedule_compact(f"{z_id}_CoolSch", "AnyNumber", cool_sch_text)
             idf.add_thermostat(z_id, f"{z_id}_HeatSch", f"{z_id}_CoolSch")
@@ -750,6 +766,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     if zone_to_zone_count > 0:
         print(f"🔗 Zone-to-Zone 경계 Surface {zone_to_zone_count}개 양방향 쌍 생성 완료")
 
+    # 실기기 HVAC 누적분 일괄 emit (PTHP 존별 EquipmentConnections/List 등)
+    idf.finalize_hvac()
+
     # 출력 변수
     idf.add_output_variables()
 
@@ -806,6 +825,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             led_reduction_active=led_reduction_active,
             hvac_upgrade_active=hvac_upgrade_active,
             heat_source=heat_source,
+            use_pthp=use_pthp,
             discount_rate=float(lcc_parameters.get('discountRate', 5.0)) / 100.0,
             inflation_rate=float(lcc_parameters.get('inflationRate', 3.0)) / 100.0,
             utility_inflation=float(lcc_parameters.get('utilityInflation', 4.0)) / 100.0,

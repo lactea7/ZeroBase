@@ -5,6 +5,64 @@
 
 import os
 import math
+import re
+
+# ---------------------------------------------------------------------------- #
+#                    IDD 필드 순서 인덱스 (dict→positional 평탄화)               #
+# ---------------------------------------------------------------------------- #
+# idragon 등은 객체를 {필드명: 값} dict로 작성하지만 우리 빌더는 위치(positional)
+# 리스트로 emit한다. 실기기 HVAC(VRF/보일러/지역난방 등)는 필드가 수십 개라
+# 위치를 손으로 맞추면 한 칸만 밀려도 물리 오류/Fatal이 난다. → EnergyPlus IDD를
+# 파싱해 객체별 '필드명 순서'를 얻고, dict를 그 순서대로 평탄화한다.
+
+_IDD_PATHS = [
+    "/Applications/EnergyPlus-25-2-0/Energy+.idd",
+    "/usr/local/EnergyPlus-25-2-0/Energy+.idd",
+    "/usr/local/bin/Energy+.idd",
+]
+_IDD_INDEX_CACHE = None  # {obj_type_lower: {"fields": [names...], "min": int}}
+
+
+def _get_idd_index():
+    """Energy+.idd를 1회 파싱해 {객체타입(소문자): {fields:[필드명...], min:최소필드수}} 반환."""
+    global _IDD_INDEX_CACHE
+    if _IDD_INDEX_CACHE is not None:
+        return _IDD_INDEX_CACHE
+    idd_path = next((p for p in _IDD_PATHS if os.path.exists(p)), None)
+    if idd_path is None:
+        # 환경변수 폴백
+        env = os.environ.get("ENERGYPLUS_IDD")
+        if env and os.path.exists(env):
+            idd_path = env
+    index = {}
+    if idd_path is None:
+        _IDD_INDEX_CACHE = index
+        return index
+
+    obj_header = re.compile(r"^([A-Za-z][A-Za-z0-9:_]*)\s*,\s*$")
+    field_line = re.compile(r"^\s+[AN]\d+\s*[,;]\s*\\field\s+(.+?)\s*$")
+    minf_line = re.compile(r"^\s+\\min-fields\s+(\d+)")
+
+    cur = None
+    with open(idd_path, "r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            m = obj_header.match(line)
+            if m:
+                cur = {"fields": [], "min": 0}
+                index[m.group(1).lower()] = cur
+                continue
+            if cur is None:
+                continue
+            fm = field_line.match(line)
+            if fm:
+                cur["fields"].append(fm.group(1).strip())
+                continue
+            mm = minf_line.match(line)
+            if mm:
+                cur["min"] = int(mm.group(1))
+    _IDD_INDEX_CACHE = index
+    return index
 
 
 class IdfObject:
@@ -42,6 +100,10 @@ class IdfBuilder:
     def __init__(self, version: str = "25.2"):
         self.version = version
         self.objects: list[IdfObject] = []
+        # 실기기 HVAC 누적 상태 (idragon의 postprocessor 대체: 누적→finalize_hvac에서 일괄 emit)
+        self._vrf_sources: dict = {}   # source_name -> {"terminals": [term_name,...]}
+        self._zone_equip: dict = {}    # zone_id -> [(obj_type, name), ...]
+        self._zone_nodes: dict = {}    # zone_id -> {"inlet": node, "exhaust": node}
         self._add_header()
 
     def _add_header(self):
@@ -58,6 +120,38 @@ class IdfBuilder:
         """IDF 객체 추가 (체이닝 지원)"""
         self.objects.append(IdfObject(obj_type, fields or []))
         return self
+
+    def _emit_by_idd(self, obj_type: str, field_dict: dict) -> "IdfBuilder":
+        """{필드명: 값} dict를 IDD 필드 순서대로 위치 리스트로 평탄화해 추가.
+
+        - 미설정 필드는 "" 로 채움(마지막 설정 필드 또는 \\min-fields 까지).
+        - field_dict 키가 IDD에 없으면 ValueError(오타·버전 불일치 조기 발견).
+        - IDD를 못 찾으면 RuntimeError(이 경로는 IDD 기반 객체 emit을 요구).
+        """
+        idx = _get_idd_index().get(obj_type.lower())
+        if idx is None or not idx["fields"]:
+            raise RuntimeError(
+                f"IDD에서 '{obj_type}' 필드 정의를 찾지 못했습니다 "
+                f"(Energy+.idd 경로 확인 필요)."
+            )
+        names = idx["fields"]
+        pos = {n: i for i, n in enumerate(names)}
+        # 키 검증
+        unknown = [k for k in field_dict if k not in pos]
+        if unknown:
+            raise ValueError(
+                f"'{obj_type}' IDD에 없는 필드: {unknown}\n사용 가능 필드 일부: {names[:8]}..."
+            )
+        if not field_dict:
+            last = 0
+        else:
+            last = max(pos[k] for k in field_dict) + 1
+        length = max(last, idx.get("min", 0))
+        fields = []
+        for i in range(length):
+            v = field_dict.get(names[i], "")
+            fields.append("" if v is None else v)
+        return self.add(obj_type, fields)
 
     # -------------------------------------------------------
     # 도메인 특화 메서드 (imugi의 set_wwr, rename 패턴 참고)
@@ -210,6 +304,386 @@ class IdfBuilder:
         ])
         return self
 
+    # -------------------------------------------------------
+    # 실기기 HVAC: VRF(가변냉매유량) 히트펌프 — idragon dragon/hvac.py 포팅
+    #   이상부하(IdealLoads) 대신 실제 기기를 모델링해 EnergyPlus가
+    #   실제 전력 소비/용량을 산출하도록 함. (전기 열원/지열 케이스)
+    # -------------------------------------------------------
+
+    def add_vrf_outdoor_unit(self, source_name: str, cooling_cop: float,
+                             heating_cop: float, cooling_capacity_w: float,
+                             heating_capacity_w: float):
+        """VRF 실외기(AirConditioner:VariableRefrigerantFlow) + 성능곡선 ~20개.
+        (idragon HeatPump.to_idf_object, hvac.py:147-302 포팅)
+        용량은 고정값(W). 현재 파이프라인은 sizing 미수행이라 autosize 불가 →
+        연면적 기반 추정 용량을 ep_simulator에서 계산해 전달."""
+        s = source_name
+        # (curve_type, suffix, [values...])  — idragon 계수 그대로
+        curves = [
+            ("Curve:Biquadratic", "CoolingCapaMF_LowTemp", [0.576882692, 0.017447952, 0.000583269, -1.76324E-06, -7.474E-09, -1.30413E-07, 15, 24, -5, 23, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Cubic", "CoolingCapaBoundary", [25.73473775, -0.03150043, -0.01416595, 0, 11, 30, None, None, "Temperature"]),
+            ("Curve:Biquadratic", "CoolingCapaMF_HighTemp", [0.6867358, 0.0207631, 0.0005447, -0.0016218, -4.259E-07, -0.0003392, 15, 24, 16, 43, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Biquadratic", "CoolingEIRMF_LowTemp", [0.989010541, -0.02347967, 0.000199711, 0.005968336, -1.0289E-07, -0.00015686, 15, 24, -5, 23, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Cubic", "CoolingEIRBoundary", [25.73473775, -0.03150043, -0.01416595, 0, 15, 24, None, None, "Temperature"]),
+            ("Curve:Biquadratic", "CoolingEIRMF_HighTemp", [0.14351470, 0.01860035, -0.0003954, 0.02485219, 0.00016329, -0.0006244, 15, 24, 16, 43, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Cubic", "CoolingEIRMF_LowPLR", [0.4628123, -1.0402406, 2.17490997, -0.5974817, 0, 1, None, None, "Temperature", "Capacity"]),
+            ("Curve:Linear", "CoolingEIRMF_HighPLR", [1.0, 0.0, 1.0, 1.5]),
+            ("Curve:Linear", "CoolingCombCorrection", [0.618055, 0.381945, 1.0, 1.5]),
+            ("Curve:Linear", "CoolingPLRCorrelation", [0.85, 0.15, 0.0, 1.0]),
+            ("Curve:Biquadratic", "HeatingCapaMF_LowTemp", [1.014599599, -0.002506703, -0.000141599, 0.026931595, 1.83538E-06, -0.000358147, 15, 27, -20, 15, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Cubic", "HeatingCapaBoundary", [-7.6000882, 3.05090016, -0.1162844, 0.0, 15, 27, None, None, "Temperature"]),
+            ("Curve:Biquadratic", "HeatingCapaMF_HighTemp", [1.161134821, 0.027478868, -0.00168795, 0.001783378, 2.03208E-06, -6.8969E-05, 15, 27, -10, 15, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Biquadratic", "HeatingEIRMF_LowTemp", [0.87465501, -0.01319754, 0.00110307, -0.0133118, 0.00089017, -0.00012766, 15, 27, -20, 12, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Cubic", "HeatingEIRBoundary", [-7.6000882, 3.05090016, -0.1162844, 0.0, 15, 27, -20, 15, "Temperature"]),
+            ("Curve:Biquadratic", "HeatingEIRMF_HighTemp", [2.504005146, -0.05736767, 4.07336E-05, -0.12959669, 0.00135839, 0.00317047, 15, 27, -10, 15, None, None, "Temperature", "Temperature", "Dimensionless"]),
+            ("Curve:Cubic", "HeatingEIRMF_LowPLR", [0.1400093, 0.6415002, 0.1339047, 0.0845859, 0, 1, None, None, "Dimensionless", "Dimensionless"]),
+            ("Curve:Quadratic", "HeatingEIRMF_HighPLR", [2.4294355, -2.235887, 0.8064516, 1.0, 1.5]),
+            ("Curve:Linear", "HeatingCombCorrection", [0.96034, 0.03966, 1.0, 1.5]),
+            ("Curve:Linear", "HeatingPLRCorrelation", [0.85, 0.15, 0.0, 1.0]),
+        ]
+        for ctype, suffix, vals in curves:
+            self.add(ctype, [f"Curve_for_{s}:{suffix}"] + vals)
+
+        self._emit_by_idd("AirConditioner:VariableRefrigerantFlow", {
+            "Heat Pump Name": s,
+            "Availability Schedule Name": "AlwaysOn",
+            "Gross Rated Total Cooling Capacity": round(cooling_capacity_w, 1),
+            "Gross Rated Cooling COP": cooling_cop,
+            "Cooling Capacity Ratio Modifier Function of Low Temperature Curve Name": f"Curve_for_{s}:CoolingCapaMF_LowTemp",
+            "Cooling Capacity Ratio Boundary Curve Name": f"Curve_for_{s}:CoolingCapaBoundary",
+            "Cooling Capacity Ratio Modifier Function of High Temperature Curve Name": f"Curve_for_{s}:CoolingCapaMF_HighTemp",
+            "Cooling Energy Input Ratio Modifier Function of Low Temperature Curve Name": f"Curve_for_{s}:CoolingEIRMF_LowTemp",
+            "Cooling Energy Input Ratio Boundary Curve Name": f"Curve_for_{s}:CoolingEIRBoundary",
+            "Cooling Energy Input Ratio Modifier Function of High Temperature Curve Name": f"Curve_for_{s}:CoolingEIRMF_HighTemp",
+            "Cooling Energy Input Ratio Modifier Function of Low Part-Load Ratio Curve Name": f"Curve_for_{s}:CoolingEIRMF_LowPLR",
+            "Cooling Energy Input Ratio Modifier Function of High Part-Load Ratio Curve Name": f"Curve_for_{s}:CoolingEIRMF_HighPLR",
+            "Cooling Combination Ratio Correction Factor Curve Name": f"Curve_for_{s}:CoolingCombCorrection",
+            "Cooling Part-Load Fraction Correlation Curve Name": f"Curve_for_{s}:CoolingPLRCorrelation",
+            "Gross Rated Heating Capacity": round(heating_capacity_w, 1),
+            "Gross Rated Heating COP": heating_cop,
+            "Heating Capacity Ratio Modifier Function of Low Temperature Curve Name": f"Curve_for_{s}:HeatingCapaMF_LowTemp",
+            "Heating Capacity Ratio Boundary Curve Name": f"Curve_for_{s}:HeatingCapaBoundary",
+            "Heating Capacity Ratio Modifier Function of High Temperature Curve Name": f"Curve_for_{s}:HeatingCapaMF_HighTemp",
+            "Heating Energy Input Ratio Modifier Function of Low Temperature Curve Name": f"Curve_for_{s}:HeatingEIRMF_LowTemp",
+            "Heating Energy Input Ratio Boundary Curve Name": f"Curve_for_{s}:HeatingEIRBoundary",
+            "Heating Energy Input Ratio Modifier Function of High Temperature Curve Name": f"Curve_for_{s}:HeatingEIRMF_HighTemp",
+            "Heating Energy Input Ratio Modifier Function of Low Part-Load Ratio Curve Name": f"Curve_for_{s}:HeatingEIRMF_LowPLR",
+            "Heating Energy Input Ratio Modifier Function of High Part-Load Ratio Curve Name": f"Curve_for_{s}:HeatingEIRMF_HighPLR",
+            "Heating Combination Ratio Correction Factor Curve Name": f"Curve_for_{s}:HeatingCombCorrection",
+            "Heating Part-Load Fraction Correlation Curve Name": f"Curve_for_{s}:HeatingPLRCorrelation",
+            "Master Thermostat Priority Control Type": "LoadPriority",
+            "Zone Terminal Unit List Name": f"{s}_TUList",
+            # EP25.2는 기본 ReverseCycle 제상에 EIR 곡선을 요구 → 저항식으로 설정(곡선 불요)
+            "Defrost Strategy": "Resistive",
+            "Defrost Control": "Timed",
+            # 공랭식 응축기는 응축기 입구노드를 외기노드에 연결해야 함(없으면 미초기화 노드 접근→crash)
+            "Condenser Type": "AirCooled",
+            "Condenser Inlet Node Name": f"{s}_OANode",
+        })
+        # 응축기 외기 노드 등록(외기 조건을 노드에 채워줌)
+        self.add("OutdoorAir:NodeList", [f"{s}_OANode"])
+        self._vrf_sources.setdefault(s, {"terminals": []})
+        return self
+
+    def add_vrf_terminal(self, zone_id: str, source_name: str,
+                         cooling_w: float, heating_w: float,
+                         op_schedule: str = "AlwaysOn"):
+        """VRF 실내기(ZoneHVAC:TerminalUnit:VRF) + DX 코일 2종 + 팬.
+        (idragon AirHandlingUnit.to_idf_object, hvac.py:2010-2102 포팅)
+        용량 고정(W). 송풍량은 용량 기반 추정(ΔT≈10K) — sizing 미수행 대응."""
+        tu = f"{zone_id}_VRFterm"
+        inlet = f"{zone_id}_VRF_SupplyOut"     # 터미널→존 (존 급기)
+        exhaust = f"{zone_id}_VRF_ReturnIn"    # 존→터미널 (존 환기, OA믹서 환기측)
+        mixed = f"{zone_id}_VRF_Mixed"         # OA믹서 혼합공기 = 냉방코일 입구
+        oa_in = f"{tu}_OAIn"                    # 외기 도입 노드
+        relief = f"{tu}_Relief"                # 배기 노드
+        mid1 = f"{zone_id}_VRF_C2H"
+        mid2 = f"{zone_id}_VRF_H2F"
+        # 송풍량(m3/s) ≈ Q /(ρ·cp·ΔT), ρ1.2 cp1006 ΔT10 → ≈ Q/12000, 최소 0.05
+        airflow = round(max(cooling_w, heating_w) / 12000.0, 4)
+        if airflow < 0.05:
+            airflow = 0.05
+        oa_flow = round(airflow * 0.15, 4)     # 환기용 외기풍량(고정)
+
+        # 외기 믹서(EP25.2 VRF 실내기는 OA 믹서 구성을 기대 — 없으면 본런 직후 crash)
+        self._emit_by_idd("OutdoorAir:Mixer", {
+            "Name": f"{tu}_OAMixer",
+            "Mixed Air Node Name": mixed,
+            "Outdoor Air Stream Node Name": oa_in,
+            "Relief Air Stream Node Name": relief,
+            "Return Air Stream Node Name": exhaust,
+        })
+        self.add("OutdoorAir:NodeList", [oa_in])
+
+        # 실내기 용량곡선 4개
+        self.add("Curve:Cubic", [f"Curve_for_{tu}:HeatingCapaTemp", -3.90708928E-01, 2.61815024E-01, -1.30431603E-02, 1.78131746E-04, 0.0, 50, 0.5, 1.5, "Temperature", "Dimensionless"])
+        self.add("Curve:Linear", [f"Curve_for_{tu}:HeatingCapaFlow", 0.8, 0.2, 0.0, 1.5])
+        self.add("Curve:Cubic", [f"Curve_for_{tu}:CoolingCapaTemp", 5.04547274E-01, 2.88891279E-02, -1.08194187E-05, 1.01359395E-05, 0.0, 50, 0.5, 1.5, "Temperature", "Dimensionless"])
+        self.add("Curve:Linear", [f"Curve_for_{tu}:CoolingCapaFlow", 0.8, 0.2, 0.0, 1.5])
+
+        self._emit_by_idd("Coil:Cooling:DX:VariableRefrigerantFlow", {
+            "Name": f"CoolingCoil_for_{tu}",
+            "Availability Schedule Name": op_schedule,
+            "Gross Rated Total Cooling Capacity": round(cooling_w, 1),
+            "Gross Rated Sensible Heat Ratio": 0.75,
+            "Rated Air Flow Rate": airflow,
+            "Cooling Capacity Ratio Modifier Function of Temperature Curve Name": f"Curve_for_{tu}:CoolingCapaTemp",
+            "Cooling Capacity Modifier Curve Function of Flow Fraction Name": f"Curve_for_{tu}:CoolingCapaFlow",
+            "Coil Air Inlet Node": mixed,
+            "Coil Air Outlet Node": mid1,
+        })
+        self._emit_by_idd("Coil:Heating:DX:VariableRefrigerantFlow", {
+            "Name": f"HeatingCoil_for_{tu}",
+            "Availability Schedule": op_schedule,
+            "Gross Rated Heating Capacity": round(heating_w, 1),
+            "Rated Air Flow Rate": airflow,
+            "Coil Air Inlet Node": mid1,
+            "Coil Air Outlet Node": mid2,
+            "Heating Capacity Ratio Modifier Function of Temperature Curve Name": f"Curve_for_{tu}:HeatingCapaTemp",
+            "Heating Capacity Modifier Function of Flow Fraction Curve Name": f"Curve_for_{tu}:HeatingCapaFlow",
+        })
+        self._emit_by_idd("Fan:SystemModel", {
+            "Name": f"Fan_for_{tu}",
+            "Availability Schedule Name": op_schedule,
+            "Air Inlet Node Name": mid2,
+            "Air Outlet Node Name": inlet,
+            "Design Maximum Air Flow Rate": airflow,
+            "Speed Control Method": "Discrete",
+            "Design Pressure Rise": 100,
+            "Motor Efficiency": 0.9,
+            "Motor In Air Stream Fraction": 1.0,
+            "Design Power Sizing Method": "TotalEfficiencyAndPressure",
+            "Fan Total Efficiency": 0.7,
+        })
+        self._emit_by_idd("ZoneHVAC:TerminalUnit:VariableRefrigerantFlow", {
+            "Zone Terminal Unit Name": tu,
+            "Terminal Unit Availability Schedule": op_schedule,
+            "Terminal Unit Air Inlet Node Name": exhaust,
+            "Terminal Unit Air Outlet Node Name": inlet,
+            "Cooling Supply Air Flow Rate": airflow,
+            "No Cooling Supply Air Flow Rate": round(airflow * 0.3, 4),
+            "Heating Supply Air Flow Rate": airflow,
+            "No Heating Supply Air Flow Rate": round(airflow * 0.3, 4),
+            "Cooling Outdoor Air Flow Rate": oa_flow,
+            "Heating Outdoor Air Flow Rate": oa_flow,
+            "No Load Outdoor Air Flow Rate": oa_flow,
+            "Supply Air Fan Operating Mode Schedule Name": "AlwaysOn",
+            "Supply Air Fan Placement": "DrawThrough",
+            "Supply Air Fan Object Type": "Fan:SystemModel",
+            "Supply Air Fan Object Name": f"Fan_for_{tu}",
+            "Outside Air Mixer Object Type": "OutdoorAir:Mixer",
+            "Outside Air Mixer Object Name": f"{tu}_OAMixer",
+            "Cooling Coil Object Type": "Coil:Cooling:DX:VariableRefrigerantFlow",
+            "Cooling Coil Object Name": f"CoolingCoil_for_{tu}",
+            "Heating Coil Object Type": "Coil:Heating:DX:VariableRefrigerantFlow",
+            "Heating Coil Object Name": f"HeatingCoil_for_{tu}",
+            "Zone Terminal Unit On Parasitic Electric Energy Use": 30,
+            "Zone Terminal Unit Off Parasitic Electric Energy Use": 20,
+        })
+        # 누적(존 장비/노드 + 소스 터미널 목록) → finalize_hvac에서 일괄 emit
+        self._vrf_sources.setdefault(source_name, {"terminals": []})["terminals"].append(tu)
+        self._zone_equip.setdefault(zone_id, []).append(
+            ("ZoneHVAC:TerminalUnit:VariableRefrigerantFlow", tu))
+        self._zone_nodes[zone_id] = {"inlet": inlet, "exhaust": exhaust}
+        return self
+
+    # -------------------------------------------------------
+    # 실기기 HVAC: PTHP(패키지형 터미널 히트펌프) — 존 단위 자기완결 실기기.
+    #   VRF가 EP25.2에서 불안정해 PTHP로 채택. 실제 전력소비+COP를 EnergyPlus가
+    #   산출 → 비용(운영비)에 직접 연결. (전기 열원/지열=고COP 케이스)
+    #   DX 곡선은 EnergyPlus 공식 PTHP 예제의 검증된 정규화 곡선 사용.
+    # -------------------------------------------------------
+
+    def _add_dx_curves_once(self):
+        """PTHP DX 단속(single-speed) 성능곡선(공용, 1회만)."""
+        if getattr(self, "_dx_curves_added", False):
+            return
+        self._dx_curves_added = True
+        self.add("Curve:Biquadratic", ["HPACCoolCapFT", 0.942587793, 0.009543347, 0.000683770, -0.011042676, 0.000005249, -0.000009720, 12.77778, 23.88889, 18.0, 46.11111, None, None, "Temperature", "Temperature", "Dimensionless"])
+        self.add("Curve:Quadratic", ["HPACCoolCapFFF", 0.8, 0.2, 0.0, 0.5, 1.5])
+        self.add("Curve:Biquadratic", ["HPACEIRFT", 0.342414409, 0.034885008, -0.000623700, 0.004977216, 0.000437951, -0.000728028, 12.77778, 23.88889, 18.0, 46.11111, None, None, "Temperature", "Temperature", "Dimensionless"])
+        self.add("Curve:Quadratic", ["HPACEIRFFF", 1.1552, -0.1808, 0.0256, 0.5, 1.5])
+        self.add("Curve:Quadratic", ["HPACCOOLPLFFPLR", 0.75, 0.25, 0.0, 0.0, 1.0])
+        self.add("Curve:Cubic", ["HPACHeatCapFT", 0.758746, 0.027626, 0.000148716, 0.0000034992, -20.0, 20.0, None, None, "Temperature", "Dimensionless"])
+        self.add("Curve:Cubic", ["HPACHeatCapFFF", 0.84, 0.16, 0.0, 0.0, 0.5, 1.5])
+        self.add("Curve:Cubic", ["HPACHeatEIRFT", 1.19248, -0.0300438, 0.00103745, -0.000023328, -20.0, 20.0, None, None, "Temperature", "Dimensionless"])
+        self.add("Curve:Quadratic", ["HPACHeatEIRFFF", 1.3824, -0.4336, 0.0512, 0.0, 1.0])
+        self.add("Curve:Quadratic", ["HPACPLFFPLR", 0.85, 0.15, 0.0, 0.0, 1.0])
+
+    def add_pthp(self, zone_id: str, cooling_cop: float, heating_cop: float,
+                 op_schedule: str = "AlwaysOn"):
+        """ZoneHVAC:PackagedTerminalHeatPump(+OA믹서·팬·DX코일2·보조전기코일) 추가.
+        용량/풍량은 autosize → enable_sizing()+add_zone_sizing() 필요(부하에 맞춰 적정 산정)."""
+        self._add_dx_curves_once()
+        u = f"{zone_id}_PTHP"
+        inlet = f"{zone_id}_PTHP_SupplyOut"   # 유닛→존
+        exhaust = f"{zone_id}_PTHP_ReturnIn"  # 존→유닛 (유닛 입구)
+        oa_in = f"{u}_OAIn"; relief = f"{u}_Relief"; mixed = f"{u}_Mixed"
+        fan_out = f"{u}_FanOut"; c2h = f"{u}_C2H"; h2s = f"{u}_H2S"
+        A = "autosize"
+
+        # OA 믹서
+        self._emit_by_idd("OutdoorAir:Mixer", {
+            "Name": f"{u}_OAMixer",
+            "Mixed Air Node Name": mixed,
+            "Outdoor Air Stream Node Name": oa_in,
+            "Relief Air Stream Node Name": relief,
+            "Return Air Stream Node Name": exhaust,
+        })
+        self.add("OutdoorAir:NodeList", [oa_in])
+        # 팬(BlowThrough): mixed → fan_out
+        self._emit_by_idd("Fan:SystemModel", {
+            "Name": f"Fan_for_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Air Inlet Node Name": mixed,
+            "Air Outlet Node Name": fan_out,
+            "Design Maximum Air Flow Rate": A,
+            "Speed Control Method": "Discrete",
+            "Design Pressure Rise": 100,
+            "Motor Efficiency": 0.9,
+            "Motor In Air Stream Fraction": 1.0,
+            "Design Power Sizing Method": "TotalEfficiencyAndPressure",
+            "Fan Total Efficiency": 0.7,
+        })
+        # DX 냉방코일: fan_out → c2h
+        self._emit_by_idd("Coil:Cooling:DX:SingleSpeed", {
+            "Name": f"CoolCoil_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Gross Rated Total Cooling Capacity": A,
+            "Gross Rated Sensible Heat Ratio": A,
+            "Gross Rated Cooling COP": cooling_cop,
+            "Rated Air Flow Rate": A,
+            "Air Inlet Node Name": fan_out,
+            "Air Outlet Node Name": c2h,
+            "Total Cooling Capacity Function of Temperature Curve Name": "HPACCoolCapFT",
+            "Total Cooling Capacity Function of Flow Fraction Curve Name": "HPACCoolCapFFF",
+            "Energy Input Ratio Function of Temperature Curve Name": "HPACEIRFT",
+            "Energy Input Ratio Function of Flow Fraction Curve Name": "HPACEIRFFF",
+            "Part Load Fraction Correlation Curve Name": "HPACCOOLPLFFPLR",
+        })
+        # DX 난방코일: c2h → h2s (저항식 제상 → 제상 EIR 곡선 불요)
+        self._emit_by_idd("Coil:Heating:DX:SingleSpeed", {
+            "Name": f"HeatCoil_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Gross Rated Heating Capacity": A,
+            "Gross Rated Heating COP": heating_cop,
+            "Rated Air Flow Rate": A,
+            "Air Inlet Node Name": c2h,
+            "Air Outlet Node Name": h2s,
+            "Heating Capacity Function of Temperature Curve Name": "HPACHeatCapFT",
+            "Heating Capacity Function of Flow Fraction Curve Name": "HPACHeatCapFFF",
+            "Energy Input Ratio Function of Temperature Curve Name": "HPACHeatEIRFT",
+            "Energy Input Ratio Function of Flow Fraction Curve Name": "HPACHeatEIRFFF",
+            "Part Load Fraction Correlation Curve Name": "HPACPLFFPLR",
+            # 한랭기에도 히트펌프 압축기가 계속 가동되도록(기본 컷오프가 높으면 보조히터가 과다)
+            "Minimum Outdoor Dry-Bulb Temperature for Compressor Operation": -15.0,
+            "Defrost Strategy": "Resistive",
+            "Defrost Control": "Timed",
+        })
+        # 보조 전기 히터: h2s → inlet
+        self._emit_by_idd("Coil:Heating:Electric", {
+            "Name": f"SuppCoil_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Efficiency": 1.0,
+            "Nominal Capacity": A,
+            "Air Inlet Node Name": h2s,
+            "Air Outlet Node Name": inlet,
+        })
+        # PTHP 유닛
+        self._emit_by_idd("ZoneHVAC:PackagedTerminalHeatPump", {
+            "Name": u,
+            "Availability Schedule Name": op_schedule,
+            "Air Inlet Node Name": exhaust,
+            "Air Outlet Node Name": inlet,
+            "Outdoor Air Mixer Object Type": "OutdoorAir:Mixer",
+            "Outdoor Air Mixer Name": f"{u}_OAMixer",
+            "Cooling Supply Air Flow Rate": A,
+            "Heating Supply Air Flow Rate": A,
+            "No Load Supply Air Flow Rate": A,
+            "Cooling Outdoor Air Flow Rate": A,
+            "Heating Outdoor Air Flow Rate": A,
+            "No Load Outdoor Air Flow Rate": A,
+            "Supply Air Fan Object Type": "Fan:SystemModel",
+            "Supply Air Fan Name": f"Fan_for_{u}",
+            "Heating Coil Object Type": "Coil:Heating:DX:SingleSpeed",
+            "Heating Coil Name": f"HeatCoil_{u}",
+            "Cooling Coil Object Type": "Coil:Cooling:DX:SingleSpeed",
+            "Cooling Coil Name": f"CoolCoil_{u}",
+            "Supplemental Heating Coil Object Type": "Coil:Heating:Electric",
+            "Supplemental Heating Coil Name": f"SuppCoil_{u}",
+            "Maximum Supply Air Temperature from Supplemental Heater": 50,
+            # 보조 전기히터는 한랭(-5℃ 미만)에서만 가동 → 그 외엔 히트펌프가 부하 담당(실효 COP↑)
+            "Maximum Outdoor Dry-Bulb Temperature for Supplemental Heater Operation": -5.0,
+            "Fan Placement": "BlowThrough",
+        })
+        self._zone_equip.setdefault(zone_id, []).append(
+            ("ZoneHVAC:PackagedTerminalHeatPump", u))
+        self._zone_nodes[zone_id] = {"inlet": inlet, "exhaust": exhaust}
+        return self
+
+    def enable_sizing(self):
+        """존/시스템 사이징 활성화 + 외기 기반 사이징 기간 2종(여름/겨울 극한).
+        autosize 기기(PTHP 등)가 부하에 맞춰 용량을 산정하도록. 1회만."""
+        if getattr(self, "_sizing_enabled", False):
+            return self
+        self._sizing_enabled = True
+        # SimulationControl(헤더의 objects[1]) → 존+시스템 사이징 ON
+        for o in self.objects:
+            if o.obj_type == "SimulationControl":
+                o.fields = ["Yes", "Yes", "No", "No", "Yes"]
+                break
+        self.add("SizingPeriod:WeatherFileConditionType",
+                 ["SummerSizing", "SummerExtreme", "SummerDesignDay", "No", "No"])
+        self.add("SizingPeriod:WeatherFileConditionType",
+                 ["WinterSizing", "WinterExtreme", "WinterDesignDay", "No", "No"])
+        # 안전계수: 설계일 기준 자동산정에 여유를 둬 미달시간(unmet hours) 감소
+        self._emit_by_idd("Sizing:Parameters", {
+            "Heating Sizing Factor": 1.25,
+            "Cooling Sizing Factor": 1.15,
+        })
+        return self
+
+    def add_zone_sizing(self, zone_id: str):
+        """Sizing:Zone — 존 냉난방 설계 급기 조건(autosize 기반)."""
+        return self._emit_by_idd("Sizing:Zone", {
+            "Zone or ZoneList Name": zone_id,
+            "Zone Cooling Design Supply Air Temperature Input Method": "SupplyAirTemperature",
+            "Zone Cooling Design Supply Air Temperature": 14,
+            "Zone Heating Design Supply Air Temperature Input Method": "SupplyAirTemperature",
+            "Zone Heating Design Supply Air Temperature": 40,
+            "Zone Cooling Design Supply Air Humidity Ratio": 0.008,
+            "Zone Heating Design Supply Air Humidity Ratio": 0.008,
+        })
+
+    def add_zone_hvac_connections(self, zone_id: str):
+        """존 누적 장비로 EquipmentConnections + EquipmentList emit (실기기 존용)."""
+        equip = self._zone_equip.get(zone_id, [])
+        nodes = self._zone_nodes.get(zone_id, {})
+        if not equip:
+            return self
+        self.add("ZoneHVAC:EquipmentConnections", [
+            zone_id, f"{zone_id}_Equip", nodes.get("inlet", ""), nodes.get("exhaust", ""),
+            f"{zone_id}_Node", f"{zone_id}_Return"
+        ])
+        fields = [f"{zone_id}_Equip", "SequentialLoad"]
+        for i, (otype, oname) in enumerate(equip, start=1):
+            fields += [otype, oname, i, i, "", ""]
+        self.add("ZoneHVAC:EquipmentList", fields)
+        return self
+
+    def finalize_hvac(self):
+        """실기기 누적 상태를 마지막에 일괄 emit (idragon postprocessor 대체).
+        - 소스별 ZoneTerminalUnitList(터미널 전체)
+        - 실기기 존별 EquipmentConnections/List
+        ep_simulator에서 존 루프 종료 후, write/run 전에 호출."""
+        for src, info in self._vrf_sources.items():
+            terms = info.get("terminals", [])
+            if terms:
+                self.add("ZoneTerminalUnitList", [f"{src}_TUList"] + terms)
+        for zone_id in self._zone_equip:
+            self.add_zone_hvac_connections(zone_id)
+        return self
+
     def add_thermostat(self, zone_id: str, heat_schedule: str, cool_schedule: str):
         """온도 제어 세트 일괄 추가"""
         self.add("ThermostatSetpoint:DualSetpoint", [
@@ -237,6 +711,12 @@ class IdfBuilder:
         self.add("Output:Variable", ["*", "AFN Linkage Node 2 to Node 1 Volume Flow Rate", "Hourly"])
         self.add("Output:Variable", ["*", "Water Use Equipment Heating Energy", "Hourly"])
         self.add("Output:Variable", ["*", "Zone Mechanical Ventilation Mass Flow Rate", "Hourly"])
+        # 실기기(PTHP) 실제 소비/요구량 — 이상부하 존엔 0으로 나오므로 공존 가능
+        self.add("Output:Variable", ["*", "Zone Air System Sensible Heating Energy", "Hourly"])
+        self.add("Output:Variable", ["*", "Zone Air System Sensible Cooling Energy", "Hourly"])
+        self.add("Output:Meter", ["Heating:Electricity", "Hourly"])
+        self.add("Output:Meter", ["Cooling:Electricity", "Hourly"])
+        self.add("Output:Meter", ["Fans:Electricity", "Hourly"])
         self.add("OutputControl:Table:Style", ["Comma"])
         self.add("Output:Table:SummaryReports", ["AllSummary"])
         return self

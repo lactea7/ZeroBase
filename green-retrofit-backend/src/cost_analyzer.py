@@ -506,49 +506,72 @@ class LCCAnalyzer:
             total_c_rate_w = np.zeros(total_rows)
             total_h_rate_w = np.zeros(total_rows)
 
-            for z in zones:
-                z_id = z['id'].replace(" ", "_").upper()
-                zh_cols = [c for c in h_cols if z_id in c.upper()]
-                zc_cols = [c for c in c_cols if z_id in c.upper()]
-                zr_h_cols = [c for c in h_rate_cols if z_id in c.upper()]
-                zr_c_cols = [c for c in c_rate_cols if z_id in c.upper()]
-                
-                zh_kwh = df[zh_cols].sum(axis=1).values / 3600000.0 if zh_cols else 0.0
-                zc_kwh = df[zc_cols].sum(axis=1).values / 3600000.0 if zc_cols else 0.0
-                zh_rate = df[zr_h_cols].sum(axis=1).values if zr_h_cols else 0.0
-                zc_rate = df[zr_c_cols].sum(axis=1).values if zr_c_cols else 0.0
-                
-                if not z.get("isConditioned", True):
-                    continue
-                    
-                hvac_sys = z.get('hvacSystemId', 5)
-                fuel_type = z.get('heatingFuelId', 2)
-                
-                if is_geothermal: 
-                    h_cop, c_cop = 4.5, 5.0
-                else:
-                    c_cop = self.COOLING_EFF_DB.get(hvac_sys, 2.8)
-                    h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, 1.0)
-                    
-                total_h_req_kwh += zh_kwh
-                total_c_req_kwh += zc_kwh
-                total_h_con_kwh += zh_kwh / h_cop
-                total_c_con_kwh += zc_kwh / c_cop
-                total_h_rate_w += zh_rate / h_cop
-                total_c_rate_w += zc_rate / c_cop
+            # 실기기(PTHP) 모드: EnergyPlus가 산출한 '실제 전력 소비'를 그대로 사용
+            # (이상부하처럼 COP를 다시 곱하지 않음). 난방도 전기(히트펌프)이므로 전기요금으로 청구.
+            use_pthp = kwargs.get("use_pthp", False)
+            fan_kwh = np.zeros(total_rows)
+
+            if use_pthp:
+                sh_cols = [c for c in df.columns if 'Zone Air System Sensible Heating Energy' in c]
+                sc_cols = [c for c in df.columns if 'Zone Air System Sensible Cooling Energy' in c]
+                total_h_req_kwh = (df[sh_cols].sum(axis=1).values / 3600000.0) if sh_cols else np.zeros(total_rows)
+                total_c_req_kwh = (df[sc_cols].sum(axis=1).values / 3600000.0) if sc_cols else np.zeros(total_rows)
+                he_col = next((c for c in df.columns if 'Heating:Electricity' in c and '[J]' in c), None)
+                ce_col = next((c for c in df.columns if 'Cooling:Electricity' in c and '[J]' in c), None)
+                fe_col = next((c for c in df.columns if 'Fans:Electricity' in c and '[J]' in c), None)
+                # 실소비(전력). 미터가 없으면 요구량/대표COP로 보수적 추정.
+                total_h_con_kwh = (df[he_col].values / 3600000.0) if he_col else (total_h_req_kwh / 3.5)
+                total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 4.2)
+                fan_kwh = (df[fe_col].values / 3600000.0) if fe_col else np.zeros(total_rows)
+            else:
+                for z in zones:
+                    z_id = z['id'].replace(" ", "_").upper()
+                    zh_cols = [c for c in h_cols if z_id in c.upper()]
+                    zc_cols = [c for c in c_cols if z_id in c.upper()]
+                    zr_h_cols = [c for c in h_rate_cols if z_id in c.upper()]
+                    zr_c_cols = [c for c in c_rate_cols if z_id in c.upper()]
+
+                    zh_kwh = df[zh_cols].sum(axis=1).values / 3600000.0 if zh_cols else 0.0
+                    zc_kwh = df[zc_cols].sum(axis=1).values / 3600000.0 if zc_cols else 0.0
+                    zh_rate = df[zr_h_cols].sum(axis=1).values if zr_h_cols else 0.0
+                    zc_rate = df[zr_c_cols].sum(axis=1).values if zr_c_cols else 0.0
+
+                    if not z.get("isConditioned", True):
+                        continue
+
+                    hvac_sys = z.get('hvacSystemId', 5)
+                    fuel_type = z.get('heatingFuelId', 2)
+
+                    if is_geothermal:
+                        h_cop, c_cop = 4.5, 5.0
+                    else:
+                        c_cop = self.COOLING_EFF_DB.get(hvac_sys, 2.8)
+                        h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, 1.0)
+
+                    total_h_req_kwh += zh_kwh
+                    total_c_req_kwh += zc_kwh
+                    total_h_con_kwh += zh_kwh / h_cop
+                    total_c_con_kwh += zc_kwh / c_cop
+                    total_h_rate_w += zh_rate / h_cop
+                    total_c_rate_w += zc_rate / c_cop
 
             l_kwh = df[l_cols].sum(axis=1).values / 3600000.0 if l_cols else 0.0
             e_kwh = df[e_cols].sum(axis=1).values / 3600000.0 if e_cols else 0.0
-            
+
             dhw_j = df[dhw_cols].sum(axis=1).values if dhw_cols else np.zeros(total_rows)
             dhw_kwh = (dhw_j / 3600000.0) * 1.1
-            
+
             v_flow = df[vent_cols].sum(axis=1).values if vent_cols else np.zeros(total_rows)
             vent_multiplier = 1.0 if is_hourly else 730.0
-            vent_kwh = (v_flow / 1.2) * 0.8 * vent_multiplier
+            vent_kwh = (v_flow / 1.2) * 0.8 * vent_multiplier + fan_kwh  # PTHP 팬 전력 포함
 
-            df['total_elec_kwh'] = total_c_con_kwh + l_kwh + e_kwh + vent_kwh
-            df['total_heat_kwh'] = total_h_con_kwh + dhw_kwh
+            if use_pthp:
+                # 히트펌프 난방=전기 → 난방 소비도 전기요금으로 (열 요금엔 급탕만)
+                df['total_elec_kwh'] = total_c_con_kwh + total_h_con_kwh + l_kwh + e_kwh + vent_kwh
+                df['total_heat_kwh'] = dhw_kwh
+            else:
+                df['total_elec_kwh'] = total_c_con_kwh + l_kwh + e_kwh + vent_kwh
+                df['total_heat_kwh'] = total_h_con_kwh + dhw_kwh
 
             # TOU Rate calculation (시간대별 차등 요금제 적용)
             def get_tou_rate(row):
