@@ -379,6 +379,44 @@ def parse_gbxml_to_json(filepath: str):
     if construction_db:
         found_count = sum(1 for v in construction_db.values() if v["uValue"] is not None)
         print(f"📐 Construction DB 파싱 완료: {len(construction_db)}개 중 U-value 보유 {found_count}개")
+
+    # =====================================================
+    # 💡 WindowType 데이터베이스 파싱
+    # gbXML <WindowType>의 U-value/SHGC. opening의 windowTypeIdRef로 참조된다.
+    # (기존엔 창호 U를 2.5로 하드코딩 → 모든 건물 창호가 동일 성능으로 잡히던 문제)
+    # =====================================================
+    window_type_db = {}
+    for wt in root.findall('.//windowtype'):
+        wt_id = get_attr(wt, 'id')
+        if not wt_id:
+            continue
+        wt_u = None
+        for tag_name in ['uvalue', 'u-value', 'ufactor', 'u-factor']:
+            e = wt.find(f'.//{tag_name}')
+            if e is not None and e.text:
+                try:
+                    wt_u = float(e.text)
+                except (ValueError, TypeError):
+                    pass
+                break
+        # SHGC: 수직입사(solarIncidentAngle=0) 값 우선, 없으면 첫 값
+        wt_shgc = None
+        for sh in wt.findall('.//solarheatgaincoeff'):
+            if not sh.text:
+                continue
+            try:
+                val = float(sh.text)
+            except (ValueError, TypeError):
+                continue
+            ang = (get_attr(sh, 'solarincidentangle') or '').strip()
+            if ang == '0':
+                wt_shgc = val
+                break
+            if wt_shgc is None:
+                wt_shgc = val
+        window_type_db[wt_id] = {"u": wt_u, "shgc": wt_shgc}
+    if window_type_db:
+        print(f"🪟 WindowType DB 파싱 완료: {len(window_type_db)}개")
     
     # 타입별 기본 U-value (gbXML에 정보가 없을 때 fallback)
     DEFAULT_U_VALUES = {
@@ -556,19 +594,41 @@ def parse_gbxml_to_json(filepath: str):
             
             if len(op_verts) >= 3:
                 total_op_area += calculate_surface_area(op_verts)
-                
+
+            # 창호 U/SHGC: windowTypeIdRef로 실측값 조회, 없으면 일반 이중유리 기본값
+            wt_ref = get_attr(opening, 'windowtypeidref')
+            wt = window_type_db.get(wt_ref) if wt_ref else None
+            op_u = wt["u"] if wt and wt.get("u") is not None else 2.5
+            op_shgc = wt["shgc"] if wt and wt.get("shgc") is not None else 0.7
+
             surface_data["openings"].append({
                 "id": op_id,
                 "type": op_type or "Unknown",
                 "vertices": op_verts,
-                "uValue": 2.5,
-                "shgc": 0.7
+                "uValue": op_u,
+                "shgc": op_shgc
             })
 
         # WWR 계산 반영
         if surf_area > 0 and total_op_area > 0:
             calc_wwr = int((total_op_area / surf_area) * 100)
             surface_data["wwr"] = min(calc_wwr, 90)
+
+        # 대표 창호 U/SHGC(면적가중) — 비용/에너지에서 glazingId 미지정 시 실측값으로 사용.
+        # Air(개방경계) opening은 창이 아니므로 제외.
+        _wu_sum = _wsh_sum = _wa_sum = 0.0
+        for op in surface_data["openings"]:
+            if (op.get("type") or "").lower() == "air" or len(op.get("vertices", [])) < 3:
+                continue
+            oa = calculate_surface_area(op["vertices"])
+            if oa <= 0:
+                continue
+            _wu_sum += op["uValue"] * oa
+            _wsh_sum += op["shgc"] * oa
+            _wa_sum += oa
+        if _wa_sum > 0:
+            surface_data["windowU"] = round(_wu_sum / _wa_sum, 4)
+            surface_data["windowShgc"] = round(_wsh_sum / _wa_sum, 4)
 
         surfaces_list.append(surface_data)
 

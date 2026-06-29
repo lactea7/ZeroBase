@@ -758,8 +758,19 @@ export default function App() {
       
       return changedCount > 0 ? `단열재 ${changedCount}개 외벽을 일반 등급(EPS/미네랄울)으로 하향` : null;
     } else if (type === 'hvac') {
-      setProjectData((prev) => ({ ...prev, geothermalApplied: false }));
-      return '지열(Geothermal) 시스템 도입 취소';
+      // 지열이면 지열 해제, 아니면 고효율 설비를 표준 개별 냉난방기(Generic, id 5)로 하향
+      if (projectData.geothermalApplied) {
+        setProjectData((prev) => ({ ...prev, geothermalApplied: false }));
+        return '지열(Geothermal) 시스템 도입 취소';
+      }
+      const targets = zones.filter((z) => z.isConditioned !== false && z.hvacSystemId !== 5);
+      if (targets.length === 0) return null;
+      setZones((prev) =>
+        prev.map((z) =>
+          z.isConditioned !== false && z.hvacSystemId !== 5 ? { ...z, hvacSystemId: 5 } : z
+        )
+      );
+      return `냉난방 설비 ${targets.length}개 존을 표준 설비로 변경`;
     } else if (type === 'led') {
       const manualZones = zones.filter((z) => z.ledFixtureCount > 0);
       if (manualZones.length > 0) {

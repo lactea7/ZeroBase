@@ -329,19 +329,15 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     
     total_window_area = 0.0
     total_wall_area = 0.0
-    target_glazing_id = 42
-    
     for s in surfaces:
         s_area = calculate_surface_area(s.get("vertices", []))
         wwr = s.get("wwr", 0)
         s_type = s.get("type", "").lower()
-        
+
         if "wall" in s_type or "roof" in s_type:
             total_wall_area += s_area
             if "wall" in s_type and wwr > 0:
                 total_window_area += s_area * (wwr / 100.0)
-                if s.get("glazingId"): 
-                    target_glazing_id = s.get("glazingId")
 
     temp_dir_abs = os.path.abspath(temp_dir)
     os.makedirs(temp_dir_abs, exist_ok=True)
@@ -362,11 +358,36 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         db_dir = "/Users/minkimac/Desktop/gbXML_server/_data" 
     
     GLAZING_DB = load_databases(db_dir)
-    
-    # 창호 속성
-    selected_glazing = GLAZING_DB.get(target_glazing_id)
-    target_u = selected_glazing["u"] if selected_glazing else None
-    target_shgc = selected_glazing["shgc"] if selected_glazing else None
+
+    # 창호 속성: 우선순위 = 사용자 튜닝 glazingId → gbXML 실측 windowU → 기본(일반 이중유리 42)
+    _DEFAULT_GLZ = GLAZING_DB.get(42, {"u": 2.74, "shgc": 0.60})
+
+    def _window_ushgc(s):
+        gid = s.get("glazingId")
+        if gid:
+            g = GLAZING_DB.get(gid)
+            if g:
+                return g["u"], g["shgc"]
+        if s.get("windowU") is not None:
+            return s["windowU"], s.get("windowShgc", _DEFAULT_GLZ["shgc"])
+        return _DEFAULT_GLZ["u"], _DEFAULT_GLZ["shgc"]
+
+    # 건물 대표 창호 U/SHGC(창 면적가중) — 비용 등급 매칭용. 기존엔 대표 glazingId 1개로
+    # 잡아 모든 건물이 동일 창호로 계상되던 문제를 면적가중 실측값으로 교체.
+    _win_u_sum = 0.0
+    _win_shgc_sum = 0.0
+    for s in surfaces:
+        if "wall" in s.get("type", "").lower() and s.get("wwr", 0) > 0:
+            win_area = calculate_surface_area(s.get("vertices", [])) * (s["wwr"] / 100.0)
+            wu, wsh = _window_ushgc(s)
+            _win_u_sum += wu * win_area
+            _win_shgc_sum += wsh * win_area
+    if total_window_area > 0:
+        target_u = round(_win_u_sum / total_window_area, 4)
+        target_shgc = round(_win_shgc_sum / total_window_area, 4)
+    else:
+        target_u = _DEFAULT_GLZ["u"]
+        target_shgc = _DEFAULT_GLZ["shgc"]
     
     # 💡 [날씨 파일 자동 탐색]
     epw_files = []
@@ -520,9 +541,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         
         wwr = s.get("wwr", 0)
         if wwr > 0:
-            g_id = s.get("glazingId", 42)
-            g_info = GLAZING_DB.get(g_id, GLAZING_DB.get(42, {"u": 2.74, "shgc": 0.60}))
-            idf.add_glazing_simple(f"Glass_{s['id']}", g_info['u'], g_info['shgc'])
+            # 창호 U/SHGC: glazingId(튜닝) → 실측 windowU → 기본. 에너지·비용을 동일 기준으로.
+            wu, wsh = _window_ushgc(s)
+            idf.add_glazing_simple(f"Glass_{s['id']}", wu, wsh)
             idf.add_construction(f"WinConst_{s['id']}", [f"Glass_{s['id']}"])
 
     # 스케줄

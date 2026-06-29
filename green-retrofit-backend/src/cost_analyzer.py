@@ -911,6 +911,20 @@ class LCCAnalyzer:
                         "description": "초기 설치비가 높은 지열(GSHP) 시스템을 일반 시스템으로 변경하여 천공·지중 열교환기 비용을 절감합니다.",
                         "saved_cost": int(saved_hvac)
                     })
+                else:
+                    # 비지열: 고효율 설비(EHP·FCU·AHU)를 표준 개별 냉난방기(Generic, id 5)로 하향.
+                    # 설비비가 capital의 대부분을 차지하는 경우가 많아, 이 추천이 없으면 다른 항목을
+                    # 모두 적용해도 총액이 거의 안 줄던 문제를 해소한다. (이미 표준이면 절감 0 → 미표시)
+                    std_hvac_unit = self.cost_db["avg_prices"]["hvac_kw_system"].get(5, 1500000)
+                    if hvac_capacity_kw > 0 and hvac_unit_cost > std_hvac_unit:
+                        saved_hvac = hvac_capacity_kw * (hvac_unit_cost - std_hvac_unit)
+                        if saved_hvac > 0:
+                            recommendations.append({
+                                "type": "hvac",
+                                "title": "고효율 냉난방 설비 → 표준 설비로 변경",
+                                "description": "고가의 개별 히트펌프(EHP)·팬코일(FCU) 대신 표준 개별 냉난방기로 변경하여 설비 공사비를 절감합니다.",
+                                "saved_cost": int(saved_hvac)
+                            })
 
                 if led_cost > 0:
                     if led_fixture_count > 0:
