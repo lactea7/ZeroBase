@@ -1,0 +1,328 @@
+#1100 #Store Room                                                        
+#1101 #Circulation area (corridors and stairways)                        
+#1102 #Toilet                                                            
+#1103 #Reception                                                         
+#1104 #Light plant room                                                  
+#1105 #Generic Office Area                                               
+#1106 #Fitness suite/gym                                                 
+#1107 #Changing facilities with showers                                  
+#1108 #Food preparation area                                             
+#1109 #Eating/drinking area                                              
+#1110 #Workshop - small scale                                            
+#1112 #Laundry                                                           
+#1113 #Assembly areas / halls                                            
+#1114 #En suite bedroom                                                  
+#1115 #Changing facilities with showers                                  
+#1116 #Circulation area (corridors and stairways)                        
+#1117 #Food preparation area                                             
+#1118 #Eating/drinking area                                              
+#1119 #Fitness suite/gym                                                 
+#1120 #Laundry                                                           
+#1121 #Light plant room                                                  
+#1122 #Reception                                                         
+#1123 #Toilet                                                            
+#1124 #Swimming pool                                                     
+#1125 #Dry sports hall                                                   
+#1126 #Store Room                                                        
+#1128 #Generic Office Area                                               
+#1129 #Circulation area (corridors and stairways) - non public           
+#1130 #Eating/drinking area                                              
+#1131 #Food preparation area                                             
+#1132 #Store Room                                                        
+#1133 #Performance area (stage)                                          
+#1134 #Light plant room                                                  
+#1136 #Toilet                                                            
+#1138 #Generic Office Area                                               
+#1139 #Circulation area (corridors and stairways)                        
+#1140 #Eating/drinking area                                              
+#1141 #Food preparation area                                             
+#1142 #Industrial process area                                           
+#1143 #Laboratory                                                        
+#1144 #Light plant room                                                  
+#1145 #Reception                                                         
+#1146 #Store Room                                                        
+#1149 #Toilet                                                            
+#1150 #Warehouse storage                                                 
+#1152 #Generic Office Area                                               
+#1153 #Circulation area (corridors and stairways)                        
+#1154 #Food preparation area                                             
+#1155 #Eating/drinking area                                              
+#1156 #Light plant room                                                  
+#1157 #Reception                                                         
+#1159 #Store Room                                                        
+#1160 #Toilet                                                            
+#1163 #Warehouse storage                                                 
+#1164 #Changing facilities with showers                                  
+#1166 #Generic Office Area                                               
+#1167 #Circulation area (corridors and stairways) - non public           
+#1168 #Food preparation area                                             
+#1169 #Eating/drinking area                                              
+#1170 #Light plant room                                                  
+#1171 #Small Shop Unit Sales area - general                              
+#1172 #Small Shop Unit Sales area - chilled                              
+#1173 #Small Shop Unit Sales area - electrical                           
+#1174 #Store Room                                                        
+#1177 #Toilet                                                            
+#1178 #Generic Office Area                                               
+#1179 #Domestic Lounge                                                   
+#1180 #Domestic Bedroom                                                  
+#1181 #Domestic Dining room                                              
+#1182 #Domestic Toilet                                                   
+#1183 #Domestic Kitchen                                                  
+#1184 #Domestic Circulation                                              
+#1185 #Domestic Bathroom                                                 
+#1186 #Common circulation areas                                          
+#1187 #Store Room                                                        
+#1188 #Circulation area (corridors and stairways) - non-public/restricted
+#1189 #Toilet                                                            
+#1190 #Reception                                                         
+#1193 #Post Mortem Facility                                              
+#1194 #Eating/drinking area                                              
+#1195 #Food preparation area                                             
+#1196 #Light plant room                                                  
+#1197 #Physiotherapy Studio                                              
+#1198 #Bedroom Unit                                                      
+#1199 #Laundry                                                           
+#1200 #24 hrs Consulting/treatment areas                                 
+#1201 #Assembly areas / halls                                            
+#1202 #Hydrotherapy pool hall                                            
+#1203 #Industrial process area                                           
+#1204 #Laboratory                                                        
+#1205 #Operating theatre                                                 
+#1206 #Changing facilities with showers                                  
+#1207 #Classroom                                                         
+#1208 #Diagnostic Imaging                                                
+#1209 #Bathroom                                                          
+#1210 #Generic Ward                                                      
+#1211 #Office and consulting areas                                       
+#1212 #Circulation area (corridors and stairways) - non public           
+#1213 #Light plant room                                                  
+#1214 #Reception                                                         
+#1215 #Store Room                                                        
+#1218 #Toilet                                                            
+#1219 #Waiting Rooms                                                     
+#1220 #Lounges                                                           
+#1221 #Food preparation area                                             
+#1222 #Eating/drinking area                                              
+#1223 #Generic Office Area                                               
+#1224 #Generic Checkin areas                                             
+#1225 #Store Room                                                        
+#1226 #Circulation area (corridors and stairways)                        
+#1227 #Toilet                                                            
+#1228 #Reception                                                         
+#1229 #Changing facilities with showers                                  
+#1230 #Food preparation area                                             
+#1231 #Dry sports hall                                                   
+#1232 #Eating/drinking area                                              
+#1233 #Light plant room                                                  
+#1234 #Cell (police/prison)                                              
+#1235 #Bedroom                                                           
+#1236 #Bathroom                                                          
+#1237 #Fitness suite/gym                                                 
+#1238 #Generic Office Area                                               
+#1245 #Data Centre                                                       
+#1246 #Server Room                                                       
+#1247 #Store Room                                                        
+#1248 #Circulation area (corridors and stairways) - non public           
+#1249 #Toilet                                                            
+#1250 #Reception                                                         
+#1251 #Food preparation area                                             
+#1252 #Hall/lecture theatre/assembly area                                
+#1253 #Laboratory                                                        
+#1254 #Eating/drinking area                                              
+#1255 #Light plant room                                                  
+#1256 #Workshop - small scale                                            
+#1257 #Display and Public areas                                          
+#1258 #Generic Office Area                                               
+#1259 #Store Room                                                        
+#1260 #Circulation area (corridors and stairways)                        
+#1261 #Toilet                                                            
+#1262 #Reception                                                         
+#1263 #Dry sports hall                                                   
+#1264 #Food preparation area                                             
+#1265 #Eating/drinking area                                              
+#1266 #Light plant room                                                  
+#1267 #Changing facilities with showers                                  
+#1268 #Workshop - small scale                                            
+#1269 #Hall/lecture theatre/assembly area                                
+#1270 #Office and consulting areas                                       
+#1271 #Store Room                                                        
+#1272 #Circulation area (corridors and stairways)                        
+#1273 #Toilet                                                            
+#1274 #Reception                                                         
+#1275 #Light plant room                                                  
+#1276 #Office and consulting areas                                       
+#1277 #Store Room                                                        
+#1278 #Circulation area (corridors and stairways)                        
+#1279 #Toilet                                                            
+#1280 #Reception                                                         
+#1281 #Food preparation area                                             
+#1282 #Hall/lecture theatre/assembly area                                
+#1283 #Eating/drinking area                                              
+#1284 #Light plant room                                                  
+#1285 #Cell (police/prison)                                              
+#1286 #Generic Office Area                                               
+#1287 #Changing facilities with showers                                  
+#1288 #Circulation area (corridors and stairways) - non public           
+#1289 #Dry sports hall                                                   
+#1290 #Eating/drinking area                                              
+#1291 #Fitness Studio                                                    
+#1292 #Fitness suite/gym                                                 
+#1293 #Food preparation area                                             
+#1294 #Hall/lecture theatre/assembly area                                
+#1295 #Auditoria                                                         
+#1296 #Ice rink                                                          
+#1297 #Laundry                                                           
+#1298 #Performance area (stage)                                          
+#1299 #Light plant room                                                  
+#1300 #Public circulation areas                                          
+#1301 #Reception                                                         
+#1302 #Sales area - general                                              
+#1303 #Store Room                                                        
+#1304 #Swimming pool                                                     
+#1305 #Toilet                                                            
+#1306 #Workshop - small scale                                            
+#1307 #Generic Office Area                                               
+#1308 #Changing facilities with showers                                  
+#1309 #Circulation area (corridors and stairways)                        
+#1310 #Dry sports hall                                                   
+#1311 #Eating/drinking area                                              
+#1312 #Food preparation area                                             
+#1313 #Hall/lecture theatre/assembly area                                
+#1314 #Computer lab                                                      
+#1315 #Laboratory                                                        
+#1316 #Light plant room                                                  
+#1317 #Reception                                                         
+#1318 #Store Room                                                        
+#1319 #Swimming pool                                                     
+#1320 #Toilet                                                            
+#1321 #Workshop - small scale                                            
+#1322 #Teaching Areas                                                    
+#1323 #Office and consulting areas                                       
+#1324 #Cell (police/prison)                                              
+#1325 #Store Room                                                        
+#1326 #Circulation area (corridors and stairways)                        
+#1327 #Toilet                                                            
+#1328 #Reception                                                         
+#1329 #Dry sports hall                                                   
+#1330 #Changing facilities with showers                                  
+#1331 #Hall/lecture theatre/assembly area                                
+#1332 #Eating/drinking area                                              
+#1333 #Bathroom                                                          
+#1334 #Light plant room                                                  
+#1335 #Workshop - small scale                                            
+#1337 #Laundry                                                           
+#1338 #Fitness suite/gym                                                 
+#1339 #Classroom                                                         
+#1340 #Office and consulting areas                                       
+#1341 #Food preparation area                                             
+#1342 #Changing facilities with showers                                  
+#1343 #Circulation area (corridors and stairways)                        
+#1344 #Dry sports hall                                                   
+#1345 #Eating/drinking area                                              
+#1346 #Food preparation area                                             
+#1347 #Hall/lecture theatre/assembly area                                
+#1348 #Computer lab                                                      
+#1349 #Laboratory                                                        
+#1350 #Light plant room                                                  
+#1351 #Reception                                                         
+#1352 #Store Room                                                        
+#1353 #Swimming pool                                                     
+#1354 #Toilet                                                            
+#1355 #Workshop - small scale                                            
+#1356 #Teaching Areas                                                    
+#1357 #Office and consulting areas                                       
+#1358 #Bedroom                                                           
+#1359 #Bathroom                                                          
+#1360 #Residents common rooms                                            
+#1361 #Laundry                                                           
+#1362 #Bathroom                                                          
+#1363 #Bedroom                                                           
+#1364 #Changing facilities with showers                                  
+#1365 #Circulation area (corridors and stairways)                        
+#1366 #Classroom                                                         
+#1367 #Residents common rooms                                            
+#1368 #Dry sports hall                                                   
+#1369 #Eating/drinking area                                              
+#1370 #Fitness suite/gym                                                 
+#1371 #Food preparation area                                             
+#1372 #Hall/lecture theatre/assembly area                                
+#1373 #Computer lab                                                      
+#1375 #Laboratory                                                        
+#1376 #Laundry                                                           
+#1377 #Light plant room                                                  
+#1378 #Reception                                                         
+#1379 #Store Room                                                        
+#1380 #Swimming pool                                                     
+#1381 #Residents kitchen                                                 
+#1382 #Toilet                                                            
+#1383 #Workshop - small scale                                            
+#1384 #Office and consulting areas                                       
+#1388 #Bathroom                                                          
+#1389 #Public circulation areas                                          
+#1390 #Circulation area (corridors and stairways)                        
+#1391 #Light plant room                                                  
+#1392 #Toilet                                                            
+#1393 #Car Park                                                          
+#1394 #Generic Office Area                                               
+#1395 #Car Park                                                          
+#1396 #Car Park                                                          
+#1397 #Display window                                                    
+#1401 #Changing facilities with showers                                  
+#1402 #Heavy Plant Room                                                  
+#1403 #24x7 Warehouse storage                                            
+#1404 #24x7 Generic Office Area                                          
+#1405 #Dept Store Sales area - general                                   
+#1406 #Dept Store Sales area - chilled                                   
+#1407 #Dept Store Sales area - electrical                                
+#1408 #Retail Warehouse Sales area - general                             
+#1409 #Retail Warehouse Sales area - chilled                             
+#1410 #Retail Warehouse Sales area - electrical                          
+#1411 #24x7 Generic Office Area                                          
+#1412 #24x7 Circulation area (corridors and stairways)                   
+#1413 #24x7 Toilet                                                       
+#1414 #Bedroom Only                                                      
+#1415 #24x7 Reception                                                    
+#1416 #24x7 Bedroom Unit                                                 
+#1417 #Teaching Areas DoES TGD033 2018                                   
+#1418 #Changing facilities with showers                                   
+#1419 #Circulation area (corridors and stairways)                         
+#1420 #Dry sports hall                                                    
+#1421 #Eating/drinking area                                               
+#1422 #Food preparation area                                              
+#1423 #Computer lab                                                       
+#1424 #Laboratory                                                         
+#1425 #Hall/lecture theatre/assembly area                                 
+#1426 #Office and consulting areas                                        
+#1427 #Light plant room                                                   
+#1428 #Reception                                                          
+#1429 #Store Room                                                         
+#1430 #Swimming pool                                                      
+#1431 #Teaching Areas                                                     
+#1432 #Teaching Areas DoES TGD033 2018                                    
+#1433 #Toilet                                                             
+#1434 #Workshop - small scale                                             
+#1435 #Teaching Areas DoES TGD033 2018                                    
+#1436 #Circulation area (corridors and stairways)                         
+#1437 #Eating/drinking area                                               
+#1438 #Food preparation area                                              
+#1439 #Toilet                                                             
+#1440 #Bedroom                                                            
+#1441 #Bathroom                                                           
+#1442 #Residents common rooms                                             
+#1443 #Laundry                                                            
+#1444 #Changing facilities with showers                                   
+#1445 #Dry sports hall                                                    
+#1446 #Hall/lecture theatre/assembly area                                 
+#1447 #Computer lab                                                       
+#1448 #Laboratory                                                         
+#1449 #Light plant room                                                   
+#1450 #Reception                                                          
+#1451 #Store Room                                                         
+#1452 #Swimming pool                                                      
+#1453 #Workshop - small scale                                             
+#1454 #Teaching Areas                                                     
+#1455 #Teaching Areas DoES TGD033 2018                                    
+#1456 #Office and consulting areas                                        
+#1457 #12hr Specialist Treatment Area                                     
+#1458 #Specialist Care Ward                                               

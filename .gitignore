@@ -27,6 +27,17 @@ green-retrofit-backend/test_peak.idf
 _data/eplusout*
 _data/*.zip
 
+# SBEM/DesignBuilder 원본 DB 덤프(135MB .dbt 등). 런타임은 ActivityIdList.txt만 사용하므로
+# 그 파일만 추적하고 나머지(대용량 바이너리)는 제외한다.
+_data/Data/*
+!_data/Data/ActivityIdList.txt
+
+# 루트 스크래치/대용량 입력 — 앱 코드가 참조하지 않음
+# (랜딩이 쓰는 영상은 green-retrofit-frontend/public/zerobase/uploads/ 에 별도 존재)
+/upscaled-video.mp4
+/ARK_NordicLCA_Housing_Concrete_As-Built.xml
+/창호단면사진.jpeg
+
 # 루트 작업/보고서 산출물
 /src/
 /memory.md/

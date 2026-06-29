@@ -509,6 +509,9 @@ class LCCAnalyzer:
             # 실기기(PTHP) 모드: EnergyPlus가 산출한 '실제 전력 소비'를 그대로 사용
             # (이상부하처럼 COP를 다시 곱하지 않음). 난방도 전기(히트펌프)이므로 전기요금으로 청구.
             use_pthp = kwargs.get("use_pthp", False)
+            # 난방 효율은 '프로젝트 열원'으로 결정해야 함(존 heatingFuelId 기본값=전기 오용 방지).
+            # 지역난방(11)인데 전기 히트펌프 COP를 적용하던 버그 수정.
+            proj_heat_source = kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
             fan_kwh = np.zeros(total_rows)
 
             if use_pthp:
@@ -540,13 +543,17 @@ class LCCAnalyzer:
                         continue
 
                     hvac_sys = z.get('hvacSystemId', 5)
-                    fuel_type = z.get('heatingFuelId', 2)
+                    # 난방 연료는 프로젝트 열원(proj_heat_source)으로 결정. 존 heatingFuelId(기본=전기)를
+                    # 쓰면 지역난방(11)에도 전기 히트펌프 COP(~3.5)가 적용돼 난방 에너지가 ~3배 과소산정됨.
+                    fuel_type = proj_heat_source
 
                     if is_geothermal:
                         h_cop, c_cop = 4.5, 5.0
                     else:
                         c_cop = self.COOLING_EFF_DB.get(hvac_sys, 2.8)
-                        h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, 1.0)
+                        # 지역난방(11)은 효율~1.0(열량 전달 거의 손실 없음). DB에 없으면 0.95로 폴백.
+                        h_default = 0.95 if fuel_type == 11 else 1.0
+                        h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, h_default)
 
                     total_h_req_kwh += zh_kwh
                     total_c_req_kwh += zc_kwh
@@ -621,6 +628,21 @@ class LCCAnalyzer:
             peak_elec_kw = peak_kw_series.max() * 0.8 if len(peak_kw_series) > 0 else 0
             peak_kw_estimate = peak_elec_kw if peak_elec_kw > 0 else total_area * 0.05
             annual_elec_bill += peak_kw_estimate * self.ELEC_BASE_CHARGE * 12
+
+            # 냉난방 설비 용량(kW) — 설비비 산정용.
+            # 시간당 현열부하(kWh/h ≈ kW)의 99퍼센타일로 산정한다. 이상부하의 순간 .max()는
+            # 셋백 복귀 시 용량제한 없이 치솟아(예: 228 W/㎡) 설비비를 과대평가하므로 백분위로 완화하고,
+            # PTHP·이상부하 양 경로가 같은 현열부하 시계열을 써 시스템 선택과 무관하게 일관되게 한다.
+            if len(total_h_req_kwh) > 0:
+                heat_peak_kw = float(np.percentile(total_h_req_kwh, 99))
+                cool_peak_kw = float(np.percentile(total_c_req_kwh, 99))
+            else:
+                heat_peak_kw = cool_peak_kw = 0.0
+            hvac_capacity_kw = max(heat_peak_kw, cool_peak_kw)
+            # 현실 설계부하 범위로 클램프: 40~100 W/㎡.
+            # 일부 gbXML 모델(폐합 갭·과대 침기 등)은 현열부하가 200 W/㎡까지 치솟지만 실제 설비는
+            # 그렇게 사이징하지 않는다. 단열 좋은 건물은 하한 미만이라 설비비가 싸진다(정상).
+            hvac_capacity_kw = min(max(hvac_capacity_kw, total_area * 0.04), total_area * 0.10)
             
             for m in range(1, 13):
                 mask_m = (df['month'] == m).values
@@ -716,7 +738,9 @@ class LCCAnalyzer:
             habitable_area = 0.0
             non_habitable_area = 0.0
             for z in zones:
-                z_name = z.get('name', '').lower()
+                # gbXML 파서는 존 용도명을 'id'에 담는다('name' 미발급). id 폴백이 없으면
+                # 모든 존이 거주구역으로 분류돼 LED 감면 추천이 재실행해도 무효(비용 동일)였음.
+                z_name = (z.get('name') or z.get('id') or '').lower()
                 z_area = z.get('area', 0)
                 if not z_area:
                     z_area = total_area / max(len(zones), 1)
@@ -750,11 +774,13 @@ class LCCAnalyzer:
                     break
             
             hvac_unit_cost = self.cost_db["avg_prices"]["hvac_kw_system"].get(main_hvac_sys, self.cost_db["avg_prices"]["hvac_kw_default"])
-                    
-            if is_geothermal or hvac_upgrade_active:
-                hvac_cost = peak_kw_estimate * hvac_unit_cost
-            else:
-                hvac_cost = 0.0
+            # 지열(GSHP)은 천공·지중 열교환기 비용으로 일반 시스템보다 고가 → 프리미엄(×2.2) 반영
+            if is_geothermal:
+                hvac_unit_cost = int(hvac_unit_cost * 2.2)
+
+            # 설비비는 항상 표시한다(건물에는 냉난방 설비가 필수). 토글 게이팅 제거 →
+            # 실제 산정된 설비 용량(hvac_capacity_kw) × 시스템 단가로 일관 산출.
+            hvac_cost = hvac_capacity_kw * hvac_unit_cost
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
 
@@ -876,19 +902,13 @@ class LCCAnalyzer:
                     })
                     
                 if is_geothermal:
-                    saved_hvac = hvac_cost * 0.4
+                    # 지열 해제 시 절감액 = 지열 프리미엄(×2.2)분. 일반 시스템(×1.0)으로 환원되므로
+                    # saved = hvac_cost × (1.2/2.2). 설비비는 그대로 남고 프리미엄만 빠진다.
+                    saved_hvac = hvac_cost * (1.2 / 2.2)
                     recommendations.append({
                         "type": "hvac",
                         "title": "지열 난방 시스템 해제",
-                        "description": "초기 설치비가 높은 지열 시스템을 일반 시스템으로 변경하여 비용을 절감합니다.",
-                        "saved_cost": int(saved_hvac)
-                    })
-                elif hvac_upgrade_active:
-                    saved_hvac = hvac_cost
-                    recommendations.append({
-                        "type": "hvac",
-                        "title": "설비 시스템 전면 교체 보류",
-                        "description": "기존 냉난방 설비를 유지하여 막대한 초기 공사비를 대폭 절감합니다.",
+                        "description": "초기 설치비가 높은 지열(GSHP) 시스템을 일반 시스템으로 변경하여 천공·지중 열교환기 비용을 절감합니다.",
                         "saved_cost": int(saved_hvac)
                     })
 
