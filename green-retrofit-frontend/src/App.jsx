@@ -20,6 +20,7 @@ import {
   Settings2,
   ArrowRight,
   ArrowLeft,
+  PlayCircle,
   FileText,
   Loader2,
   LayoutDashboard,
@@ -73,9 +74,7 @@ import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
 import { LOADING_MESSAGES, DIR_MAP } from './utils/format';
 import { getPanesCategory, getCoatingType } from './utils/surface';
 import ScheduleEditor from './components/ScheduleEditor';
-import Navigation from './components/landing/Navigation';
-import Hero from './components/landing/Hero';
-import Manual from './components/landing/Manual';
+import ZeroBaseLanding from './components/landing/ZeroBaseLanding';
 import { REGION_LATITUDES } from './utils/solarHelper';
 import * as THREE from 'three';
 
@@ -133,6 +132,7 @@ export default function App() {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   
   const [showVideoTooltip, setShowVideoTooltip] = useState(false);
+  const [showGuide, setShowGuide] = useState(false); // Revit gbXML 추출 가이드 영상 모달
   const tooltipTimerRef = useRef(null);
 
   const handleMouseEnterTooltip = () => {
@@ -883,18 +883,19 @@ export default function App() {
     ];
   };
 
+  // 랜딩의 따뜻한 톤(브라운 #1a120d / 크림 #f3ece1 / 테라코타)을 앱 전역으로 이어감
   const theme = {
-    bg: isDarkMode ? 'bg-[#0B0F19] text-slate-200' : 'bg-[#DFDCD5] text-slate-800',
-    card: isDarkMode ? 'bg-[#151B2B] border-slate-800' : 'bg-[#EAE8E3] border-[#D5D2C9]',
-    panel: isDarkMode ? 'bg-slate-900/80 border-slate-700' : 'bg-white/80 border-slate-300',
-    textMain: isDarkMode ? 'text-white' : 'text-slate-900',
-    textSub: isDarkMode ? 'text-slate-400' : 'text-slate-600',
-    input: isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800',
-    tableHeader: isDarkMode ? 'bg-white/5 text-emerald-400 border-slate-700' : 'bg-[#DFDCD5] text-slate-800 border-[#C4C1B6]',
-    tableBorder: isDarkMode ? 'border-slate-700' : 'border-[#D5D2C9]',
-    chartText: isDarkMode ? '#94a3b8' : '#475569',
-    chartGrid: isDarkMode ? 'rgba(255,255,255,0.05)' : '#C4C1B6',
-    pieBg: isDarkMode ? 'rgba(255,255,255,0.05)' : '#DFDCD5',
+    bg: isDarkMode ? 'bg-[#1a120d] text-[#f3ece1]' : 'bg-[#f3ece1] text-[#2a211b]',
+    card: isDarkMode ? 'bg-[#241a13] border-[#3a2c20]' : 'bg-[#eae1d3] border-[#d8cbb5]',
+    panel: isDarkMode ? 'bg-[#1f160e]/85 border-[#3a2c20]' : 'bg-[#fbf7f0]/85 border-[#d8cbb5]',
+    textMain: isDarkMode ? 'text-[#f7f1e8]' : 'text-[#2a211b]',
+    textSub: isDarkMode ? 'text-[#b8a48f]' : 'text-[#6b5d50]',
+    input: isDarkMode ? 'bg-[#241a13] border-[#3a2c20] text-[#f3ece1]' : 'bg-[#fbf7f0] border-[#d8cbb5] text-[#2a211b]',
+    tableHeader: isDarkMode ? 'bg-white/5 text-[#e4b48f] border-[#3a2c20]' : 'bg-[#eae1d3] text-[#2a211b] border-[#d8cbb5]',
+    tableBorder: isDarkMode ? 'border-[#3a2c20]' : 'border-[#d8cbb5]',
+    chartText: isDarkMode ? '#b8a48f' : '#6b5d50',
+    chartGrid: isDarkMode ? 'rgba(255,255,255,0.05)' : '#d8cbb5',
+    pieBg: isDarkMode ? 'rgba(255,255,255,0.05)' : '#eae1d3',
   };
 
   const selectedSurfaceData = editMode === 'surface' ? surfaces.find((s) => s.id === selectedId) : null;
@@ -1200,16 +1201,12 @@ export default function App() {
       )}
 
       {step === 'landing' ? (
-        <div className="min-h-screen selection:bg-brand-primary/30 bg-white overflow-y-auto pb-24">
-          <Navigation onStart={() => setStep('upload')} />
-          <main>
-            <Hero />
-            <Manual onStart={() => setStep('upload')} />
-          </main>
+        <div className="min-h-screen overflow-y-auto" style={{ background: '#1a120d' }}>
+          <ZeroBaseLanding onStart={() => setStep('upload')} />
         </div>
       ) : (
       <div className={`h-screen w-full transition-colors duration-300 ${theme.bg} font-sans flex flex-col overflow-hidden`}>
-        <header className={`flex-shrink-0 px-8 py-4 border-b ${isDarkMode ? 'border-slate-800 bg-[#0B0F19]' : 'border-[#D5D2C9] bg-[#DFDCD5]'} flex justify-between items-center z-10 shadow-sm`}>
+        <header className={`flex-shrink-0 px-8 py-4 border-b ${isDarkMode ? 'border-[#3a2c20] bg-[#1a120d]' : 'border-[#d8cbb5] bg-[#f3ece1]'} flex justify-between items-center z-10 shadow-sm`}>
           <div 
             className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
             onClick={() => setStep('landing')}
@@ -1277,6 +1274,12 @@ export default function App() {
                         className={`w-full py-5 rounded-[1.5rem] font-black text-sm border-2 transition-all active:scale-95 ${isDarkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-300 hover:bg-slate-200 text-slate-600'}`}
                       >
                         샘플 3층 상업용 건물로 바로 시작하기
+                      </button>
+                      <button
+                        onClick={() => setShowGuide(true)}
+                        className="mt-1 inline-flex items-center justify-center gap-2 self-center text-sm font-bold text-emerald-600 hover:text-emerald-500 transition-colors"
+                      >
+                        <PlayCircle size={18} /> Revit에서 gbXML 추출하는 법 보기
                       </button>
                     </>
                   ) : (
@@ -1444,7 +1447,7 @@ export default function App() {
                           <span className="flex items-center gap-2">
                             <Sun className="text-yellow-500" size={16} /> 태양광(PV) 패널 설치 용량
                           </span>
-                          <span className="text-blue-500 bg-blue-500/10 px-3 py-1 rounded-lg text-[11px] uppercase tracking-widest">
+                          <span className="text-[#c2734a] bg-[#c2734a]/10 px-3 py-1 rounded-lg text-[11px] uppercase tracking-widest">
                             {projectData.pvCapacity} kW
                           </span>
                         </label>
@@ -1455,7 +1458,7 @@ export default function App() {
                           step="5"
                           value={projectData.pvCapacity}
                           onChange={(e) => setProjectData({ ...projectData, pvCapacity: parseInt(e.target.value) })}
-                          className="w-full h-3 rounded-full appearance-none accent-blue-500 bg-slate-700 cursor-pointer"
+                          className="w-full h-3 rounded-full appearance-none accent-[#c2734a] bg-[#dccfbb] cursor-pointer"
                         />
                       </div>
 
@@ -1936,10 +1939,47 @@ export default function App() {
                   >
                     <X size={20} className="text-slate-500" />
                   </button>
-                  <ScheduleEditor 
+                  <ScheduleEditor
                     value={projectData.customSchedule}
                     onChange={(newSchedule) => setProjectData({...projectData, customSchedule: newSchedule})}
                   />
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Revit gbXML 추출 가이드 영상 모달 */}
+          <AnimatePresence>
+            {showGuide && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowGuide(false)}></div>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className={`relative w-full max-w-3xl rounded-[2rem] shadow-2xl overflow-hidden border ${isDarkMode ? 'bg-[#241a13] border-[#3a2c20]' : 'bg-[#fbf7f0] border-[#d8cbb5]'}`}
+                >
+                  <div className="flex items-center justify-between px-6 py-4">
+                    <h3 className={`text-base font-black flex items-center gap-2 ${theme.textMain}`}>
+                      <PlayCircle size={18} className="text-emerald-600" /> Revit에서 gbXML 추출하기
+                    </h3>
+                    <button
+                      onClick={() => setShowGuide(false)}
+                      className={`p-2 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+                    >
+                      <X size={20} className={theme.textSub} />
+                    </button>
+                  </div>
+                  <video
+                    src="/gbXML_manual.mp4"
+                    controls
+                    autoPlay
+                    playsInline
+                    className="w-full max-h-[70vh] bg-black"
+                  />
+                  <p className={`px-6 py-4 text-xs leading-relaxed ${theme.textSub}`}>
+                    Revit · File → Export → gbXML 로 내보낸 .xml 파일을 업로드 화면에 올리면 됩니다.
+                  </p>
                 </motion.div>
               </div>
             )}
