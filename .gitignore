@@ -32,6 +32,12 @@ _data/*.zip
 _data/Data/*
 !_data/Data/ActivityIdList.txt
 
+# 미사용 IDD 덤프(v24.2 잔재) — idf_builder는 EnergyPlus 설치본의 Energy+.idd를 사용.
+# 랜딩 원본 TS 앱(zerobase)은 frontend/components/landing/ 으로 이식 완료.
+# 두 원본 모두 _scratch/archive/ 로 이동함.
+_data/idd/
+/zerobase/
+
 # 루트 스크래치/대용량 입력 — 앱 코드가 참조하지 않음
 # (랜딩이 쓰는 영상은 green-retrofit-frontend/public/zerobase/uploads/ 에 별도 존재)
 /upscaled-video.mp4
@@ -47,3 +53,6 @@ _data/Data/*
 *.pyc
 __pycache__/
 .env
+
+# 작업 상태 DB (SQLite, 런타임 생성)
+green-retrofit-backend/tasks.db*
