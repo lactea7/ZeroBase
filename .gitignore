@@ -13,6 +13,8 @@ green-retrofit-backend/env/
 green-retrofit-backend/**/eplusout*
 green-retrofit-backend/**/eplustbl*
 green-retrofit-backend/**/generated_model.idf
+# 단, 골든 테스트 픽스처는 추적 (테스트가 이 파일에 의존)
+!green-retrofit-backend/tests/fixtures/eplusout_monthly.csv
 
 # 일회용 스크래치/디버그 스크립트 (아카이브: _scratch/)
 _scratch/
