@@ -343,19 +343,23 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     os.makedirs(temp_dir_abs, exist_ok=True)
 
     
-    # 💡 [핵심 경로 수정] 프로젝트 구조에 최적화된 탐색
-    search_ptr = os.path.dirname(os.path.abspath(__file__))
-    db_dir = ""
-    
-    for _ in range(5):
-        potential = os.path.join(search_ptr, "_data")
-        if os.path.exists(potential):
-            db_dir = potential
-            break
-        search_ptr = os.path.dirname(search_ptr)
-        
+    # 💡 [핵심 경로 수정] 데이터 폴더 탐색: 환경변수 우선, 없으면 상위 폴더에서 _data 탐색
+    db_dir = os.environ.get("GBXML_DATA_DIR", "")
+    if not db_dir or not os.path.isdir(db_dir):
+        search_ptr = os.path.dirname(os.path.abspath(__file__))
+        db_dir = ""
+        for _ in range(5):
+            potential = os.path.join(search_ptr, "_data")
+            if os.path.isdir(potential):
+                db_dir = potential
+                break
+            search_ptr = os.path.dirname(search_ptr)
+
     if not db_dir:
-        db_dir = "/Users/minkimac/Desktop/gbXML_server/_data" 
+        raise RuntimeError(
+            "_data 폴더를 찾을 수 없습니다. 프로젝트 루트에 _data를 두거나 "
+            "GBXML_DATA_DIR 환경변수로 경로를 지정하세요."
+        )
     
     GLAZING_DB = load_databases(db_dir)
 
@@ -389,15 +393,18 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         target_u = _DEFAULT_GLZ["u"]
         target_shgc = _DEFAULT_GLZ["shgc"]
     
-    # 💡 [날씨 파일 자동 탐색]
+    # 💡 [날씨 파일 자동 탐색] — _data/weather 우선, 없으면 _data 전체.
+    # (예전처럼 프로젝트 루트 전체를 걸으면 node_modules/.git까지 매 요청마다 순회하게 됨)
+    weather_dir = os.path.join(db_dir, "weather")
+    search_root = weather_dir if os.path.isdir(weather_dir) else db_dir
+
     epw_files = []
-    parent_of_db = os.path.dirname(db_dir)
-    
-    for root_walk, dirs, files in os.walk(parent_of_db):
+    for root_walk, dirs, files in os.walk(search_root):
         for f in files:
             if f.lower().endswith('.epw'):
                 epw_files.append(os.path.join(root_walk, f))
-    
+    epw_files.sort()  # 동일 조건 다중 매칭 시 선택이 순회 순서에 좌우되지 않도록 고정
+
     if epw_files:
         target_key = location_key.lower()
         city_name = location_key.split('_')[-1].lower()
@@ -845,6 +852,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             led_fixture_count=sum(int(z.get('ledFixtureCount', 0)) for z in zones),
             led_reduction_active=led_reduction_active,
             hvac_upgrade_active=hvac_upgrade_active,
+            hvac_exclude_non_habitable=project_data.get('hvacExcludeNonHabitable', False),
             heat_source=heat_source,
             use_pthp=use_pthp,
             discount_rate=float(lcc_parameters.get('discountRate', 5.0)) / 100.0,
@@ -858,5 +866,13 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         )
         return result_data
 
-    # 시뮬레이션 실패 시 fallback 반환
-    return analyzer._fallback_data()
+    # 시뮬레이션 실패 시 가짜 데이터 대신 명시적으로 실패 처리
+    # (eplusout.err의 Severe/Fatal 줄을 추려 원인을 함께 전달)
+    err_path = os.path.join(temp_dir_abs, "eplusout.err")
+    err_hint = ""
+    if os.path.exists(err_path):
+        with open(err_path, "r", encoding="utf-8", errors="ignore") as f:
+            critical = [ln.strip() for ln in f if "** Severe" in ln or "**  Fatal" in ln]
+        if critical:
+            err_hint = " | " + " / ".join(critical[:3])
+    raise RuntimeError(f"EnergyPlus 시뮬레이션 실패{err_hint}")

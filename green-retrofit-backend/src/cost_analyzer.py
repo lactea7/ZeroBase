@@ -466,7 +466,7 @@ class LCCAnalyzer:
         construction_overrides = kwargs.get("construction_overrides", {})
         
         if pd is None:
-            return self._fallback_data()
+            raise RuntimeError("pandas가 설치되지 않아 비용 분석을 수행할 수 없습니다. (pip install pandas)")
 
         try:
             df = pd.read_csv(eplus_csv_path).fillna(0)
@@ -764,6 +764,17 @@ class LCCAnalyzer:
                 # 면적 → 등기구 개수 환산(약 LED_FIXTURE_AREA_M2 ㎡당 1개) 후 개당 단가 적용
                 est_fixtures = led_effective_area / self.LED_FIXTURE_AREA_M2
                 led_cost = est_fixtures * led_per_ea
+
+            # 추천 카드에 표시할 LED 절감액은 '적용 시 실제 차액'으로 계산한다.
+            # (기존 led_cost×0.3은 비거주 면적의 30% 몫만 빠지는 실제 효과를 ~3배 과대표시했음)
+            if led_fixture_count > 0:
+                led_saving = led_cost * 0.5   # 수량 50% 축소 → 비용도 정확히 50% 감소
+            elif not led_reduction_active:
+                reduced_area = habitable_area if habitable_area >= 1.0 else total_area * 0.5
+                led_cost_if_reduced = (reduced_area / self.LED_FIXTURE_AREA_M2) * led_per_ea
+                led_saving = max(led_cost - led_cost_if_reduced, 0.0)
+            else:
+                led_saving = 0.0
             
             hvac_upgrade_active = kwargs.get("hvac_upgrade_active", False)
             
@@ -781,6 +792,14 @@ class LCCAnalyzer:
             # 설비비는 항상 표시한다(건물에는 냉난방 설비가 필수). 토글 게이팅 제거 →
             # 실제 산정된 설비 용량(hvac_capacity_kw) × 시스템 단가로 일관 산출.
             hvac_cost = hvac_capacity_kw * hvac_unit_cost
+
+            # 비거주 구역(계단실·창고·기계실 등) 설비 제외 옵션: 냉난방 용량은 공조 대상
+            # 바닥면적에 대략 비례하므로, 비거주 면적 비율만큼 설비 규모(비용)를 축소한다.
+            _total_zone_area = habitable_area + non_habitable_area
+            non_hab_share = (non_habitable_area / _total_zone_area) if _total_zone_area > 0 else 0.0
+            hvac_exclude_non_habitable = kwargs.get("hvac_exclude_non_habitable", False)
+            if hvac_exclude_non_habitable and non_hab_share > 0:
+                hvac_cost *= (1.0 - non_hab_share)
             
             total_capital_cost = window_cost + insulation_cost + led_cost + hvac_cost
 
@@ -859,88 +878,22 @@ class LCCAnalyzer:
                 "independence": independence_val
             }
             
-            recommendations = []
-            if target_budget > 0 and total_capital_cost > target_budget:
-                if '고성능' in mapped_window_name or 'premium' in mapped_window_name.lower():
-                    std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
-                    saved_cost = window_cost - (total_window_area * std_price)
-                    if saved_cost > 0:
-                        recommendations.append({
-                            "type": "window",
-                            "title": "창호 등급 하향 (Premium → Standard)",
-                            "description": "최상급 창호 대신 일반 복층 유리로 변경하면 공사비를 크게 절감할 수 있습니다.",
-                            "saved_cost": int(saved_cost)
-                        })
-                elif '중성능' in mapped_window_name or 'high' in mapped_window_name.lower():
-                    std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
-                    saved_cost = window_cost - (total_window_area * std_price)
-                    if saved_cost > 0:
-                        recommendations.append({
-                            "type": "window",
-                            "title": "창호 등급 하향 (High → Standard)",
-                            "description": "로이 복층유리 대신 일반 복층 유리로 변경하여 예산을 아낄 수 있습니다.",
-                            "saved_cost": int(saved_cost)
-                        })
-                        
-                high_tier_insul_cost = 0
-                std_insul_price = self.cost_db.get("insulation_tiers", {}).get("standard", {}).get("avg", 15000)
-                std_insul_cost_sum = 0
-                
-                if 'detailed_insulation_costs' in locals() and detailed_insulation_costs:
-                    for d in detailed_insulation_costs:
-                        if '고성능' in d["tier"] or 'premium' in d["tier"].lower() or '중성능' in d["tier"] or 'high' in d["tier"].lower():
-                            high_tier_insul_cost += d["cost"]
-                            std_insul_cost_sum += d["area"] * std_insul_price
-
-                if high_tier_insul_cost > std_insul_cost_sum:
-                    saved_insul = high_tier_insul_cost - std_insul_cost_sum
-                    recommendations.append({
-                        "type": "insulation",
-                        "title": "단열재 사양 하향 (일반 EPS/미네랄울 활용)",
-                        "description": "고성능 단열재 대신 일반 단열재로 변경할 경우 초기 비용이 감소합니다.",
-                        "saved_cost": int(saved_insul)
-                    })
-                    
-                if is_geothermal:
-                    # 지열 해제 시 절감액 = 지열 프리미엄(×2.2)분. 일반 시스템(×1.0)으로 환원되므로
-                    # saved = hvac_cost × (1.2/2.2). 설비비는 그대로 남고 프리미엄만 빠진다.
-                    saved_hvac = hvac_cost * (1.2 / 2.2)
-                    recommendations.append({
-                        "type": "hvac",
-                        "title": "지열 난방 시스템 해제",
-                        "description": "초기 설치비가 높은 지열(GSHP) 시스템을 일반 시스템으로 변경하여 천공·지중 열교환기 비용을 절감합니다.",
-                        "saved_cost": int(saved_hvac)
-                    })
-                else:
-                    # 비지열: 고효율 설비(EHP·FCU·AHU)를 표준 개별 냉난방기(Generic, id 5)로 하향.
-                    # 설비비가 capital의 대부분을 차지하는 경우가 많아, 이 추천이 없으면 다른 항목을
-                    # 모두 적용해도 총액이 거의 안 줄던 문제를 해소한다. (이미 표준이면 절감 0 → 미표시)
-                    std_hvac_unit = self.cost_db["avg_prices"]["hvac_kw_system"].get(5, 1500000)
-                    if hvac_capacity_kw > 0 and hvac_unit_cost > std_hvac_unit:
-                        saved_hvac = hvac_capacity_kw * (hvac_unit_cost - std_hvac_unit)
-                        if saved_hvac > 0:
-                            recommendations.append({
-                                "type": "hvac",
-                                "title": "고효율 냉난방 설비 → 표준 설비로 변경",
-                                "description": "고가의 개별 히트펌프(EHP)·팬코일(FCU) 대신 표준 개별 냉난방기로 변경하여 설비 공사비를 절감합니다.",
-                                "saved_cost": int(saved_hvac)
-                            })
-
-                if led_cost > 0:
-                    if led_fixture_count > 0:
-                        saved_led = led_cost * 0.5
-                        desc = "직접 입력한 LED 교체 수량을 50% 축소하여 필수 구역만 우선 교체합니다."
-                        title = "LED 조명 교체 수량 축소 (50%)"
-                    else:
-                        saved_led = led_cost * 0.3
-                        desc = "계단실, 복도, 창고 등 공용 구역을 제외하고 주요 거주 구역 위주로 부분 교체합니다."
-                        title = "LED 조명 부분 교체 (공용구역 제외)"
-                    recommendations.append({
-                        "type": "led",
-                        "title": title,
-                        "description": desc,
-                        "saved_cost": int(saved_led)
-                    })
+            recommendations = self._build_recommendations(
+                mapped_window_name=mapped_window_name,
+                window_cost=window_cost,
+                total_window_area=total_window_area,
+                detailed_insulation_costs=detailed_insulation_costs,
+                is_geothermal=is_geothermal,
+                hvac_cost=hvac_cost,
+                hvac_capacity_kw=hvac_capacity_kw,
+                hvac_unit_cost=hvac_unit_cost,
+                hvac_exclude_non_habitable=hvac_exclude_non_habitable,
+                non_hab_share=non_hab_share,
+                led_cost=led_cost,
+                led_saving=led_saving,
+                led_fixture_count=led_fixture_count,
+                led_reduction_active=led_reduction_active,
+            )
 
             # 단순 IRR (내부수익률) 계산기 (Bisection method)
             # 상한을 5.0(500%)까지 넓혀 인위적으로 100%에 고정되지 않게 한다.
@@ -1047,64 +1000,43 @@ class LCCAnalyzer:
                     "base_running_cost": int(base_running_cost),      # 적용된 기존 건물 연간 운영비
                     "running_cost_multiplier": self.BASELINE_RUNNING_COST_MULTIPLIER,
                     "savings_pct": round((1 - retrofit_running_cost / base_running_cost) * 100) if base_running_cost > 0 else 0
-                }
+                },
+                # 수치가 전제하는 추정 가정 — UI 고지용. 정밀해 보이는 숫자에 대한 과신 방지.
+                "estimate_notes": [
+                    {
+                        "label": "공사비 단가",
+                        "note": "친환경건설자재 DB의 등급별 중앙값 단가입니다. 실제 시공 견적과 ±20% 이상 차이 날 수 있습니다."
+                    },
+                    {
+                        "label": "설비(HVAC) 비용",
+                        "note": f"시뮬레이션 피크부하로 추정한 용량 {hvac_capacity_kw:.0f}kW × 시스템 단가(kW당 {int(hvac_unit_cost):,}원)입니다. 실측 견적이 아닌 추정치입니다."
+                    },
+                    {
+                        "label": "LED 공사비",
+                        "note": ("직접 입력한 등기구 수량 × 개당 중앙값 단가로 계산했습니다."
+                                 if led_fixture_count > 0 else
+                                 f"바닥면적 약 {self.LED_FIXTURE_AREA_M2:.0f}㎡당 등기구 1개로 환산한 추정 수량 기준입니다.")
+                    },
+                    {
+                        "label": "에너지 요금",
+                        "note": "2026년 KEPCO 일반용·지역난방 요금표 기준이며, 실제 계약 종별에 따라 달라질 수 있습니다."
+                    },
+                    {
+                        "label": "기존 건물 기준선",
+                        "note": ("입력하신 실측 요금/사용량을 기준으로 절감액을 계산했습니다."
+                                 if baseline_source in ("actual_bill", "actual_usage") else
+                                 f"실측 요금 미입력 시 개선 후 운영비의 {self.BASELINE_RUNNING_COST_MULTIPLIER}배를 기존 건물로 가정합니다. 실측 요금을 입력하면 정확도가 올라갑니다.")
+                    },
+                    {
+                        "label": "NPV·IRR",
+                        "note": f"할인율 {discount_rate*100:.1f}%, 물가상승 {inflation_rate*100:.1f}%, 요금상승 {utility_inflation*100:.1f}%, 분석기간 {years}년 가정의 결과입니다."
+                    },
+                ]
             }
             
-            surface_thermal = {}
-            if surfaces:
-                for s in surfaces:
-                    s_id = s['id'].upper()
-                    temp_col = None
-                    rad_col = None
-                    for col in df.columns:
-                        col_upper = col.upper()
-                        if col_upper.startswith(s_id + ":") or col_upper.startswith(s_id + "_MIRROR:"):
-                            if 'SURFACE OUTSIDE FACE TEMPERATURE' in col_upper:
-                                temp_col = col
-                            elif 'SURFACE OUTSIDE FACE INCIDENT SOLAR' in col_upper:
-                                rad_col = col
-                    
-                    temp_months = []
-                    rad_months = []
-                    for m in range(min(12, len(df))):
-                        t_val = float(df.iloc[m][temp_col]) if temp_col else 20.0
-                        r_val = float(df.iloc[m][rad_col]) if rad_col else 100.0
-                        temp_months.append(round(t_val, 2))
-                        rad_months.append(round(r_val, 2))
-                        
-                    surface_thermal[s['id']] = {
-                        "temperature": temp_months,
-                        "radiation": rad_months
-                    }
+            surface_thermal, surface_airflow = self._surface_outputs(df, surfaces)
 
-            surface_airflow = {}
-            if surfaces:
-                for s in surfaces:
-                    win_id = f"WIN_{s['id']}".upper()
-                    flow1_col = None
-                    flow2_col = None
-                    for col in df.columns:
-                        col_upper = col.upper()
-                        if col_upper.startswith(win_id + ":"):
-                            if 'NODE 1 TO NODE 2 VOLUME FLOW RATE' in col_upper:
-                                flow1_col = col
-                            elif 'NODE 2 TO NODE 1 VOLUME FLOW RATE' in col_upper:
-                                flow2_col = col
-                    
-                    inflow_months = []
-                    outflow_months = []
-                    for m in range(min(12, len(df))):
-                        f1_val = float(df.iloc[m][flow1_col]) if flow1_col else 0.0
-                        f2_val = float(df.iloc[m][flow2_col]) if flow2_col else 0.0
-                        inflow_months.append(round(f1_val * 1000.0, 2))
-                        outflow_months.append(round(f2_val * 1000.0, 2))
-                        
-                    surface_airflow[s['id']] = {
-                        "inflow": inflow_months,
-                        "outflow": outflow_months
-                    }
-
-            final_data = { 
+            final_data = {
                 "summary": summary, 
                 "monthly": monthly_data, 
                 "matrix": matrix, 
@@ -1116,32 +1048,147 @@ class LCCAnalyzer:
             return { **final_data, "result": final_data }
             
         except Exception as e:
-            print(f"⚠️ LCC Analyzer 파싱 에러: {e}")
-            return self._fallback_data()
+            # 실패 시 가짜(fallback) 수치를 내보내지 않고 명시적으로 실패시킨다.
+            # 가짜 데이터가 정상 결과처럼 화면에 그려지는 것을 막기 위함.
+            print(f"❌ LCC Analyzer 계산 실패: {e}")
+            raise RuntimeError(f"비용 분석 실패: {e}") from e
 
-    def _fallback_data(self):
-        fallback_data = {
-            "summary": {"demand_per_m2": 50, "consume_per_m2": 30, "primary_per_m2": 80, "co2_per_m2": 15, "independence": 10}, 
-            "monthly": [{"name": f"{i}월", "heating": 5, "cooling": 5} for i in range(1, 13)], 
-            "matrix": {
-                "heating": {"req": 10, "con": 8},
-                "cooling": {"req": 12, "con": 10},
-                "hotwater": {"req": 5, "con": 5.5},
-                "lighting": {"req": 8, "con": 8},
-                "ventilation": {"req": 5, "con": 5},
-                "equipment": {"req": 10, "con": 10},
-                "renewable": {"req": -5, "con": -5}
-            },
-            "financial": {
-                "mapped_window_name": "기본 단가 반영 (DB 미매칭)", 
-                "annual_elec_bill": 0, 
-                "annual_heat_bill": 0, 
-                "capital_cost": 0, 
-                "cost_details": {"window": 0, "insulation": 0, "led": 0, "hvac": 0},
-                "insulation_details": [],
-                "csv_db_loaded": {"eco_loaded": False, "nara_loaded": False, "items": 0}
-            },
-            "surfaceThermal": {},
-            "surfaceAirflow": {}
-        }
-        return { **fallback_data, "result": fallback_data }
+    def _build_recommendations(self, *, mapped_window_name, window_cost, total_window_area,
+                               detailed_insulation_costs, is_geothermal, hvac_cost,
+                               hvac_capacity_kw, hvac_unit_cost, hvac_exclude_non_habitable,
+                               non_hab_share, led_cost, led_saving, led_fixture_count,
+                               led_reduction_active):
+        """비용 절감 추천 목록 생성. 예산 입력 여부와 무관하게 항상 생성한다.
+
+        기존엔 '예산 입력 + 초과'일 때만 만들어 설비비가 지배적이어도 대안이 안 보였다.
+        예산 초과 여부에 따른 강조는 프론트가 target_budget/capital_cost로 판단한다.
+        각 대안은 이미 적용된 상태면 반복 제시하지 않는다.
+        """
+        recommendations = []
+
+        if '고성능' in mapped_window_name or 'premium' in mapped_window_name.lower():
+            std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
+            saved_cost = window_cost - (total_window_area * std_price)
+            if saved_cost > 0:
+                recommendations.append({
+                    "type": "window",
+                    "title": "창호 등급 하향 (Premium → Standard)",
+                    "description": "최상급 창호 대신 일반 복층 유리로 변경하면 공사비를 크게 절감할 수 있습니다.",
+                    "saved_cost": int(saved_cost)
+                })
+        elif '중성능' in mapped_window_name or 'high' in mapped_window_name.lower():
+            std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
+            saved_cost = window_cost - (total_window_area * std_price)
+            if saved_cost > 0:
+                recommendations.append({
+                    "type": "window",
+                    "title": "창호 등급 하향 (High → Standard)",
+                    "description": "로이 복층유리 대신 일반 복층 유리로 변경하여 예산을 아낄 수 있습니다.",
+                    "saved_cost": int(saved_cost)
+                })
+
+        high_tier_insul_cost = 0
+        std_insul_price = self.cost_db.get("insulation_tiers", {}).get("standard", {}).get("avg", 15000)
+        std_insul_cost_sum = 0
+        for d in detailed_insulation_costs or []:
+            if '고성능' in d["tier"] or 'premium' in d["tier"].lower() or '중성능' in d["tier"] or 'high' in d["tier"].lower():
+                high_tier_insul_cost += d["cost"]
+                std_insul_cost_sum += d["area"] * std_insul_price
+
+        if high_tier_insul_cost > std_insul_cost_sum:
+            recommendations.append({
+                "type": "insulation",
+                "title": "단열재 사양 하향 (일반 EPS/미네랄울 활용)",
+                "description": "고성능 단열재 대신 일반 단열재로 변경할 경우 초기 비용이 감소합니다.",
+                "saved_cost": int(high_tier_insul_cost - std_insul_cost_sum)
+            })
+
+        if is_geothermal:
+            # 지열 해제 시 절감액 = 지열 프리미엄(×2.2)분. 일반 시스템(×1.0)으로 환원되므로
+            # saved = hvac_cost × (1.2/2.2). 설비비는 그대로 남고 프리미엄만 빠진다.
+            recommendations.append({
+                "type": "hvac",
+                "title": "지열 난방 시스템 해제",
+                "description": "초기 설치비가 높은 지열(GSHP) 시스템을 일반 시스템으로 변경하여 천공·지중 열교환기 비용을 절감합니다.",
+                "saved_cost": int(hvac_cost * (1.2 / 2.2))
+            })
+        else:
+            # 비지열: 고효율 설비(EHP·FCU·AHU)를 표준 개별 냉난방기(Generic, id 5)로 하향.
+            # 설비비가 capital의 대부분을 차지하는 경우가 많아, 이 추천이 없으면 다른 항목을
+            # 모두 적용해도 총액이 거의 안 줄던 문제를 해소한다. (이미 표준이면 절감 0 → 미표시)
+            std_hvac_unit = self.cost_db["avg_prices"]["hvac_kw_system"].get(5, 1500000)
+            if hvac_capacity_kw > 0 and hvac_unit_cost > std_hvac_unit:
+                saved_hvac = hvac_capacity_kw * (hvac_unit_cost - std_hvac_unit)
+                if saved_hvac > 0:
+                    recommendations.append({
+                        "type": "hvac",
+                        "title": "고효율 냉난방 설비 → 표준 설비로 변경",
+                        "description": "고가의 개별 히트펌프(EHP)·팬코일(FCU) 대신 표준 개별 냉난방기로 변경하여 설비 공사비를 절감합니다.",
+                        "saved_cost": int(saved_hvac)
+                    })
+
+        # 이미 표준 설비여도 쓸 수 있는 대안: 비거주 구역(계단실·창고·기계실 등)을
+        # 설비 범위에서 제외해 용량을 줄인다. 비거주 면적이 유의미할 때(3% 이상)만 제시.
+        if (not is_geothermal and not hvac_exclude_non_habitable
+                and non_hab_share >= 0.03 and hvac_cost > 0):
+            recommendations.append({
+                "type": "hvac_scope",
+                "title": "비거주 구역 냉난방 설비 제외",
+                "description": f"계단실·창고·기계실 등 비거주 구역(전체 면적의 약 {non_hab_share*100:.0f}%)을 설비 설치 범위에서 제외해 설비 용량과 공사비를 줄입니다.",
+                "saved_cost": int(hvac_cost * non_hab_share)
+            })
+
+        # 절감액은 '적용 시 실제 차액'(led_saving)만 제시. 이미 적용됐거나 효과가 0이면 미표시.
+        if led_cost > 0 and led_saving > 0:
+            if led_fixture_count > 0:
+                recommendations.append({
+                    "type": "led",
+                    "title": "LED 조명 교체 수량 축소 (50%)",
+                    "description": "직접 입력한 LED 교체 수량을 50% 축소하여 필수 구역만 우선 교체합니다.",
+                    "saved_cost": int(led_saving)
+                })
+            elif not led_reduction_active:
+                recommendations.append({
+                    "type": "led",
+                    "title": "LED 조명 부분 교체 (공용구역 제외)",
+                    "description": "계단실, 복도, 창고 등 공용 구역을 제외하고 주요 거주 구역 위주로 부분 교체합니다.",
+                    "saved_cost": int(led_saving)
+                })
+
+        return recommendations
+
+    def _surface_outputs(self, df, surfaces):
+        """면별 외피 온도/일사량과 창호 기류(월별 12개) 시계열 추출 — 3D 뷰어 오버레이용."""
+        surface_thermal = {}
+        surface_airflow = {}
+        for s in surfaces or []:
+            s_id = s['id'].upper()
+            temp_col = rad_col = None
+            win_id = f"WIN_{s['id']}".upper()
+            flow1_col = flow2_col = None
+            for col in df.columns:
+                col_upper = col.upper()
+                if col_upper.startswith(s_id + ":") or col_upper.startswith(s_id + "_MIRROR:"):
+                    if 'SURFACE OUTSIDE FACE TEMPERATURE' in col_upper:
+                        temp_col = col
+                    elif 'SURFACE OUTSIDE FACE INCIDENT SOLAR' in col_upper:
+                        rad_col = col
+                elif col_upper.startswith(win_id + ":"):
+                    if 'NODE 1 TO NODE 2 VOLUME FLOW RATE' in col_upper:
+                        flow1_col = col
+                    elif 'NODE 2 TO NODE 1 VOLUME FLOW RATE' in col_upper:
+                        flow2_col = col
+
+            temp_months, rad_months = [], []
+            inflow_months, outflow_months = [], []
+            for m in range(min(12, len(df))):
+                temp_months.append(round(float(df.iloc[m][temp_col]) if temp_col else 20.0, 2))
+                rad_months.append(round(float(df.iloc[m][rad_col]) if rad_col else 100.0, 2))
+                inflow_months.append(round((float(df.iloc[m][flow1_col]) if flow1_col else 0.0) * 1000.0, 2))
+                outflow_months.append(round((float(df.iloc[m][flow2_col]) if flow2_col else 0.0) * 1000.0, 2))
+
+            surface_thermal[s['id']] = {"temperature": temp_months, "radiation": rad_months}
+            surface_airflow[s['id']] = {"inflow": inflow_months, "outflow": outflow_months}
+
+        return surface_thermal, surface_airflow
+
