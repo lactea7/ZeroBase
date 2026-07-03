@@ -445,22 +445,36 @@ export default function ResultDashboard({
               {/* 탭: 💰 LCC (경제성) 분석 */}
               {activeResultTab === 'lcc' && res?.financial && (
                 <div className="animate-in fade-in slide-in-from-bottom-4 flex flex-col gap-6">
-                  {/* 예산 초과 알림 및 절감 추천 */}
-                  {res.financial.target_budget > 0 && res.financial.capital_cost > res.financial.target_budget && (
-                    <div className={`border-2 rounded-3xl p-7 shadow-sm ${isDarkMode ? 'bg-rose-500/5 border-rose-500/30' : 'bg-rose-50 border-rose-200'}`}>
-                      <div className="flex items-center gap-3 text-rose-500 mb-4">
-                        <AlertTriangle size={24} />
-                        <h3 className="text-lg font-black tracking-tight">목표 예산 초과 안내 및 비용 절감 제안</h3>
+                  {/* 비용 절감 제안 — 추천이 있으면 항상 표시, 예산 초과 시엔 경고 강조 */}
+                  {res.financial.recommendations && res.financial.recommendations.length > 0 && (() => {
+                    const overBudget = res.financial.target_budget > 0 && res.financial.capital_cost > res.financial.target_budget;
+                    return (
+                    <div className={`border-2 rounded-3xl p-7 shadow-sm ${overBudget
+                      ? (isDarkMode ? 'bg-rose-500/5 border-rose-500/30' : 'bg-rose-50 border-rose-200')
+                      : (isDarkMode ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50/50 border-emerald-200')}`}>
+                      <div className={`flex items-center gap-3 mb-4 ${overBudget ? 'text-rose-500' : 'text-emerald-600'}`}>
+                        {overBudget ? <AlertTriangle size={24} /> : <PiggyBank size={24} />}
+                        <h3 className="text-lg font-black tracking-tight">
+                          {overBudget ? '목표 예산 초과 안내 및 비용 절감 제안' : '공사비 절감 제안'}
+                        </h3>
                       </div>
                       <p className={`mb-6 text-sm font-medium leading-relaxed ${theme.textMain}`}>
-                        입력하신 목표 예산({formatWon(res.financial.target_budget)})을
-                        <span className="font-black text-rose-500 mx-1.5 underline decoration-rose-500/30 underline-offset-4">
-                          {formatWon(res.financial.capital_cost - res.financial.target_budget)}
-                        </span>
-                        초과했습니다. 적용할 제안을 <span className="font-bold">여러 개 선택</span>한 뒤 아래 <span className="font-bold">[선택 적용]</span> 버튼으로 한 번에 반영하세요.
+                        {overBudget ? (
+                          <>
+                            입력하신 목표 예산({formatWon(res.financial.target_budget)})을
+                            <span className="font-black text-rose-500 mx-1.5 underline decoration-rose-500/30 underline-offset-4">
+                              {formatWon(res.financial.capital_cost - res.financial.target_budget)}
+                            </span>
+                            초과했습니다. 적용할 제안을 <span className="font-bold">여러 개 선택</span>한 뒤 아래 <span className="font-bold">[선택 적용]</span> 버튼으로 한 번에 반영하세요.
+                          </>
+                        ) : (
+                          <>
+                            현재 공사비에서 더 줄일 수 있는 항목입니다. 적용할 제안을 <span className="font-bold">선택</span>한 뒤 아래 <span className="font-bold">[선택 적용]</span> 버튼으로 한 번에 반영하세요.
+                          </>
+                        )}
                       </p>
-                      
-                      {res.financial.recommendations && res.financial.recommendations.length > 0 && (
+
+                      {res.financial.recommendations.length > 0 && (
                         <div className="space-y-4">
                           {(() => {
                             const totalSavedCost = res.financial.recommendations.reduce((acc, curr) => acc + curr.saved_cost, 0);
@@ -550,7 +564,8 @@ export default function ResultDashboard({
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* 핵심 재무/LCC 지표 요약 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -940,6 +955,25 @@ export default function ResultDashboard({
                       </ResponsiveContainer>
                     </div>
                   </motion.div>
+
+                  {/* 추정 가정 고지 — 수치가 전제하는 조건을 투명하게 표시 */}
+                  {res.financial.estimate_notes && res.financial.estimate_notes.length > 0 && (
+                    <div className={`border rounded-2xl p-6 ${isDarkMode ? 'bg-white/[0.03] border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className={`flex items-center gap-2 mb-4 ${theme.textMain}`}>
+                        <Info size={17} className="text-blue-500 shrink-0" />
+                        <h4 className="text-sm font-black tracking-tight">이 수치가 전제하는 가정</h4>
+                        <span className={`text-[11px] font-medium ${theme.textSub}`}>— 결과는 추정치이며, 실제 견적·요금과 차이가 날 수 있습니다</span>
+                      </div>
+                      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 m-0">
+                        {res.financial.estimate_notes.map((n, i) => (
+                          <div key={i} className="flex flex-col gap-0.5">
+                            <dt className={`text-[11px] font-black uppercase tracking-wide ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{n.label}</dt>
+                            <dd className={`m-0 text-xs leading-relaxed ${theme.textSub}`}>{n.note}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

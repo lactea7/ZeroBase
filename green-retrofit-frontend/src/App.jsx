@@ -73,6 +73,8 @@ import { STRUCTURAL_MATERIALS } from './data/structuralMaterials';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
 import { LOADING_MESSAGES, DIR_MAP } from './utils/format';
 import { getPanesCategory, getCoatingType } from './utils/surface';
+import { getZebGradeInfo, buildAnnualChartData, buildCashFlowData } from './utils/resultData';
+import { applyRecommendation } from './utils/recommendationActions';
 import ScheduleEditor from './components/ScheduleEditor';
 import ZeroBaseLanding from './components/landing/ZeroBaseLanding';
 import { REGION_LATITUDES } from './utils/solarHelper';
@@ -619,7 +621,9 @@ export default function App() {
       setStep('upload');
     } catch (error) {
       console.error('파싱 에러:', error);
-      setUploadError('백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.');
+      // 백엔드가 원인을 알려주면(400 detail 등) 그대로 보여준다 — "서버 응답 없음"으로 뭉개지 않기
+      const detail = error?.response?.data?.detail;
+      setUploadError(detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.');
       setStep('upload');
     }
   };
@@ -678,118 +682,13 @@ export default function App() {
   };
 
   // 제안 1건의 상태 변경만 수행하고, 무엇을 바꿨는지 요약 문자열을 반환한다.
-  // (alert/화면이동은 호출하는 쪽에서 일괄 처리 → 여러 제안을 한 번에 적용 가능)
-  const applyRecommendationChanges = (type) => {
-    if (type === 'window') {
-      // gbXML 모델은 별도 Window 면이 없고 벽면의 WWR/glazingId로 창을 표현한다.
-      // 따라서 Window/Skylight 면뿐 아니라 '창을 가진 면'(glazingId 지정 or wwr>0)도 하향해야
-      // 백엔드 창호비가 실제로 줄어든다. (기존엔 type 체크만 해 gbXML에서 무반응이었음)
-      let changed = 0;
-      setSurfaces((prev) =>
-        prev.map((s) => {
-          const hasGlass =
-            s.type === 'Window' || s.type === 'Skylight' ||
-            s.glazingId != null ||
-            ((s.wwr && s.wwr > 0) && /wall/i.test(s.type || ''));
-          if (hasGlass && s.glazingId !== 42) {
-            changed++;
-            return { ...s, glazingId: 42 }; // 일반 복층 유리(ID 42)로 하향
-          }
-          return s;
-        })
-      );
-      return changed > 0 ? `창호 ${changed}개 면을 일반 복층유리로 하향` : null;
-    } else if (type === 'insulation') {
-      // 모든 구조체의 단열재를 일반 등급 제품(비드법 1종 1호, ID 1)으로 일괄 교체
-      const stdProduct = INSULATION_TYPES.find(p => p.tier === 'standard') || INSULATION_TYPES[0];
-      
-      const newOverrides = { ...constructionOverrides };
-      const updatedUValues = {};
-
-      let changedCount = 0;
-
-      // 1. 기존 오버라이드 중 고성능 다운그레이드
-      Object.keys(newOverrides).forEach((id) => {
-        if (newOverrides[id].tier === 'premium' || newOverrides[id].tier === 'high') {
-          changedCount++;
-          const newOverride = { insulationId: stdProduct.id, tier: 'standard', thickness: newOverrides[id].thickness || 100 };
-          
-          const s = surfaces.find(surf => surf.id === id);
-          if (s && materials?.constructions) {
-            const c_ref = s.constructionRef || s.constructionId;
-            const c = materials.constructions.find(con => con.id === c_ref);
-            if (c) {
-              const newU = calculateUpdatedUValue(c, newOverride);
-              newOverride.uValue = newU;
-              updatedUValues[id] = newU;
-            }
-          }
-          newOverrides[id] = newOverride;
-        }
-      });
-
-      // 2. 오버라이드가 없는 원본 고성능 벽체 추가
-      if (materials?.constructions) {
-        surfaces.forEach((s) => {
-          if (!newOverrides[s.id]) {
-            const c_ref = s.constructionRef || s.constructionId;
-            const c = materials.constructions.find(con => con.id === c_ref);
-            if (c) {
-              const insul = c.layers?.find(l => l.isInsulation);
-              if (insul && insul.conductivity <= 0.045) {
-                changedCount++;
-                const newOverride = { insulationId: stdProduct.id, tier: 'standard', thickness: insul.thickness || 100 };
-                const newU = calculateUpdatedUValue(c, newOverride);
-                newOverride.uValue = newU;
-                updatedUValues[s.id] = newU;
-                newOverrides[s.id] = newOverride;
-              }
-            }
-          }
-        });
-      }
-
-      setConstructionOverrides(newOverrides);
-      if (Object.keys(updatedUValues).length > 0) {
-        setSurfaces(prevSurfaces => prevSurfaces.map(s => 
-          updatedUValues[s.id] !== undefined ? { ...s, uValue: updatedUValues[s.id] } : s
-        ));
-      }
-      
-      return changedCount > 0 ? `단열재 ${changedCount}개 외벽을 일반 등급(EPS/미네랄울)으로 하향` : null;
-    } else if (type === 'hvac') {
-      // 지열이면 지열 해제, 아니면 고효율 설비를 표준 개별 냉난방기(Generic, id 5)로 하향
-      if (projectData.geothermalApplied) {
-        setProjectData((prev) => ({ ...prev, geothermalApplied: false }));
-        return '지열(Geothermal) 시스템 도입 취소';
-      }
-      const targets = zones.filter((z) => z.isConditioned !== false && z.hvacSystemId !== 5);
-      if (targets.length === 0) return null;
-      setZones((prev) =>
-        prev.map((z) =>
-          z.isConditioned !== false && z.hvacSystemId !== 5 ? { ...z, hvacSystemId: 5 } : z
-        )
-      );
-      return `냉난방 설비 ${targets.length}개 존을 표준 설비로 변경`;
-    } else if (type === 'led') {
-      const manualZones = zones.filter((z) => z.ledFixtureCount > 0);
-      if (manualZones.length > 0) {
-        const reducedCount = manualZones.reduce(
-          (acc, z) => acc + (z.ledFixtureCount - Math.floor(z.ledFixtureCount * 0.5)),
-          0
-        );
-        setZones((prev) =>
-          prev.map((z) =>
-            z.ledFixtureCount > 0 ? { ...z, ledFixtureCount: Math.floor(z.ledFixtureCount * 0.5) } : z
-          )
-        );
-        return `LED 교체 수량 ${reducedCount}개 축소`;
-      }
-      setProjectData((prev) => ({ ...prev, ledReductionActive: true }));
-      return '비필수 구역 LED 교체 제외';
-    }
-    return null;
-  };
+  // (도메인 로직은 utils/recommendationActions.js — 여기선 상태/세터만 연결)
+  const applyRecommendationChanges = (type) =>
+    applyRecommendation(type, {
+      surfaces, zones, projectData, constructionOverrides, materials,
+      setSurfaces, setZones, setProjectData, setConstructionOverrides,
+      calculateUpdatedUValue,
+    });
 
   // 선택한 여러 제안을 한 번에 적용 → 안내 1회 + 화면 이동 1회
   const handleApplyRecommendations = (types) => {
@@ -843,55 +742,10 @@ export default function App() {
       setActiveResultTab('energy'); 
     } catch (error) {
       clearInterval(interval);
-      alert('백엔드 시뮬레이션 연동에 실패했습니다. 파이썬 서버가 정상 동작하는지 확인하세요.');
+      const detail = error?.message ? `\n\n원인: ${error.message}` : '';
+      alert(`시뮬레이션에 실패했습니다. 백엔드 서버 상태를 확인하세요.${detail}`);
       setStep('floorView');
     }
-  };
-
-  const getZebGradeInfo = (rate) => {
-    const r = Number(rate) || 0;
-    if (r >= 100) return '1등급';
-    if (r >= 80) return '2등급';
-    if (r >= 60) return '3등급';
-    if (r >= 40) return '4등급';
-    if (r >= 20) return '5등급';
-    return '등급 외';
-  };
-
-  const getAnnualChartData = () => {
-    if (!res || !res.matrix) return [];
-    const m = res.matrix;
-    const categoriesList = [
-      { id: 'heating', name: '난방', color: '#F87171' },
-      { id: 'cooling', name: '냉방', color: '#60A5FA' },
-      { id: 'hotwater', name: '급탕', color: '#FB923C' },
-      { id: 'lighting', name: '조명', color: '#FACC15' },
-      { id: 'ventilation', name: '환기', color: '#4ADE80' },
-      { id: 'equipment', name: '기기', color: '#A78BFA' },
-      { id: 'renewable', name: '신재생', color: '#2DD4BF' },
-    ];
-
-    return [
-      {
-        name: '요구량',
-        ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.req || 0) }), {}),
-      },
-      {
-        name: '소요량',
-        ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.con || 0) }), {}),
-      },
-      {
-        name: '1차 소요량',
-        ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.con || 0) * 2.75 }), {}),
-      },
-      {
-        name: '등급용 1차',
-        ...categoriesList.reduce((acc, c) => ({
-          ...acc,
-          [c.name]: c.id === 'equipment' ? 0 : Number(m[c.id]?.con || 0) * 2.1
-        }), {}),
-      },
-    ];
   };
 
   // 랜딩의 따뜻한 톤(브라운 #1a120d / 크림 #f3ece1 / 테라코타)을 앱 전역으로 이어감
@@ -939,63 +793,8 @@ export default function App() {
     if (match) setEditState((prev) => ({ ...prev, glazingId: match.id }));
   };
 
-  // 💡 LCC(현금흐름) 차트 데이터 계산 로직
-  const getCashFlowData = () => {
-    if (!res || !res.financial) return [];
-
-    // 백엔드에서 계산된 값이 넘어오면 그것을 우선 사용
-    const f = res.financial;
-    const retrofitRunningCost = f.total_energy_bill;
-    const capitalCost = f.capital_cost;
-    // 기준 건물 운영비: 백엔드 baseline_assumptions와 단일 소스로 공유 → 차트/NPV/IRR 일관.
-    //   실측 입력 시 base_running_cost가 내려오고, 없으면 1.6배 추정으로 환산.
-    const ba = f.baseline_assumptions || {};
-    const baseMultiplier = ba.running_cost_multiplier || 1.6;
-    const baseRunningCost = ba.base_running_cost > 0 ? ba.base_running_cost : retrofitRunningCost * baseMultiplier;
-    const annualSavings = baseRunningCost - retrofitRunningCost;
-    
-    const params = f.lcc_parameters || { inflation_rate: 2, lifecycle_years: 15 };
-    const inflationRate = params.inflation_rate / 100;
-    const years = params.lifecycle_years || 20;
-
-    const data = [];
-    let cumulativeBase = 0;
-    let cumulativeRetrofit = -capitalCost; 
-
-    for (let year = 0; year <= years; year++) {
-      if (year > 0) {
-        cumulativeBase -= baseRunningCost * Math.pow(1 + inflationRate, year - 1);
-        cumulativeRetrofit -= retrofitRunningCost * Math.pow(1 + inflationRate, year - 1);
-      }
-
-      data.push({
-        year: `${year}년차`,
-        '기존 노후건물 유지': Math.round(cumulativeBase),
-        '친환경 리모델링 (투자+운영)': Math.round(cumulativeRetrofit),
-        '누적 순이익 (ROI)': Math.round(cumulativeRetrofit - cumulativeBase),
-      });
-    }
-    
-    // 고급 재무 지표
-    const npv = f.npv || 0;
-    const irr = f.irr || 0;
-    
-    // payback 추산 (수익이 0을 돌파하는 시점)
-    let paybackYears = capitalCost / annualSavings; 
-    let exactPayback = data.findIndex(d => d['누적 순이익 (ROI)'] >= 0);
-    if(exactPayback > 0) {
-        // 선형 보간으로 소수점 연도 추정
-        const prev = data[exactPayback - 1]['누적 순이익 (ROI)'];
-        const curr = data[exactPayback]['누적 순이익 (ROI)'];
-        paybackYears = (exactPayback - 1) + Math.abs(prev) / (curr - prev);
-    } else {
-        paybackYears = 0;
-    }
-
-    return { data, annualSavings, paybackYears, npv, irr, params, baselineAssumptions: f.baseline_assumptions };
-  };
-
-  const lccAnalysis = getCashFlowData();
+  // 💡 LCC(현금흐름) 차트 데이터 (utils/resultData.js)
+  const lccAnalysis = buildCashFlowData(res);
   const inactiveBtnClass = isDarkMode
     ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
     : 'text-slate-500 hover:text-slate-700 hover:bg-slate-300';
@@ -1266,7 +1065,7 @@ export default function App() {
                       >
                         <UploadCloud size={60} className="text-emerald-500 mb-6 group-hover:scale-110 transition-transform" />
                         <h3 className="text-2xl font-black mb-2">gbXML 모델 업로드</h3>
-                        <p className={`text-sm text-center ${theme.textSub}`}>클릭하여 파일을 선택하세요 (.xml)</p>
+                        <p className={`text-sm text-center ${theme.textSub}`}>클릭하여 파일을 선택하세요 (.xml / .gbxml)</p>
                         <input
                           type="file"
                           accept=".xml,.gbxml"
@@ -1875,7 +1674,7 @@ export default function App() {
               setStep={setStep}
               handleApplyRecommendations={handleApplyRecommendations}
               getZebGradeInfo={getZebGradeInfo}
-              getAnnualChartData={getAnnualChartData}
+              getAnnualChartData={() => buildAnnualChartData(res)}
               viewMode={viewMode}
               setViewMode={setViewMode}
               sunMonth={sunMonth}
