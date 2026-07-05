@@ -201,6 +201,8 @@ export default function App() {
 
   const [surfaces, setSurfaces] = useState([]);
   const [zones, setZones] = useState([]);
+  // 업로드 원본(개선 전) 스냅샷 — 백엔드가 전/후 비교 시뮬레이션의 기준선으로 사용
+  const [originalModel, setOriginalModel] = useState(null);
   const [activeFloor, setActiveFloor] = useState(1);
   const [editMode, setEditMode] = useState('surface');
   const [selectedId, setSelectedId] = useState(null);
@@ -543,7 +545,8 @@ export default function App() {
     }
     setSurfaces(newSurfaces);
     setZones(newZones);
-    
+    setOriginalModel({ zones: newZones, surfaces: newSurfaces });
+
     // 샘플용 가상 단열재 데이터 주입 (DB 연동/단열재 표시 기능 활성화용)
     setMaterials({
       summary: { premium: 0, high: 2, standard: 0, basic: 0 },
@@ -607,7 +610,8 @@ export default function App() {
           outletLoadType: z.outletLoadType || 'sum',
         }));
         setZones(mappedZones);
-        
+        setOriginalModel({ zones: mappedZones, surfaces: response.data.surfaces || [] });
+
         // 💡 면 갭 경고 처리
         const warnings = response.data.warnings || [];
         if (warnings.length > 0) {
@@ -730,6 +734,9 @@ export default function App() {
         surfaces: surfaces,
         materials: materials,
         constructionOverrides: constructionOverrides,
+        // 전/후 비교: 업로드 원본을 함께 보내 백엔드가 '개선 전' 건물을 별도 시뮬레이션
+        // (실측 요금 입력 시 백엔드가 전-시뮬을 생략하고 실측을 기준선으로 사용)
+        baselineModel: originalModel || {},
         // lccParameters / hvacUpgradeActive는 projectData 안에 포함되어 함께 전송됨
         // (백엔드는 projectData에서 읽음 — 최상위로 보내면 SimulationPayload에서 누락됨)
       };

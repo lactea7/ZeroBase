@@ -675,11 +675,13 @@ export default function ResultDashboard({
                   {lccAnalysis.baselineAssumptions && (() => {
                     const ba = lccAnalysis.baselineAssumptions;
                     const isActual = ba.source === 'actual_bill' || ba.source === 'actual_usage';
+                    const isSimulated = ba.source === 'simulated';
                     const srcLabel = ba.source === 'actual_bill' ? '실측(요금 입력)'
-                      : ba.source === 'actual_usage' ? '실측(사용량 입력)' : '추정';
+                      : ba.source === 'actual_usage' ? '실측(사용량 입력)'
+                      : isSimulated ? '개선 전 건물 시뮬레이션' : '추정';
                     return (
                       <div className={`text-[11px] leading-relaxed px-1 ${theme.textSub} opacity-80`}>
-                        <span className={`inline-block px-2 py-0.5 mb-1.5 rounded-full text-[10px] font-black ${isActual ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}>
+                        <span className={`inline-block px-2 py-0.5 mb-1.5 rounded-full text-[10px] font-black ${(isActual || isSimulated) ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}>
                           기준 건물: {srcLabel}
                         </span>
                         <p className="flex items-start gap-1.5">
@@ -689,6 +691,13 @@ export default function ResultDashboard({
                               NPV·IRR·회수기간은 입력하신 <b>실제 기존 건물 운영비</b>
                               (연 {Math.round((ba.base_running_cost || 0) / 10000).toLocaleString()}만원,
                               절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다.
+                            </span>
+                          ) : isSimulated ? (
+                            <span>
+                              업로드하신 <b>원본 건물(개선 전)을 별도 시뮬레이션</b>한 운영비
+                              (연 {Math.round((ba.base_running_cost || 0) / 10000).toLocaleString()}만원,
+                              절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다 — 전/후 모두 동일한
+                              물리 엔진으로 계산된 값입니다.
                             </span>
                           ) : (
                             <span>
