@@ -26,12 +26,16 @@ def test_matrix_golden(result):
 
 
 def test_capital_cost_golden(result):
+    # 2026-07-05 갱신 2건:
+    #  - 존 실면적 파싱: LED가 균등분할 대신 실측 거주면적 기준
+    #  - 창호 DB 정제: 바닥재 오염 제거 → '창세트' 실단가(169,500/㎡)로 창호비 현실화
+    #    (기존 15.1M은 오염 중앙값 27,486→가드 50,000원이 만든 과소평가)
     fin = result["financial"]
-    assert fin["capital_cost"] == 213_092_138
+    assert fin["capital_cost"] == 247_931_532
     assert fin["cost_details"] == {
-        "window": 15_081_059,
-        "insulation": 14_267_000,
-        "led": 8_110_719,
+        "window": 51_124_790,
+        "insulation": 12_840_300,
+        "led": 8_333_082,
         "hvac": 175_633_358,
     }
 
@@ -44,8 +48,8 @@ def test_energy_bills_golden(result):
 
 def test_lcc_metrics_golden(result):
     fin = result["financial"]
-    assert fin["npv"] == pytest.approx(-168_261_791, rel=1e-6)
-    assert fin["irr"] == pytest.approx(-14.26, abs=0.01)
+    assert fin["npv"] == pytest.approx(-203_271_679, rel=1e-6)
+    assert fin["irr"] == pytest.approx(-15.01, abs=0.01)
 
 
 def test_monthly_structure(result):

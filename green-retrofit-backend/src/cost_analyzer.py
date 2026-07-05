@@ -73,17 +73,24 @@ class LCCAnalyzer:
 
     # 공종별 단가 타당성 범위 (원). DB 추출값이 벗어나면 클램프 + 경고 → 오매핑 재발 방지.
     PRICE_BOUNDS = {
-        "window_m2":     (50_000, 600_000),   # 창호 ₩/㎡
-        "insulation_m2":  (5_000, 120_000),   # 단열재 ₩/㎡
+        "window_m2":     (50_000, 600_000),   # 창호(창세트) ₩/㎡
+        "insulation_m2":  (3_000, 120_000),   # 단열재 ₩/㎡ (EPS 100mm 실거래 ~4천원대)
         "led_ea":        (20_000, 500_000),   # LED 등기구 ₩/개
     }
 
+    # 두께당(T=1㎜) 단가로 등재된 단열재의 ㎡ 환산 기준 두께.
+    # (EPS류가 '비드법 2종 1호(T=1㎜) 109원/㎡'식으로 등재됨 → ×100mm = 10,900원/㎡)
+    STD_INSUL_THICKNESS_MM = 100
+
     def _clamp_price(self, value, key, label=""):
-        """DB에서 뽑은 단가가 상식 범위를 벗어나면 경계값으로 보정하고 경고를 남긴다."""
+        """DB에서 뽑은 단가가 상식 범위를 벗어나면 경계값으로 보정하고 경고를 남긴다.
+        발동 내역은 load_warnings에 쌓아 calculate()가 사용자 경고로 노출한다."""
         lo, hi = self.PRICE_BOUNDS[key]
         v = min(max(value, lo), hi)
         if v != value:
-            print(f"  ⚠️ 단가 가드: {label or key} ₩{int(value):,} → ₩{int(v):,} (정상범위 {lo:,}~{hi:,})")
+            msg = f"단가 가드 발동: {label or key} DB값 ₩{int(value):,} → ₩{int(v):,} 보정 (해당 단가는 실DB가 아닌 보정값)"
+            print(f"  ⚠️ {msg}")
+            self.load_warnings.append(msg)
         return v
 
     HEATING_EFF_DB = { 
@@ -102,6 +109,7 @@ class LCCAnalyzer:
 
     def __init__(self, db_dir: str):
         self.db_dir = db_dir
+        self.load_warnings = []   # DB 로드 중 품질 이슈(가드 발동 등) — calculate()가 노출
         self.cost_db = self._load_cost_db()
 
     @staticmethod
@@ -271,7 +279,14 @@ class LCCAnalyzer:
                                 # 접착제, 실링재 등 비창호 자재 제외
                                 if any(excl in text_chunk for excl in ['접착제', '실링재', '코킹', '테이프', '부자재']):
                                     continue
-                                
+
+                                # 창호 '완제품(창세트)'만 등급 단가에 반영.
+                                # 기존 키워드 필터는 '복층 비닐 타일'(바닥재), '발포유리보드'(단열재)
+                                # 같은 오염 행이 섞여 standard 등급 중앙값이 27,486원(바닥재값)으로
+                                # 붕괴됐었다. 리트로핏 시나리오도 창세트 교체이므로 완제품이 맞다.
+                                if not ('창세트' in text_chunk or '창 세트' in text_chunk):
+                                    continue
+
                                 if price > 10000 and '㎡' in item_unit:
                                     tier = self._classify_window_tier(text_chunk)
                                     tier_prices[tier].append(price)
@@ -335,8 +350,20 @@ class LCCAnalyzer:
                                 else:
                                     m2_insul = insul_items
                                 
-                                m2_valid = m2_insul[m2_insul['price_num'] > 0]
+                                m2_valid = m2_insul[m2_insul['price_num'] > 0].copy()
                                 if not m2_valid.empty:
+                                    # 두께당 단가(T=1㎜) 행 환산: EPS류는 'T=1㎜' ㎡·mm 단가로
+                                    # 등재돼 있어(예: 109원) 그대로 쓰면 중앙값이 ₩106으로 붕괴.
+                                    # 표준 시공 두께(100mm)를 곱해 다른 ㎡ 단가와 정합시킨다.
+                                    # 표기 2종: '(T=1㎜)' 그리고 '900×1800㎜×1T'(1T=두께 1mm)
+                                    spec_col = next((c for c in df.columns if '규격' in str(c)), None)
+                                    if spec_col is not None:
+                                        per_mm = m2_valid[spec_col].astype(str).str.contains(
+                                            r'T\s*=\s*1\s*(?:㎜|mm)|[×xX]\s*1\s*T\b', na=False, regex=True)
+                                        m2_valid.loc[per_mm, 'price_num'] *= self.STD_INSUL_THICKNESS_MM
+                                        if per_mm.any():
+                                            print(f"  🔧 두께당(T=1㎜) 단가 {per_mm.sum()}건 → {self.STD_INSUL_THICKNESS_MM}mm 환산")
+
                                     # 등급별 단가와 동일하게 중앙값 + 타당성 클램프 (평균은 이상치에 민감)
                                     insul_fallback = int(self._clamp_price(m2_valid['price_num'].median(), "insulation_m2", "단열 폴백"))
                                     cost_db_dict["avg_prices"]["insulation"] = insul_fallback
@@ -350,7 +377,7 @@ class LCCAnalyzer:
                                             if any(kw.lower() in text_chunk.lower() for kw in tier_info["keywords"]):
                                                 insul_tier_prices[tier_key].append(price)
                                                 break
-                                    
+
                                     print(f"  📊 단열재 DB: ㎡ 단위 {len(m2_valid)}건, 중앙값 ₩{insul_fallback:,}/㎡")
                             
                             cost_db_dict["status"]["eco_loaded"] = True
@@ -386,6 +413,7 @@ class LCCAnalyzer:
         if total_window_items > 0:
             print(f"  ✅ 창호 성능 등급별 단가 매핑 완료! (총 {total_window_items}건 분류)")
 
+
         # 단열재 등급별 평균 단가 최종 산출
         for tier_key, tier_info in self.INSULATION_TIERS.items():
             prices = insul_tier_prices[tier_key]
@@ -403,7 +431,47 @@ class LCCAnalyzer:
                     "label": tier_info["label"]
                 }
 
+        # 등급 단조성 보정 — 절감액(상위-하위 차액) 왜곡 방지
+        _order = ["basic", "standard", "high", "premium"]
+        self._enforce_tier_order(cost_db_dict["window_tiers"], _order, "창호")
+        self._enforce_tier_order(cost_db_dict["insulation_tiers"], _order, "단열재")
+
         return cost_db_dict
+
+    def _enforce_tier_order(self, tiers: dict, order: list, kind: str):
+        """등급 단가가 성능 순서(basic≤standard≤high≤premium)를 지키도록 보정.
+
+        1) 실데이터(count>0) 등급 간 역전 → 하위 등급 값으로 끌어올리고 경고
+           (역전 = DB가 등급을 구분하지 못한다는 신호. 차액 기반 절감액이 왜곡되지 않게 함)
+        2) 데이터 없는 등급의 기본값은 이웃 실데이터 범위 안으로 클램프
+           (예: 저성능 기본값 8,000원이 실측 일반 등급 4,500원보다 비싼 역전 방지)
+        """
+        prev = None
+        for tk in order:
+            cur = tiers.get(tk)
+            if not cur or cur.get("count", 0) == 0:
+                continue
+            if prev is not None and cur["avg"] < prev["avg"]:
+                self.load_warnings.append(
+                    f"{kind} DB 등급 역전: {cur['label']}({cur['avg']:,}원) < {prev['label']}({prev['avg']:,}원) — 하위 등급 단가로 보정"
+                )
+                cur["avg"] = prev["avg"]
+            prev = cur
+
+        reals = [(i, tiers[tk]["avg"]) for i, tk in enumerate(order)
+                 if tiers.get(tk, {}).get("count", 0) > 0]
+        for i, tk in enumerate(order):
+            cur = tiers.get(tk)
+            if not cur or cur.get("count", 0) > 0:
+                continue
+            lower = max((avg for j, avg in reals if j < i), default=None)
+            upper = min((avg for j, avg in reals if j > i), default=None)
+            v = cur["avg"]
+            if lower is not None:
+                v = max(v, lower)
+            if upper is not None:
+                v = min(v, upper)
+            cur["avg"] = v
 
     def match_window_price(self, target_u: float, target_shgc: float) -> tuple:
         """U-Value를 기반으로 가장 적합한 성능 등급의 평균 단가를 보간하여 반환합니다."""
@@ -832,7 +900,7 @@ class LCCAnalyzer:
 
             # 공사비 비중 새너티 점검: 단가/물량 오매핑으로 한 공종이 비정상 지배하면 경고
             # (설비는 전면교체 시 정상적으로 클 수 있어 임계 제외)
-            cost_warnings = []
+            cost_warnings = list(self.load_warnings)  # DB 품질 이슈(가드 발동 등)도 사용자에게 노출
             if total_capital_cost > 0:
                 _shares = {"창호": window_cost, "단열": insulation_cost, "LED": led_cost}
                 for _label, _val in _shares.items():

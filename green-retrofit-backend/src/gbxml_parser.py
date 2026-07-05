@@ -749,12 +749,23 @@ def parse_gbxml_to_json(filepath: str):
         for w in gap_warnings:
             print(f"   {w['message']}")
 
+    # 존별 실제 바닥면적: 해당 존의 floor/slab 면 면적 합.
+    # 없으면 cost_analyzer가 균등분할로 폴백하지만, 균등분할은 '면적 비율'을
+    # '존 개수 비율'로 왜곡해 비거주 면적 기반 산정(LED·설비 절감)을 부정확하게 만든다.
+    zone_floor_area = {}
+    for s in surfaces_list:
+        s_type = (s.get("type") or "").lower()
+        if ("floor" in s_type or "slab" in s_type) and s.get("zone"):
+            zone_floor_area[s["zone"]] = zone_floor_area.get(s["zone"], 0.0) + s.get("area", 0.0)
+
     # 6. 존(Zone) 리스트 완성
     for sp_id, sp_data in spaces.items():
+        z_area = round(zone_floor_area.get(sp_data["name"], 0.0), 2)
         zones_list.append({
             "id": sp_data["name"],
             "floor": sp_data["floor"],
             "height": sp_data.get("height", 3.0),  # 💡 [신규] 역산된 높이
+            "area": z_area,   # 실측 바닥면적 (0이면 소비처에서 폴백)
             # gbXML에 spaceType이 없으므로 Space 이름으로 용도 추론 (못 찾으면 1105)
             "activityId": activity_id_from_space_name(sp_data.get("name", "")),
             "isConditioned": True,
