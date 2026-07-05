@@ -8,6 +8,21 @@ try:
 except ImportError:
     pd = None
 
+# 비거주 구역 판별 키워드 — LED 공사 면적 축소·설비(냉방기) 설치 제외 등에 공용.
+# (ep_simulator도 import: 계단실 등엔 WindowAC를 설치하지 않아 냉방부하 0 → 사이징 실패 방지)
+NON_HABITABLE_KEYWORDS = [
+    'stair', 'chase', 'shaft', 'lift', 'elevator', 'store', 'storage',
+    'parking', 'garage', 'vent', 'mechanical', 'duct', 'pipe',
+    '계단', '엘리베이터', '창고', '주차', '기계', '덕트'
+]
+
+
+def is_non_habitable(zone: dict) -> bool:
+    """존 용도명(파서는 id에 담음)으로 비거주 구역 여부 판별."""
+    z_name = (zone.get('name') or zone.get('id') or '').lower()
+    return any(kw in z_name for kw in NON_HABITABLE_KEYWORDS)
+
+
 class LCCAnalyzer:
     """
     Building Energy Modeling (BEM) 경제성 및 요금(LCC) 분석 오픈소스 모듈
@@ -29,7 +44,11 @@ class LCCAnalyzer:
     # 열원에 따라 요금·1차·CO2가 모두 달라진다. 지열/히트펌프는 전기로 본다.
     # 전기=한전 공식, 지역난방=KDHC 공식. (가스·등유는 미사용으로 제외)
     HEAT_SOURCE_DB = {
+        # 가스/등유 단가는 GR_Simulator(Site2Cost) 검증값 — 지역난방(94.98)이 당사 96.6과
+        # 일치해 상호 신뢰 확인됨. CO2는 연료 연소 배출계수.
+        1:  {"label": "가스보일러",     "rate": 78.12,            "primary": 1.10,  "co2": 0.232},
         2:  {"label": "전기(히트펌프)", "rate": ELEC_RATE_WINTER, "primary": 2.75,  "co2": 0.466},
+        4:  {"label": "등유보일러",     "rate": 141.92,           "primary": 1.10,  "co2": 0.260},
         11: {"label": "지역난방",       "rate": HEAT_RATE_KWH,    "primary": 0.728, "co2": 0.200},
     }
     DEFAULT_HEAT_SOURCE = 11   # 미지정 시 지역난방(기존 동작과 동일)
@@ -506,25 +525,40 @@ class LCCAnalyzer:
             total_c_rate_w = np.zeros(total_rows)
             total_h_rate_w = np.zeros(total_rows)
 
-            # 실기기(PTHP) 모드: EnergyPlus가 산출한 '실제 전력 소비'를 그대로 사용
-            # (이상부하처럼 COP를 다시 곱하지 않음). 난방도 전기(히트펌프)이므로 전기요금으로 청구.
+            # 실기기 모드: EnergyPlus가 산출한 '실제 소비'를 그대로 사용 (COP 나눗셈 근사 제거)
+            #   pthp — 히트펌프(전기/지열): 난방·냉방 모두 전기 미터
+            #   fuel — 연료 보일러+개별냉방(가스/등유/지역난방): 난방은 Heating:<연료> 미터(연소효율
+            #          반영된 연료 소비), 냉방은 Cooling:Electricity(DX 실소비)
             use_pthp = kwargs.get("use_pthp", False)
+            hvac_mode = kwargs.get("hvac_mode") or ("pthp" if use_pthp else "ideal")
+            heating_fuel = kwargs.get("heating_fuel")
+            heating_fuel_eff = kwargs.get("heating_fuel_eff") or 0.9
             # 난방 효율은 '프로젝트 열원'으로 결정해야 함(존 heatingFuelId 기본값=전기 오용 방지).
             # 지역난방(11)인데 전기 히트펌프 COP를 적용하던 버그 수정.
             proj_heat_source = kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
             fan_kwh = np.zeros(total_rows)
 
-            if use_pthp:
+            if hvac_mode in ("pthp", "fuel"):
                 sh_cols = [c for c in df.columns if 'Zone Air System Sensible Heating Energy' in c]
                 sc_cols = [c for c in df.columns if 'Zone Air System Sensible Cooling Energy' in c]
                 total_h_req_kwh = (df[sh_cols].sum(axis=1).values / 3600000.0) if sh_cols else np.zeros(total_rows)
                 total_c_req_kwh = (df[sc_cols].sum(axis=1).values / 3600000.0) if sc_cols else np.zeros(total_rows)
-                he_col = next((c for c in df.columns if 'Heating:Electricity' in c and '[J]' in c), None)
                 ce_col = next((c for c in df.columns if 'Cooling:Electricity' in c and '[J]' in c), None)
                 fe_col = next((c for c in df.columns if 'Fans:Electricity' in c and '[J]' in c), None)
-                # 실소비(전력). 미터가 없으면 요구량/대표COP로 보수적 추정.
-                total_h_con_kwh = (df[he_col].values / 3600000.0) if he_col else (total_h_req_kwh / 3.5)
-                total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 4.2)
+
+                if hvac_mode == "pthp":
+                    he_col = next((c for c in df.columns if 'Heating:Electricity' in c and '[J]' in c), None)
+                    # 실소비(전력). 미터가 없으면 요구량/대표COP로 보수적 추정.
+                    total_h_con_kwh = (df[he_col].values / 3600000.0) if he_col else (total_h_req_kwh / 3.5)
+                    total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 4.2)
+                else:
+                    hf_col = next((c for c in df.columns
+                                   if heating_fuel and f'Heating:{heating_fuel}' in c and '[J]' in c), None)
+                    # 난방 = 연료 실소비(연소효율 반영). 미터 없으면 요구량/효율로 추정.
+                    total_h_con_kwh = (df[hf_col].values / 3600000.0) if hf_col else (total_h_req_kwh / heating_fuel_eff)
+                    # 냉방 = 개별 에어컨 DX 실소비(전기)
+                    total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 3.3)
+
                 fan_kwh = (df[fe_col].values / 3600000.0) if fe_col else np.zeros(total_rows)
             else:
                 for z in zones:
@@ -730,21 +764,14 @@ class LCCAnalyzer:
             
             # LED 공사 면적 산출: 비거주 구역(계단실, 기계실, 창고, 엘리베이터 등)은
             # 조명 밀도가 낮으므로 해당 면적의 30%만 LED 공사 대상으로 반영
-            NON_HABITABLE_KEYWORDS = [
-                'stair', 'chase', 'shaft', 'lift', 'elevator', 'store', 'storage',
-                'parking', 'garage', 'vent', 'mechanical', 'duct', 'pipe',
-                '계단', '엘리베이터', '창고', '주차', '기계', '덕트'
-            ]
             habitable_area = 0.0
             non_habitable_area = 0.0
             for z in zones:
-                # gbXML 파서는 존 용도명을 'id'에 담는다('name' 미발급). id 폴백이 없으면
-                # 모든 존이 거주구역으로 분류돼 LED 감면 추천이 재실행해도 무효(비용 동일)였음.
-                z_name = (z.get('name') or z.get('id') or '').lower()
+                # gbXML 파서는 존 용도명을 'id'에 담는다('name' 미발급) → is_non_habitable이 폴백 처리
                 z_area = z.get('area', 0)
                 if not z_area:
                     z_area = total_area / max(len(zones), 1)
-                if any(kw in z_name for kw in NON_HABITABLE_KEYWORDS):
+                if is_non_habitable(z):
                     non_habitable_area += z_area
                 else:
                     habitable_area += z_area
@@ -913,12 +940,15 @@ class LCCAnalyzer:
             retrofit_running_cost = annual_elec_bill + annual_heat_bill
 
             # ── 기준 건물(리모델링 전) 연간 운영비 산정 ──
-            # 우선순위: ① 실측 요금 → ② 실측 사용량(공식 단가 환산) → ③ 1.6배 추정(fallback)
+            # 우선순위: ① 실측 요금 → ② 실측 사용량(공식 단가 환산)
+            #          → ③ 개선 전 건물 물리 시뮬레이션(전/후 비교) → ④ 1.6배 추정(fallback)
             #   어떤 기준을 썼는지 baseline_source로 내려보내 UI가 명시 고지한다.
             act_elec_bill = kwargs.get("actual_elec_bill")
             act_heat_bill = kwargs.get("actual_heat_bill")
             act_elec_kwh  = kwargs.get("actual_elec_kwh")
             act_heat_kwh  = kwargs.get("actual_heat_kwh")
+            sim_base_elec = kwargs.get("sim_base_elec_bill")
+            sim_base_heat = kwargs.get("sim_base_heat_bill")
             avg_elec_rate = (self.ELEC_RATE_SUMMER + self.ELEC_RATE_WINTER + self.ELEC_RATE_SPRING) / 3.0
 
             if act_elec_bill or act_heat_bill:
@@ -927,13 +957,17 @@ class LCCAnalyzer:
             elif act_elec_kwh or act_heat_kwh:
                 base_running_cost = (act_elec_kwh or 0.0) * avg_elec_rate + (act_heat_kwh or 0.0) * heat_src["rate"]
                 baseline_source = "actual_usage"         # 실측(사용량 환산)
+            elif (sim_base_elec or 0) > 0 or (sim_base_heat or 0) > 0:
+                base_running_cost = (sim_base_elec or 0.0) + (sim_base_heat or 0.0)
+                baseline_source = "simulated"            # 개선 전 건물 시뮬레이션(전/후 비교)
             else:
                 base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
                 baseline_source = "estimate"             # 추정(1.6배)
 
             if baseline_source != "estimate" and base_running_cost <= retrofit_running_cost:
                 cost_warnings.append(
-                    "입력한 기존 건물 운영비가 리모델링 후 운영비보다 낮거나 같습니다 — 절감액이 음수가 될 수 있으니 입력값을 확인하세요"
+                    "기존 건물 운영비(실측 또는 개선 전 시뮬레이션)가 리모델링 후 운영비보다 낮거나 같습니다 — "
+                    "절감액이 음수가 될 수 있으니 입력값 또는 개선 항목을 확인하세요"
                 )
 
             cash_flows = [-total_capital_cost]
@@ -1025,6 +1059,8 @@ class LCCAnalyzer:
                         "label": "기존 건물 기준선",
                         "note": ("입력하신 실측 요금/사용량을 기준으로 절감액을 계산했습니다."
                                  if baseline_source in ("actual_bill", "actual_usage") else
+                                 "업로드하신 원본 건물(개선 전)을 별도 시뮬레이션한 운영비를 기준으로 절감액을 계산했습니다."
+                                 if baseline_source == "simulated" else
                                  f"실측 요금 미입력 시 개선 후 운영비의 {self.BASELINE_RUNNING_COST_MULTIPLIER}배를 기존 건물로 가정합니다. 실측 요금을 입력하면 정확도가 올라갑니다.")
                     },
                     {

@@ -69,3 +69,28 @@ def test_geothermal_gets_removal_rec(analyzer, base_kwargs):
 def test_budget_passthrough(analyzer, base_kwargs):
     result = analyzer.calculate(**dict(base_kwargs, target_budget=100_000_000.0))
     assert result["financial"]["target_budget"] == 100_000_000
+
+
+# ── 전/후 비교: 기준선 우선순위 (실측 > 전-시뮬 > 1.6배 추정) ──
+
+def test_simulated_baseline_used_when_no_actuals(analyzer, base_kwargs):
+    result = analyzer.calculate(**dict(base_kwargs),
+                                sim_base_elec_bill=20_000_000.0,
+                                sim_base_heat_bill=8_000_000.0)
+    ba = result["financial"]["baseline_assumptions"]
+    assert ba["source"] == "simulated"
+    assert ba["base_running_cost"] == 28_000_000
+
+
+def test_actual_bill_beats_simulated_baseline(analyzer, base_kwargs):
+    result = analyzer.calculate(**dict(base_kwargs),
+                                actual_elec_bill=30_000_000.0,
+                                sim_base_elec_bill=20_000_000.0)
+    ba = result["financial"]["baseline_assumptions"]
+    assert ba["source"] == "actual_bill"
+    assert ba["base_running_cost"] == 30_000_000
+
+
+def test_estimate_baseline_without_sim_or_actuals(analyzer, base_kwargs):
+    result = analyzer.calculate(**base_kwargs)
+    assert result["financial"]["baseline_assumptions"]["source"] == "estimate"

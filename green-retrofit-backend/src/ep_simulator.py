@@ -15,7 +15,7 @@ try:
 except ImportError:
     pd = None
 
-from src.cost_analyzer import LCCAnalyzer
+from src.cost_analyzer import LCCAnalyzer, is_non_habitable
 from src.activity_schedules import load_activity_names, classify_activity, build_schedules, get_archetype_loads, daily_op_hours
 
 # ---------------------------------------------------------
@@ -259,6 +259,37 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
     surfaces = payload.get("surfaces", [])
+
+    # ── 전/후 비교: 업로드 원본(개선 전)을 별도 시뮬레이션해 물리 기반 기준선 산출 ──
+    # 실측 요금/사용량이 입력됐으면 그쪽이 더 정확한 기준선이므로 전-시뮬은 생략(시간 절약).
+    baseline_result = None
+    baseline_model = payload.get("baselineModel") or {}
+    _ba = project_data.get("baselineActual") or {}
+
+    def _is_pos(v):
+        try:
+            return float(v) > 0
+        except (TypeError, ValueError):
+            return False
+
+    has_actuals = any(_is_pos(_ba.get(k)) for k in ("elecBill", "heatBill", "elecKwh", "heatKwh"))
+
+    if baseline_model.get("zones") and baseline_model.get("surfaces") and not has_actuals:
+        print("⏮️ [전/후 비교] 개선 전(업로드 원본) 건물 시뮬레이션 시작...")
+        base_project = dict(project_data)
+        # 리모델링 요소 제거 — 기존 건물엔 PV·지열·LED 축소·설비 범위 조정이 없다
+        for k in ("pvCapacity", "geothermalApplied", "ledReductionActive",
+                  "hvacExcludeNonHabitable", "hvacUpgradeActive", "constructionOverrides"):
+            base_project.pop(k, None)
+        base_payload = {
+            "projectData": base_project,
+            "zones": baseline_model["zones"],
+            "surfaces": baseline_model["surfaces"],
+            "materials": payload.get("materials", {}),
+            "constructionOverrides": {},
+        }
+        baseline_result = generate_idf_and_simulate(base_payload, os.path.join(temp_dir, "baseline"))
+        print("⏮️ [전/후 비교] 개선 전 시뮬레이션 완료 → 기준선으로 사용")
     insulation_overrides = payload.get("insulationOverrides", {})
     materials_data = payload.get("materials", {})
     
@@ -561,15 +592,32 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     created_op_sch = set()
 
     # ── 실기기 HVAC 모드 선택 ──
-    # 전기 열원(2) 또는 지열 → PTHP(실제 히트펌프, 실소비+COP). 그 외(지역난방 등)는
-    # 이상부하로 폴백(난방 소비는 cost_analyzer가 열원 단가로 환산). 지열은 고COP.
+    # 전기 열원(2)/지열 → PTHP(히트펌프 실기기, 실소비+COP)
+    # 가스(1)/등유(4)/지역난방(11) → UnitHeater(연료 보일러 실기기) + WindowAC(개별 냉방 DX)
+    #   연료 소비가 Heating:<연료> 미터로 산출돼 COP 나눗셈 근사를 대체한다.
+    #   지역난방은 OtherFuel1 + 효율 0.95(열교환 손실)로 모델링.
+    # 매핑 불가한 열원만 이상부하 폴백.
+    FUEL_SYSTEMS = {
+        1:  ("NaturalGas", 0.87),   # 가스보일러 (콘덴싱 반영 평균 효율)
+        4:  ("FuelOilNo2", 0.83),   # 등유보일러
+        11: ("OtherFuel1", 0.95),   # 지역난방 (열교환 손실)
+    }
+    WINDOW_AC_COP = 3.3             # 개별 에어컨(벽걸이/스탠드) 대표 COP
     _heat_src_id = int(project_data.get("heatSource", 11))
     use_pthp = bool(is_geothermal or _heat_src_id == 2)
+    fuel_type, fuel_eff = FUEL_SYSTEMS.get(_heat_src_id, (None, None)) if not use_pthp else (None, None)
+    use_fuel_system = fuel_type is not None
+    hvac_mode = "pthp" if use_pthp else ("fuel" if use_fuel_system else "ideal")
     pthp_ccop, pthp_hcop = (5.0, 4.5) if is_geothermal else (4.2, 3.5)
-    if use_pthp:
-        idf.enable_sizing()   # PTHP autosize용 사이징 활성화(1회)
-    print(f"🌀 HVAC 모드: {'PTHP 실기기(전기/지열)' if use_pthp else '이상부하(폴백)'} "
-          f"(heatSource={_heat_src_id}, geo={is_geothermal})")
+    if hvac_mode in ("pthp", "fuel"):
+        idf.enable_sizing()   # 실기기 autosize용 사이징 활성화(1회)
+    if use_fuel_system:
+        # 연료 미터 출력 (해당 연료만 — 없는 미터는 경고 유발)
+        idf.add("Output:Meter", [f"Heating:{fuel_type}", "Hourly"])
+    _mode_label = {"pthp": "PTHP 실기기(전기/지열)",
+                   "fuel": f"연료 보일러+개별냉방 실기기({fuel_type}, 효율 {fuel_eff})",
+                   "ideal": "이상부하(폴백)"}[hvac_mode]
+    print(f"🌀 HVAC 모드: {_mode_label} (heatSource={_heat_src_id}, geo={is_geothermal})")
 
     custom_sch = project_data.get("customSchedule", {})
     use_custom = custom_sch.get("useCustom", False)
@@ -661,6 +709,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
                 idf.add_zone_sizing(z_id)
                 idf.add_pthp(z_id, cooling_cop=pthp_ccop, heating_cop=pthp_hcop,
                              op_schedule=op_sch)
+            elif use_fuel_system:
+                idf.add_zone_sizing(z_id)
+                idf.add_unit_heater(z_id, fuel_type=fuel_type, efficiency=fuel_eff,
+                                    op_schedule=op_sch)
+                # 계단실·샤프트 등 비거주 구역엔 냉방기 미설치 (실제와 부합).
+                # 용량은 면적 기반 명시값(150W/㎡, 최소 600W) — 냉방부하 0인 존에서
+                # autosize가 0이 되어 Fatal 나는 문제를 원천 차단.
+                if not is_non_habitable(z):
+                    idf.add_window_ac(z_id, cooling_cop=WINDOW_AC_COP,
+                                      cooling_capacity_w=max(z_area * 150.0, 600.0),
+                                      op_schedule=op_sch)
             else:
                 idf.add_ideal_hvac(z_id, op_sch)
             idf.add_schedule_compact(f"{z_id}_HeatSch", "AnyNumber", heat_sch_text)
@@ -855,6 +914,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             hvac_exclude_non_habitable=project_data.get('hvacExcludeNonHabitable', False),
             heat_source=heat_source,
             use_pthp=use_pthp,
+            hvac_mode=hvac_mode,
+            heating_fuel=fuel_type,
+            heating_fuel_eff=fuel_eff,
             discount_rate=float(lcc_parameters.get('discountRate', 5.0)) / 100.0,
             inflation_rate=float(lcc_parameters.get('inflationRate', 3.0)) / 100.0,
             utility_inflation=float(lcc_parameters.get('utilityInflation', 4.0)) / 100.0,
@@ -862,8 +924,22 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             actual_elec_bill=_pos_num(baseline_actual.get('elecBill')),
             actual_heat_bill=_pos_num(baseline_actual.get('heatBill')),
             actual_elec_kwh=_pos_num(baseline_actual.get('elecKwh')),
-            actual_heat_kwh=_pos_num(baseline_actual.get('heatKwh'))
+            actual_heat_kwh=_pos_num(baseline_actual.get('heatKwh')),
+            sim_base_elec_bill=(baseline_result["financial"]["annual_elec_bill"] if baseline_result else None),
+            sim_base_heat_bill=(baseline_result["financial"]["annual_heat_bill"] if baseline_result else None)
         )
+
+        # 개선 전 시뮬 결과를 응답에 동봉 → UI가 전/후 에너지를 나란히 비교 가능
+        if baseline_result:
+            baseline_block = {
+                "summary": baseline_result.get("summary"),
+                "monthly": baseline_result.get("monthly"),
+                "annual_elec_bill": baseline_result["financial"]["annual_elec_bill"],
+                "annual_heat_bill": baseline_result["financial"]["annual_heat_bill"],
+            }
+            result_data["baseline"] = baseline_block
+            result_data["result"]["baseline"] = baseline_block
+
         return result_data
 
     # 시뮬레이션 실패 시 가짜 데이터 대신 명시적으로 실패 처리

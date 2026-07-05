@@ -102,8 +102,10 @@ class IdfBuilder:
         self.objects: list[IdfObject] = []
         # 실기기 HVAC 누적 상태 (idragon의 postprocessor 대체: 누적→finalize_hvac에서 일괄 emit)
         self._vrf_sources: dict = {}   # source_name -> {"terminals": [term_name,...]}
-        self._zone_equip: dict = {}    # zone_id -> [(obj_type, name), ...]
-        self._zone_nodes: dict = {}    # zone_id -> {"inlet": node, "exhaust": node}
+        # zone_id -> [(obj_type, name, cool_seq, heat_seq), ...] — 존당 여러 기기 지원
+        self._zone_equip: dict = {}
+        # zone_id -> {"inlets": [node,...], "exhausts": [node,...]} (2개 이상이면 NodeList로 emit)
+        self._zone_nodes: dict = {}
         self._add_header()
 
     def _add_header(self):
@@ -482,10 +484,17 @@ class IdfBuilder:
         })
         # 누적(존 장비/노드 + 소스 터미널 목록) → finalize_hvac에서 일괄 emit
         self._vrf_sources.setdefault(source_name, {"terminals": []})["terminals"].append(tu)
-        self._zone_equip.setdefault(zone_id, []).append(
-            ("ZoneHVAC:TerminalUnit:VariableRefrigerantFlow", tu))
-        self._zone_nodes[zone_id] = {"inlet": inlet, "exhaust": exhaust}
+        self._register_zone_equip(zone_id, "ZoneHVAC:TerminalUnit:VariableRefrigerantFlow", tu,
+                                  cool_seq=1, heat_seq=1, inlet=inlet, exhaust=exhaust)
         return self
+
+    def _register_zone_equip(self, zone_id: str, obj_type: str, name: str, *,
+                             cool_seq: int, heat_seq: int, inlet: str, exhaust: str):
+        """존 장비/노드 누적 — finalize_hvac에서 EquipmentConnections/List로 일괄 emit."""
+        self._zone_equip.setdefault(zone_id, []).append((obj_type, name, cool_seq, heat_seq))
+        nodes = self._zone_nodes.setdefault(zone_id, {"inlets": [], "exhausts": []})
+        nodes["inlets"].append(inlet)
+        nodes["exhausts"].append(exhaust)
 
     # -------------------------------------------------------
     # 실기기 HVAC: PTHP(패키지형 터미널 히트펌프) — 존 단위 자기완결 실기기.
@@ -616,9 +625,141 @@ class IdfBuilder:
             "Maximum Outdoor Dry-Bulb Temperature for Supplemental Heater Operation": -5.0,
             "Fan Placement": "BlowThrough",
         })
-        self._zone_equip.setdefault(zone_id, []).append(
-            ("ZoneHVAC:PackagedTerminalHeatPump", u))
-        self._zone_nodes[zone_id] = {"inlet": inlet, "exhaust": exhaust}
+        self._register_zone_equip(zone_id, "ZoneHVAC:PackagedTerminalHeatPump", u,
+                                  cool_seq=1, heat_seq=1, inlet=inlet, exhaust=exhaust)
+        return self
+
+    # -------------------------------------------------------
+    # 실기기 HVAC: 비전기 열원(가스/등유/지역난방)용 존 자기완결 조합
+    #   난방 = ZoneHVAC:UnitHeater + Coil:Heating:Fuel (연료·연소효율 실모델
+    #          → Heating:<연료> 미터로 실소비 산출. 한국 개별 보일러 근사)
+    #   냉방 = ZoneHVAC:WindowAirConditioner + DX 코일 (개별 에어컨 근사)
+    #   지역난방은 Fuel Type=OtherFuel1, 효율≈0.95(열교환 손실)로 모델링.
+    # -------------------------------------------------------
+
+    def add_unit_heater(self, zone_id: str, fuel_type: str, efficiency: float,
+                        op_schedule: str = "AlwaysOn"):
+        """연료 난방기(UnitHeater+Coil:Heating:Fuel). autosize → 사이징 활성화 필요."""
+        u = f"{zone_id}_UH"
+        inlet = f"{zone_id}_UH_SupplyOut"   # 유닛→존
+        exhaust = f"{zone_id}_UH_ReturnIn"  # 존→유닛
+        fan_out = f"{u}_FanOut"
+        A = "autosize"
+        self._emit_by_idd("Fan:SystemModel", {
+            "Name": f"Fan_for_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Air Inlet Node Name": exhaust,
+            "Air Outlet Node Name": fan_out,
+            "Design Maximum Air Flow Rate": A,
+            "Speed Control Method": "Discrete",
+            "Design Pressure Rise": 75,
+            "Motor Efficiency": 0.9,
+            "Motor In Air Stream Fraction": 1.0,
+            "Design Power Sizing Method": "TotalEfficiencyAndPressure",
+            "Fan Total Efficiency": 0.7,
+        })
+        self._emit_by_idd("Coil:Heating:Fuel", {
+            "Name": f"HeatCoil_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Fuel Type": fuel_type,
+            "Burner Efficiency": efficiency,
+            "Nominal Capacity": A,
+            "Air Inlet Node Name": fan_out,
+            "Air Outlet Node Name": inlet,
+        })
+        self._emit_by_idd("ZoneHVAC:UnitHeater", {
+            "Name": u,
+            "Availability Schedule Name": op_schedule,
+            "Air Inlet Node Name": exhaust,
+            "Air Outlet Node Name": inlet,
+            "Supply Air Fan Object Type": "Fan:SystemModel",
+            "Supply Air Fan Name": f"Fan_for_{u}",
+            "Maximum Supply Air Flow Rate": A,
+            "Heating Coil Object Type": "Coil:Heating:Fuel",
+            "Heating Coil Name": f"HeatCoil_{u}",
+            "Supply Air Fan Operation During No Heating": "No",
+        })
+        # 난방 우선순위 1 / 냉방 2 (냉방은 WindowAC가 1순위로 담당)
+        self._register_zone_equip(zone_id, "ZoneHVAC:UnitHeater", u,
+                                  cool_seq=2, heat_seq=1, inlet=inlet, exhaust=exhaust)
+        return self
+
+    def add_window_ac(self, zone_id: str, cooling_cop: float,
+                      cooling_capacity_w: float = None,
+                      op_schedule: str = "AlwaysOn"):
+        """개별 냉방기(WindowAC+DX 단속코일).
+
+        cooling_capacity_w를 주면 명시 용량(정격 유량은 5e-5 m³/s·W로 유도) — 냉방부하가
+        0인 존에서 autosize가 0이 되어 Fatal 나는 것을 원천 차단. 실제 에어컨도
+        카탈로그 정격 용량으로 설치되므로 면적 기반 명시 용량이 현실과도 부합.
+        미지정 시 autosize(사이징 활성화 필요)."""
+        self._add_dx_curves_once()
+        u = f"{zone_id}_WAC"
+        inlet = f"{zone_id}_WAC_SupplyOut"
+        exhaust = f"{zone_id}_WAC_ReturnIn"
+        oa_in = f"{u}_OAIn"; relief = f"{u}_Relief"; mixed = f"{u}_Mixed"
+        fan_out = f"{u}_FanOut"
+        A = "autosize"
+        if cooling_capacity_w:
+            cap = round(float(cooling_capacity_w), 1)
+            flow = round(cap * 5e-5, 5)   # 정격 유량 (E+ 허용범위 4.0e-5~6.0e-5 m³/s·W)
+            shr = 0.75
+        else:
+            cap = flow = shr = A
+        self._emit_by_idd("OutdoorAir:Mixer", {
+            "Name": f"{u}_OAMixer",
+            "Mixed Air Node Name": mixed,
+            "Outdoor Air Stream Node Name": oa_in,
+            "Relief Air Stream Node Name": relief,
+            "Return Air Stream Node Name": exhaust,
+        })
+        self.add("OutdoorAir:NodeList", [oa_in])
+        self._emit_by_idd("Fan:SystemModel", {
+            "Name": f"Fan_for_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Air Inlet Node Name": mixed,
+            "Air Outlet Node Name": fan_out,
+            "Design Maximum Air Flow Rate": flow,
+            "Speed Control Method": "Discrete",
+            "Design Pressure Rise": 75,
+            "Motor Efficiency": 0.9,
+            "Motor In Air Stream Fraction": 1.0,
+            "Design Power Sizing Method": "TotalEfficiencyAndPressure",
+            "Fan Total Efficiency": 0.7,
+        })
+        self._emit_by_idd("Coil:Cooling:DX:SingleSpeed", {
+            "Name": f"CoolCoil_{u}",
+            "Availability Schedule Name": op_schedule,
+            "Gross Rated Total Cooling Capacity": cap,
+            "Gross Rated Sensible Heat Ratio": shr,
+            "Gross Rated Cooling COP": cooling_cop,
+            "Rated Air Flow Rate": flow,
+            "Air Inlet Node Name": fan_out,
+            "Air Outlet Node Name": inlet,
+            "Total Cooling Capacity Function of Temperature Curve Name": "HPACCoolCapFT",
+            "Total Cooling Capacity Function of Flow Fraction Curve Name": "HPACCoolCapFFF",
+            "Energy Input Ratio Function of Temperature Curve Name": "HPACEIRFT",
+            "Energy Input Ratio Function of Flow Fraction Curve Name": "HPACEIRFFF",
+            "Part Load Fraction Correlation Curve Name": "HPACCOOLPLFFPLR",
+        })
+        self._emit_by_idd("ZoneHVAC:WindowAirConditioner", {
+            "Name": u,
+            "Availability Schedule Name": op_schedule,
+            "Maximum Supply Air Flow Rate": flow,
+            "Maximum Outdoor Air Flow Rate": 0.0,
+            "Air Inlet Node Name": exhaust,
+            "Air Outlet Node Name": inlet,
+            "Outdoor Air Mixer Object Type": "OutdoorAir:Mixer",
+            "Outdoor Air Mixer Name": f"{u}_OAMixer",
+            "Supply Air Fan Object Type": "Fan:SystemModel",
+            "Supply Air Fan Name": f"Fan_for_{u}",
+            "Cooling Coil Object Type": "Coil:Cooling:DX:SingleSpeed",
+            "DX Cooling Coil Name": f"CoolCoil_{u}",
+            "Fan Placement": "BlowThrough",
+        })
+        # 냉방 우선순위 1 / 난방 2 (난방은 UnitHeater가 1순위로 담당)
+        self._register_zone_equip(zone_id, "ZoneHVAC:WindowAirConditioner", u,
+                                  cool_seq=1, heat_seq=2, inlet=inlet, exhaust=exhaust)
         return self
 
     def enable_sizing(self):
@@ -656,18 +797,34 @@ class IdfBuilder:
         })
 
     def add_zone_hvac_connections(self, zone_id: str):
-        """존 누적 장비로 EquipmentConnections + EquipmentList emit (실기기 존용)."""
+        """존 누적 장비로 EquipmentConnections + EquipmentList emit (실기기 존용).
+        기기 2개 이상이면 인렛/배기 노드를 NodeList로 묶는다."""
         equip = self._zone_equip.get(zone_id, [])
-        nodes = self._zone_nodes.get(zone_id, {})
+        nodes = self._zone_nodes.get(zone_id, {"inlets": [], "exhausts": []})
         if not equip:
             return self
+
+        inlets = nodes.get("inlets", [])
+        exhausts = nodes.get("exhausts", [])
+        if len(inlets) > 1:
+            inlet_ref = f"{zone_id}_InletNodes"
+            self.add("NodeList", [inlet_ref] + inlets)
+        else:
+            inlet_ref = inlets[0] if inlets else ""
+        if len(exhausts) > 1:
+            exhaust_ref = f"{zone_id}_ExhaustNodes"
+            self.add("NodeList", [exhaust_ref] + exhausts)
+        else:
+            exhaust_ref = exhausts[0] if exhausts else ""
+
         self.add("ZoneHVAC:EquipmentConnections", [
-            zone_id, f"{zone_id}_Equip", nodes.get("inlet", ""), nodes.get("exhaust", ""),
+            zone_id, f"{zone_id}_Equip", inlet_ref, exhaust_ref,
             f"{zone_id}_Node", f"{zone_id}_Return"
         ])
         fields = [f"{zone_id}_Equip", "SequentialLoad"]
-        for i, (otype, oname) in enumerate(equip, start=1):
-            fields += [otype, oname, i, i, "", ""]
+        n = len(equip)  # 시퀀스는 1..기기수 범위여야 함 (기기 1개 존에 seq=2면 Severe)
+        for (otype, oname, cool_seq, heat_seq) in equip:
+            fields += [otype, oname, min(cool_seq, n), min(heat_seq, n), "", ""]
         self.add("ZoneHVAC:EquipmentList", fields)
         return self
 

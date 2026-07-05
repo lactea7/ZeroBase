@@ -102,6 +102,8 @@ class SimulationPayload(BaseModel):
     surfaces: List[Dict[str, Any]]
     materials: Dict[str, Any] = {}
     constructionOverrides: Dict[str, Any] = {}
+    # 업로드 원본(개선 전) 모델 {zones, surfaces} — 전/후 비교 시뮬레이션용
+    baselineModel: Dict[str, Any] = {}
 
 # 작업 저장소: SQLite 영속화 — 서버 재시작에도 완료 결과가 유지되고,
 # 재시작으로 중단된 진행 중 작업은 기동 시 명시적으로 실패 처리된다.
