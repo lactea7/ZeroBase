@@ -39,6 +39,17 @@ def test_unknown_task_returns_none(store):
     assert store.get("no-such-task") is None
 
 
+def test_stage_tracking(store):
+    """진행 단계(개선 전/후)가 폴링 응답에 실려야 로딩 화면이 표시 가능."""
+    store.create("t1")
+    store.mark_running("t1")
+    assert "stage" not in store.get("t1")
+    store.set_stage("t1", "baseline")
+    assert store.get("t1")["stage"] == "baseline"
+    store.set_stage("t1", "retrofit")
+    assert store.get("t1")["stage"] == "retrofit"
+
+
 def test_restart_recovers_orphans(tmp_path):
     """재시작 시 queued/running 작업은 실패 처리, 완료 결과는 유지되어야 한다."""
     db = str(tmp_path / "tasks.db")

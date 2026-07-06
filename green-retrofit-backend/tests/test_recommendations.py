@@ -95,3 +95,12 @@ def test_actual_bill_beats_simulated_baseline(analyzer, base_kwargs):
 def test_estimate_baseline_without_sim_or_actuals(analyzer, base_kwargs):
     result = analyzer.calculate(**base_kwargs)
     assert result["financial"]["baseline_assumptions"]["source"] == "estimate"
+
+
+def test_identical_before_after_means_zero_savings(analyzer, base_kwargs):
+    """편집 없는 전=후 모델 → ×1.6 추정 대신 절감 0으로 정직하게 처리."""
+    result = analyzer.calculate(**dict(base_kwargs), sim_base_same=True)
+    ba = result["financial"]["baseline_assumptions"]
+    assert ba["source"] == "simulated"
+    assert ba["savings_pct"] == 0
+    assert any("동일" in w for w in result["financial"]["cost_warnings"])

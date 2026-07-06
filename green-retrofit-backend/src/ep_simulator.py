@@ -63,29 +63,8 @@ def load_databases(db_dir):
             
     return glazing_db
 
-# ---------------------------------------------------------
-# [에너지 요금제 완벽 매핑 - 2026 KEPCO & 지역난방 PDF 기반]
-# ---------------------------------------------------------
-ELEC_RATE_SUMMER = (183.6 + 128.9 + 98.1) / 3   # 6~8월 가중평균: 약 136.86원
-ELEC_RATE_WINTER = (138.5 + 112.2 + 98.1) / 3   # 11~2월 가중평균: 약 116.26원
-ELEC_RATE_SPRING = (121.7 + 103.9 + 98.1) / 3   # 3~5, 9~10월 가중평균: 약 107.9원
-ELEC_BASE_CHARGE = 4910    # 기본요금 (원/kW)
-HEAT_RATE_MCAL = 145.82    
-HEAT_RATE_KWH = HEAT_RATE_MCAL * 0.8604
-
-HEATING_EFF_DB = { 
-    1: {1: 0.85, 2: 2.50, 4: 0.80, 11: 0.95}, 
-    2: {2: 3.50, 11: 1.00}, 
-    3: {1: 0.82, 2: 3.00, 11: 0.95}, 
-    5: {1: 0.80, 2: 2.80, 4: 0.75} 
-}
-
-COOLING_EFF_DB = { 
-    1: 3.50, 
-    2: 4.20, 
-    3: 3.20, 
-    5: 2.80 
-}
+# 요금·효율 상수는 cost_analyzer.LCCAnalyzer가 단일 소스다.
+# (과거 이곳에 값이 다른 복제본이 있었으나 사용처가 없는 죽은 코드였음 — 재정의 금지)
 
 def calculate_surface_area(vertices):
     if len(vertices) < 3: 
@@ -375,14 +354,22 @@ def build_window_geometries(surface: dict, wall_verts: list) -> list:
     return result
 
 
-def generate_idf_and_simulate(payload: dict, temp_dir: str):
+def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
     surfaces = payload.get("surfaces", [])
 
+    def _stage(name):
+        if on_stage:
+            try:
+                on_stage(name)
+            except Exception:
+                pass   # 진행 표시 실패가 시뮬레이션을 막으면 안 됨
+
     # ── 전/후 비교: 업로드 원본(개선 전)을 별도 시뮬레이션해 물리 기반 기준선 산출 ──
     # 실측 요금/사용량이 입력됐으면 그쪽이 더 정확한 기준선이므로 전-시뮬은 생략(시간 절약).
     baseline_result = None
+    baseline_same = False
     baseline_model = payload.get("baselineModel") or {}
     _ba = project_data.get("baselineActual") or {}
 
@@ -395,21 +382,37 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
     has_actuals = any(_is_pos(_ba.get(k)) for k in ("elecBill", "heatBill", "elecKwh", "heatKwh"))
 
     if baseline_model.get("zones") and baseline_model.get("surfaces") and not has_actuals:
-        print("⏮️ [전/후 비교] 개선 전(업로드 원본) 건물 시뮬레이션 시작...")
-        base_project = dict(project_data)
-        # 리모델링 요소 제거 — 기존 건물엔 PV·지열·LED 축소·설비 범위 조정이 없다
-        for k in ("pvCapacity", "geothermalApplied", "ledReductionActive",
-                  "hvacExcludeNonHabitable", "hvacUpgradeActive", "constructionOverrides"):
-            base_project.pop(k, None)
-        base_payload = {
-            "projectData": base_project,
-            "zones": baseline_model["zones"],
-            "surfaces": baseline_model["surfaces"],
-            "materials": payload.get("materials", {}),
-            "constructionOverrides": {},
-        }
-        baseline_result = generate_idf_and_simulate(base_payload, os.path.join(temp_dir, "baseline"))
-        print("⏮️ [전/후 비교] 개선 전 시뮬레이션 완료 → 기준선으로 사용")
+        # 편집이 전혀 없으면(전=후) 시뮬 1회 낭비 + '×1.6 추정 절감' 착시 대신
+        # '동일 모델 → 절감 0'으로 정직하게 처리
+        baseline_same = (
+            baseline_model["zones"] == zones
+            and baseline_model["surfaces"] == surfaces
+            and not payload.get("constructionOverrides")
+            and not project_data.get("pvCapacity")
+            and not project_data.get("geothermalApplied")
+            and not project_data.get("ledReductionActive")
+            and not project_data.get("hvacExcludeNonHabitable")
+        )
+        if baseline_same:
+            print("⏮️ [전/후 비교] 개선 전후 모델 동일 → 전-시뮬 생략 (절감 0으로 처리)")
+        else:
+            print("⏮️ [전/후 비교] 개선 전(업로드 원본) 건물 시뮬레이션 시작...")
+            _stage("baseline")
+            base_project = dict(project_data)
+            # 리모델링 요소 제거 — 기존 건물엔 PV·지열·LED 축소·설비 범위 조정이 없다
+            for k in ("pvCapacity", "geothermalApplied", "ledReductionActive",
+                      "hvacExcludeNonHabitable", "hvacUpgradeActive", "constructionOverrides"):
+                base_project.pop(k, None)
+            base_payload = {
+                "projectData": base_project,
+                "zones": baseline_model["zones"],
+                "surfaces": baseline_model["surfaces"],
+                "materials": payload.get("materials", {}),
+                "constructionOverrides": {},
+            }
+            baseline_result = generate_idf_and_simulate(base_payload, os.path.join(temp_dir, "baseline"))
+            print("⏮️ [전/후 비교] 개선 전 시뮬레이션 완료 → 기준선으로 사용")
+    _stage("retrofit")
     insulation_overrides = payload.get("insulationOverrides", {})
     materials_data = payload.get("materials", {})
     
@@ -1082,7 +1085,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             actual_elec_kwh=_pos_num(baseline_actual.get('elecKwh')),
             actual_heat_kwh=_pos_num(baseline_actual.get('heatKwh')),
             sim_base_elec_bill=(baseline_result["financial"]["annual_elec_bill"] if baseline_result else None),
-            sim_base_heat_bill=(baseline_result["financial"]["annual_heat_bill"] if baseline_result else None)
+            sim_base_heat_bill=(baseline_result["financial"]["annual_heat_bill"] if baseline_result else None),
+            sim_base_same=baseline_same
         )
 
         # 적용된 설비 내역 동봉 (입력/자동 배지 표시용)

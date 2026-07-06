@@ -209,6 +209,7 @@ export default function App() {
   const [hoveredId, setHoveredId] = useState(null);
   const [editState, setEditState] = useState({});
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
+  const [loadingStage, setLoadingStage] = useState(null); // queued | baseline | retrofit
   const [res, setRes] = useState(null);
   
   // 💡 [수정] 결과를 볼 때 '에너지 성능(energy)' 탭이 무조건 먼저 나오도록 기본값 설정
@@ -740,15 +741,17 @@ export default function App() {
         // lccParameters / hvacUpgradeActive는 projectData 안에 포함되어 함께 전송됨
         // (백엔드는 projectData에서 읽음 — 최상위로 보내면 SimulationPayload에서 누락됨)
       };
-      const response = await runSimulation(payload);
+      const response = await runSimulation(payload, setLoadingStage);
 
       clearInterval(interval);
+      setLoadingStage(null);
       setRes(response.result);
       setStep('result');
       // 💡 [수정] 시뮬레이션 완료 시 에너지 탭이 먼저 보이도록 강제
       setActiveResultTab('energy'); 
     } catch (error) {
       clearInterval(interval);
+      setLoadingStage(null);
       const detail = error?.message ? `\n\n원인: ${error.message}` : '';
       alert(`시뮬레이션에 실패했습니다. 백엔드 서버 상태를 확인하세요.${detail}`);
       setStep('floorView');
@@ -1692,9 +1695,16 @@ export default function App() {
           {/* STEP 5: Loading */}
           {step === 'loading' && (
             <div className="flex-1 flex flex-col items-center justify-center animate-in fade-in h-full">
-              <h2 className={`text-4xl font-black mb-12 tracking-tighter uppercase text-center ${theme.textMain}`}>
+              <h2 className={`text-4xl font-black mb-4 tracking-tighter uppercase text-center ${theme.textMain}`}>
                 {LOADING_MESSAGES[loadingMsgIdx]}
               </h2>
+              {/* 백엔드가 알려주는 실제 진행 단계 */}
+              <p className={`text-sm font-bold mb-10 ${theme.textSub}`}>
+                {loadingStage === 'queued' && '대기열에서 순서를 기다리는 중...'}
+                {loadingStage === 'baseline' && '1/2단계 — 개선 전(원본) 건물 시뮬레이션 중'}
+                {loadingStage === 'retrofit' && '개선안 건물 시뮬레이션 중'}
+                {!loadingStage && 'EnergyPlus 물리 엔진 가동 중'}
+              </p>
               <div className="relative flex justify-center items-center h-24">
                 <div className="loading-wrapper">
                   <div className="loading-circle"></div>

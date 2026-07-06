@@ -14,6 +14,7 @@ class TaskStore:
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
                     status TEXT NOT NULL,           -- queued | running | success | failed
+                    stage TEXT,                      -- 진행 단계 (baseline | retrofit 등)
                     result TEXT,                     -- 성공 시 결과 JSON
                     error TEXT,                      -- 실패 시 원인
                     created_at REAL,
@@ -21,6 +22,11 @@ class TaskStore:
                     finished_at REAL
                 )
             """)
+            # 기존 DB 마이그레이션 (stage 컬럼이 없던 버전)
+            try:
+                c.execute("ALTER TABLE tasks ADD COLUMN stage TEXT")
+            except sqlite3.OperationalError:
+                pass   # 이미 존재
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -51,6 +57,11 @@ class TaskStore:
                 (time.time(), task_id),
             )
 
+    def set_stage(self, task_id: str, stage: str):
+        """진행 단계 기록 — 폴링 응답에 실려 로딩 화면이 실제 단계를 표시한다."""
+        with self._conn() as c:
+            c.execute("UPDATE tasks SET stage=? WHERE id=?", (stage, task_id))
+
     def finish(self, task_id: str, result=None, error: str = None):
         status = "success" if error is None else "failed"
         with self._conn() as c:
@@ -64,13 +75,15 @@ class TaskStore:
         """기존 dict 저장소와 동일한 응답 형태를 유지한다 (프론트 폴링 계약)."""
         with self._conn() as c:
             row = c.execute(
-                "SELECT status, result, error, started_at, finished_at FROM tasks WHERE id=?",
+                "SELECT status, result, error, started_at, finished_at, stage FROM tasks WHERE id=?",
                 (task_id,),
             ).fetchone()
         if row is None:
             return None
-        status, result, error, started_at, finished_at = row
+        status, result, error, started_at, finished_at, stage = row
         task = {"status": status}
+        if stage:
+            task["stage"] = stage
         if started_at:
             task["started_at"] = started_at
         if finished_at:

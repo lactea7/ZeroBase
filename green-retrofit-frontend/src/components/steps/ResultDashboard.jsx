@@ -276,8 +276,11 @@ export default function ResultDashboard({
                               boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
                             }}
                           />
-                          <Bar dataKey="heating" fill="#F87171" radius={[8, 8, 0, 0]} barSize={16} />
-                          <Bar dataKey="cooling" fill="#60A5FA" radius={[8, 8, 0, 0]} barSize={16} />
+                          <Bar dataKey="heating" name="난방" fill="#F87171" radius={[8, 8, 0, 0]} barSize={12} />
+                          <Bar dataKey="cooling" name="냉방" fill="#60A5FA" radius={[8, 8, 0, 0]} barSize={12} />
+                          <Bar dataKey="lighting" name="조명" fill="#FACC15" radius={[8, 8, 0, 0]} barSize={12} />
+                          <Bar dataKey="equipment" name="기기" fill="#A78BFA" radius={[8, 8, 0, 0]} barSize={12} />
+                          <Bar dataKey="hotwater" name="급탕" fill="#FB923C" radius={[8, 8, 0, 0]} barSize={12} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -300,10 +303,28 @@ export default function ResultDashboard({
                               <td key={d.name}>{Number(d.heating || 0).toFixed(1)}</td>
                             ))}
                           </tr>
-                          <tr>
+                          <tr className={`border-b ${theme.tableBorder}`}>
                             <td className="p-3 text-blue-500">냉방</td>
                             {(res?.monthly || []).map((d) => (
                               <td key={d.name}>{Number(d.cooling || 0).toFixed(1)}</td>
+                            ))}
+                          </tr>
+                          <tr className={`border-b ${theme.tableBorder}`}>
+                            <td className="p-3 text-yellow-500">조명</td>
+                            {(res?.monthly || []).map((d) => (
+                              <td key={d.name}>{Number(d.lighting || 0).toFixed(1)}</td>
+                            ))}
+                          </tr>
+                          <tr className={`border-b ${theme.tableBorder}`}>
+                            <td className="p-3 text-violet-500">기기</td>
+                            {(res?.monthly || []).map((d) => (
+                              <td key={d.name}>{Number(d.equipment || 0).toFixed(1)}</td>
+                            ))}
+                          </tr>
+                          <tr>
+                            <td className="p-3 text-orange-400">급탕</td>
+                            {(res?.monthly || []).map((d) => (
+                              <td key={d.name}>{Number(d.hotwater || 0).toFixed(1)}</td>
                             ))}
                           </tr>
                         </tbody>

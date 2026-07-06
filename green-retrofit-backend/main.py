@@ -88,7 +88,19 @@ async def upload_gbxml(request: Request, background_tasks: BackgroundTasks, file
     try:
         # gbXML 파싱 모듈 호출
         parsed_data = parse_gbxml_to_json(file_path)
+        # 프리체크: XML은 맞지만 gbXML 구조가 아니면 존/면이 0개 — 뒤 단계에서
+        # 알 수 없는 실패로 터지기 전에 원인을 명확히 알려준다
+        n_zones = len(parsed_data.get("zones", []))
+        n_surfs = len(parsed_data.get("surfaces", []))
+        if n_zones == 0 or n_surfs == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"gbXML 구조를 찾지 못했습니다 (존 {n_zones}개 / 면 {n_surfs}개). "
+                       "Revit 등에서 내보낸 gbXML 파일인지 확인해주세요.",
+            )
         return {"status": "success", "data": parsed_data}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ 파싱 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"파싱 실패: {str(e)}")
@@ -127,7 +139,10 @@ def _run_simulation_task(task_id: str, payload_dict: Dict[str, Any], session_dir
     try:
         with _sim_semaphore:
             task_store.mark_running(task_id)
-            result = generate_idf_and_simulate(payload_dict, session_dir)
+            result = generate_idf_and_simulate(
+                payload_dict, session_dir,
+                on_stage=lambda s: task_store.set_stage(task_id, s),
+            )
         task_store.finish(task_id, result=result)
     except Exception as e:
         print(f"❌ 시뮬레이션 에러: {str(e)}")

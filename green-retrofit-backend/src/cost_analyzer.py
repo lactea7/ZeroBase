@@ -34,6 +34,16 @@ class LCCAnalyzer:
     ELEC_RATE_WINTER = 110.8   # 겨울철 11~2월
     ELEC_RATE_SPRING = 86.4    # 봄·가을철 3~5, 9~10월
     ELEC_BASE_CHARGE = 5230    # 일반용 저압 기본요금 (원/kW)
+
+    # ── 시간대별(TOU) 요율: 일반용(을) 고압A 선택Ⅱ 기준 (원/kWh) ──
+    # ⚠️ 요금 개정 시 위 계절 요율과 함께 이 테이블만 수정하면 된다 (요율의 단일 소스).
+    #    시간별 출력(hourly)이 있으면 TOU, 월별 출력뿐이면 위 계절 평탄 요율을 적용한다.
+    #    (엄밀히는 요금제 선택은 건물 계약 종별을 따라야 하나, 현재는 출력 주기 기준 근사)
+    TOU_RATES = {
+        "summer": {"peak": 147.3, "mid": 109.0, "off": 56.1},   # 6~8월
+        "winter": {"peak": 137.9, "mid": 109.0, "off": 61.6},   # 11~2월
+        "spring": {"peak": 65.5,  "mid": 65.5,  "off": 56.1},   # 3~5, 9~10월 (피크 구간 없음)
+    }
     # 지역난방: KDHC 공식 열요금표(2024.7.1, 부가세 별도) — 주택용 난방 사용요금
     #   단일요금 112.32원/Mcal 적용. (참고: 업무용 145.82 / 공공용 127.34 원/Mcal)
     #   1 Mcal = 1.163 kWh → 원/kWh = 원/Mcal ÷ 1.163 (≈ ×0.8598)
@@ -696,20 +706,23 @@ class LCCAnalyzer:
                 df['total_elec_kwh'] = total_c_con_kwh + l_kwh + e_kwh + vent_kwh
                 df['total_heat_kwh'] = total_h_con_kwh + dhw_kwh
 
-            # TOU Rate calculation (시간대별 차등 요금제 적용)
+            # TOU Rate calculation (시간대별 차등 요금제 — 요율은 self.TOU_RATES 단일 소스)
             def get_tou_rate(row):
                 m, h = row['month'], row['hour']
                 if m in [6, 7, 8]:
-                    if 13 <= h < 17: return 147.3  # Peak
-                    if (9 <= h < 13) or (17 <= h < 23): return 109.0  # Mid
-                    return 56.1  # Off
+                    r = self.TOU_RATES["summer"]
+                    if 13 <= h < 17: return r["peak"]
+                    if (9 <= h < 13) or (17 <= h < 23): return r["mid"]
+                    return r["off"]
                 elif m in [11, 12, 1, 2]:
-                    if (9 <= h < 12) or (16 <= h < 19): return 137.9
-                    if (12 <= h < 16) or (19 <= h < 23): return 109.0
-                    return 61.6
+                    r = self.TOU_RATES["winter"]
+                    if (9 <= h < 12) or (16 <= h < 19): return r["peak"]
+                    if (12 <= h < 16) or (19 <= h < 23): return r["mid"]
+                    return r["off"]
                 else:
-                    if 9 <= h < 23: return 65.5
-                    return 56.1
+                    r = self.TOU_RATES["spring"]
+                    if 9 <= h < 23: return r["mid"]
+                    return r["off"]
                     
             if is_hourly:
                 df['elec_rate'] = df.apply(get_tou_rate, axis=1)
@@ -760,14 +773,24 @@ class LCCAnalyzer:
             # 그렇게 사이징하지 않는다. 단열 좋은 건물은 하한 미만이라 설비비가 싸진다(정상).
             hvac_capacity_kw = min(max(hvac_capacity_kw, total_area * 0.04), total_area * 0.10)
             
+            def _monthly_sum(series, mask):
+                """시계열이 스칼라(해당 부하 없음)일 수 있어 안전하게 월합산."""
+                if isinstance(series, np.ndarray):
+                    return float(np.sum(series[mask]))
+                return 0.0
+
             for m in range(1, 13):
                 mask_m = (df['month'] == m).values
                 # 난방은 '공간 난방'만 (급탕 DHW는 연중 발생하므로 제외 → 냉방과 대칭)
                 # 기존엔 total_heat_kwh(=공간난방+급탕)를 써서 여름에도 급탕만큼 난방값이 떠 보였음
+                _a = total_area if total_area > 0 else 1.0
                 monthly_data.append({
                     "name": f"{m}월",
-                    "heating": round(np.sum(total_h_con_kwh[mask_m]) / total_area, 1) if total_area > 0 else 0,
-                    "cooling": round(np.sum(total_c_con_kwh[mask_m]) / total_area, 1) if total_area > 0 else 0
+                    "heating": round(_monthly_sum(total_h_con_kwh, mask_m) / _a, 1),
+                    "cooling": round(_monthly_sum(total_c_con_kwh, mask_m) / _a, 1),
+                    "lighting": round(_monthly_sum(l_kwh, mask_m) / _a, 1),
+                    "equipment": round(_monthly_sum(e_kwh, mask_m) / _a, 1),
+                    "hotwater": round(_monthly_sum(dhw_kwh, mask_m) / _a, 1),
                 })
 
             pv_gen = ((pv_capacity_kw * 1300) / total_area) if pv_capacity_kw and total_area > 0 else 0.0
@@ -1043,6 +1066,14 @@ class LCCAnalyzer:
             elif (sim_base_elec or 0) > 0 or (sim_base_heat or 0) > 0:
                 base_running_cost = (sim_base_elec or 0.0) + (sim_base_heat or 0.0)
                 baseline_source = "simulated"            # 개선 전 건물 시뮬레이션(전/후 비교)
+            elif kwargs.get("sim_base_same"):
+                # 개선 전후 모델이 동일 (편집 없음) → 절감 0이 정직한 답.
+                # ×1.6 추정으로 가짜 절감이 표시되는 것을 막는다.
+                base_running_cost = retrofit_running_cost
+                baseline_source = "simulated"
+                cost_warnings.append(
+                    "개선 전후 모델이 동일합니다 — 창호·단열·설비 등을 편집하지 않아 절감액이 0으로 계산됩니다"
+                )
             else:
                 base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
                 baseline_source = "estimate"             # 추정(1.6배)
@@ -1136,7 +1167,8 @@ class LCCAnalyzer:
                     },
                     {
                         "label": "에너지 요금",
-                        "note": "2026년 KEPCO 일반용·지역난방 요금표 기준이며, 실제 계약 종별에 따라 달라질 수 있습니다."
+                        "note": "2026년 KEPCO 일반용·지역난방 요금표 기준이며, 실제 계약 종별에 따라 달라질 수 있습니다. "
+                                "주거 건물의 세대별 주택용 누진제는 반영되지 않습니다."
                     },
                     {
                         "label": "기존 건물 기준선",
