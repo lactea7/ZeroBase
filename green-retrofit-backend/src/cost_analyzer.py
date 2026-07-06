@@ -729,6 +729,19 @@ class LCCAnalyzer:
             else:
                 df['elec_rate'] = df['month'].apply(lambda m: self.ELEC_RATE_SUMMER if m in [6,7,8] else (self.ELEC_RATE_WINTER if m in [11,12,1,2] else self.ELEC_RATE_SPRING))
 
+            # ── 태양광(PV) 자가소비 차감 ──
+            # 연간 발전량(설치kW × 1300kWh/kW·년)을 주간(9~17시)에 균등 분배해 시간별
+            # 소비에서 차감. TOU와 상호작용해 '비싼 낮 요금'을 깎는 실제 효과가 반영된다.
+            # 잉여 발전(소비 초과분)은 버림 — 역송 보상(상계거래) 미반영, 보수적 추정.
+            # (기존엔 PV가 ZEB 자립률 표시에만 쓰이고 요금에서 빠지지 않는 버그가 있었음)
+            if pv_capacity_kw and pv_capacity_kw > 0:
+                _day_mask = ((df['hour'] >= 9) & (df['hour'] < 17)).values
+                _n_day = int(_day_mask.sum())
+                if _n_day > 0:
+                    _gen_per_step = (pv_capacity_kw * 1300.0) / _n_day
+                    _gen_series = np.where(_day_mask, _gen_per_step, 0.0)
+                    df['total_elec_kwh'] = np.maximum(df['total_elec_kwh'].values - _gen_series, 0.0)
+
             df['elec_cost'] = df['total_elec_kwh'] * df['elec_rate']
             # 난방 열원 결정: 지열/히트펌프면 전기(2), 아니면 프로젝트 선택값(기본 지역난방)
             heat_source_id = 2 if is_geothermal else kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)

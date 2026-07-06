@@ -54,7 +54,22 @@ def test_lcc_metrics_golden(result):
 
 def test_monthly_structure(result):
     assert len(result["monthly"]) == 12
-    assert {"name", "heating", "cooling"} <= set(result["monthly"][0].keys())
+    assert {"name", "heating", "cooling", "lighting", "equipment", "hotwater"} <= set(result["monthly"][0].keys())
+
+
+def test_pv_reduces_elec_bill(analyzer, base_kwargs):
+    """PV 자가소비가 전기요금에서 차감돼야 한다.
+
+    기존엔 PV가 ZEB 자립률 표시에만 쓰이고 요금은 그대로인 버그가 있었다
+    (100kW를 설치해도 요금 동일 — 전수 스윕에서 발견).
+    """
+    base = analyzer.calculate(**base_kwargs)
+    pv = analyzer.calculate(**dict(base_kwargs, pv_capacity_kw=10.0))
+    assert pv["financial"]["annual_elec_bill"] < base["financial"]["annual_elec_bill"]
+    assert pv["matrix"]["renewable"]["con"] < 0
+    # 과대 차감 방지: 절감액 ≤ 발전량 × 최고 요율
+    saved = base["financial"]["annual_elec_bill"] - pv["financial"]["annual_elec_bill"]
+    assert saved <= 10.0 * 1300.0 * 150.0
 
 
 def test_response_contract(result):
