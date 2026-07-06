@@ -10,6 +10,7 @@ import {
   Box as BoxIcon, FileSpreadsheet, LayoutDashboard, Info, Fan,
 } from 'lucide-react';
 import { formatWon, formatWonShort } from '../../utils/format';
+import { openPdfReport } from '../../utils/pdfReport';
 import BuildingViewer from '../viewer/BuildingViewer';
 
 // App.jsx에서 분리된 STEP 6: 분석 결과 대시보드 (에너지 성능 / LCC 경제성 탭)
@@ -35,6 +36,7 @@ export default function ResultDashboard({
   setSunHour,
   latitude,
   selectedRegion,
+  projectData,
 }) {
   // 에너지 항목 분류 및 차트 색상 (App.jsx에서 함께 이동)
   const categories = ['신재생', '난방', '냉방', '급탕', '조명', '환기', '기기'];
@@ -87,6 +89,20 @@ export default function ResultDashboard({
                       </span>
                     </button>
                   </div>
+                  <button
+                    onClick={() =>
+                      openPdfReport({
+                        res,
+                        projectData,
+                        lccAnalysis,
+                        zones,
+                        regionName: selectedRegion?.name || selectedRegion,
+                      })
+                    }
+                    className="px-6 py-3 rounded-2xl bg-slate-800 text-white font-black text-sm hover:bg-slate-700 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <FileSpreadsheet size={16} /> PDF 리포트
+                  </button>
                   <button
                     onClick={() => setStep('buildingView')}
                     className="px-6 py-3 rounded-2xl border-2 border-slate-500 font-black text-sm hover:bg-slate-500/10 transition-all active:scale-95 text-slate-400"

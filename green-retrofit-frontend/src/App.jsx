@@ -1724,6 +1724,7 @@ export default function App() {
               theme={theme}
               res={res}
               isDarkMode={isDarkMode}
+              projectData={projectData}
               lccAnalysis={lccAnalysis}
               activeResultTab={activeResultTab}
               setActiveResultTab={setActiveResultTab}
