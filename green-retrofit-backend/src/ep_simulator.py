@@ -255,6 +255,74 @@ def condense_daily_schedule(day_type_str: str, hourly_values: list) -> str:
                 
     return ", ".join(parts)
 
+# ── 실기기 성능 매핑 (사용자 입력 등급/연식 → 물리 파라미터) ──
+# 냉방 COP: 에너지소비효율등급(신형) + 노후 성능저하(냉매 열화·열교환기 오염) 반영
+COOLING_COP_BY_GRADE = {
+    "grade1": 4.0,   # 1등급 신형
+    "grade3": 3.3,   # 일반(3등급) — 미입력 기본값(기존 WINDOW_AC_COP와 동일)
+    "grade5": 2.9,   # 5등급
+    "old10":  2.6,   # 10년 노후
+    "old15":  2.2,   # 15년 이상 노후
+}
+# PTHP(히트펌프)용 (냉방COP, 난방COP) — 창문형보다 높은 기저 효율
+PTHP_COP_BY_GRADE = {
+    "grade1": (4.8, 4.1),
+    "grade3": (4.2, 3.5),   # 기본값(기존과 동일)
+    "grade5": (3.7, 3.1),
+    "old10":  (3.2, 2.6),
+    "old15":  (2.7, 2.2),
+}
+# 난방기(보일러) 연식 → 효율 보정 계수 (버너 열화·스케일 침착)
+HEATING_EFF_FACTOR_BY_AGE = {"new": 1.0, "mid": 0.93, "old": 0.85}
+# 에어컨 '평형' → 냉방능력 kW (예: 6평형 ≈ 2.3kW)
+PYEONG_TO_KW = 0.383
+
+
+def resolve_hvac_equipment(project_data: dict) -> dict:
+    """projectData.hvacEquipment(사용자 입력) → 물리 파라미터. 미입력 시 현행 기본값."""
+    eq = project_data.get("hvacEquipment") or {}
+    cooling_grade = eq.get("coolingGrade") or "grade3"
+    heating_age = eq.get("heatingAge") or "new"
+    if cooling_grade not in COOLING_COP_BY_GRADE:
+        cooling_grade = "grade3"
+    if heating_age not in HEATING_EFF_FACTOR_BY_AGE:
+        heating_age = "new"
+    return {
+        "cooling_grade": cooling_grade,
+        "heating_age": heating_age,
+        "cool_cop": COOLING_COP_BY_GRADE[cooling_grade],
+        "pthp_cops": PTHP_COP_BY_GRADE[cooling_grade],
+        "heat_factor": HEATING_EFF_FACTOR_BY_AGE[heating_age],
+        "is_user_input": bool(eq.get("coolingGrade") or eq.get("heatingAge")),
+    }
+
+
+def zone_cooling_plan(zone: dict, default_capacity_w: float) -> dict:
+    """존별 냉방기 설치 계획: 사용자 오버라이드 > 자동(비거주 제외).
+
+    zone.coolingInstalled: 'yes' | 'no' | 그 외/'auto'(자동)
+    zone.coolingCapacityPyeong: 평형 입력 시 실기기 용량으로 사용
+    """
+    override = (zone.get("coolingInstalled") or "auto").lower()
+    if override == "no":
+        return {"installed": False, "capacity_w": 0.0, "source": "user"}
+    if override == "yes":
+        installed = True
+        source = "user"
+    else:
+        installed = not is_non_habitable(zone)
+        source = "auto"
+    capacity_w = default_capacity_w
+    try:
+        pyeong = float(zone.get("coolingCapacityPyeong") or 0)
+    except (TypeError, ValueError):
+        pyeong = 0.0
+    if pyeong > 0:
+        capacity_w = pyeong * PYEONG_TO_KW * 1000.0
+        source = "user"
+    return {"installed": installed, "capacity_w": capacity_w, "source": source}
+
+
 def build_window_geometries(surface: dict, wall_verts: list) -> list:
     """벽면의 창 형상 목록 생성 — 실측 opening 우선.
 
@@ -654,13 +722,22 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
         4:  ("FuelOilNo2", 0.83),   # 등유보일러
         11: ("OtherFuel1", 0.95),   # 지역난방 (열교환 손실)
     }
-    WINDOW_AC_COP = 3.3             # 개별 에어컨(벽걸이/스탠드) 대표 COP
     _heat_src_id = int(project_data.get("heatSource", 11))
     use_pthp = bool(is_geothermal or _heat_src_id == 2)
     fuel_type, fuel_eff = FUEL_SYSTEMS.get(_heat_src_id, (None, None)) if not use_pthp else (None, None)
     use_fuel_system = fuel_type is not None
     hvac_mode = "pthp" if use_pthp else ("fuel" if use_fuel_system else "ideal")
-    pthp_ccop, pthp_hcop = (5.0, 4.5) if is_geothermal else (4.2, 3.5)
+
+    # 사용자 입력 실기기(등급/연식) → COP·효율. 미입력이면 기존 기본값과 동일.
+    equip = resolve_hvac_equipment(project_data)
+    window_ac_cop = equip["cool_cop"]
+    if use_fuel_system:
+        fuel_eff = round(fuel_eff * equip["heat_factor"], 3)   # 보일러 연식 열화 반영
+    # 지열은 신설 전제(고정 COP), 일반 히트펌프는 등급/연식 반영
+    pthp_ccop, pthp_hcop = (5.0, 4.5) if is_geothermal else equip["pthp_cops"]
+    if equip["is_user_input"]:
+        print(f"🎛️ 실기기 입력: 냉방 {equip['cooling_grade']}(COP {window_ac_cop}), "
+              f"난방 연식 {equip['heating_age']}(계수 {equip['heat_factor']})")
     if hvac_mode in ("pthp", "fuel"):
         idf.enable_sizing()   # 실기기 autosize용 사이징 활성화(1회)
     if use_fuel_system:
@@ -670,6 +747,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
                    "fuel": f"연료 보일러+개별냉방 실기기({fuel_type}, 효율 {fuel_eff})",
                    "ideal": "이상부하(폴백)"}[hvac_mode]
     print(f"🌀 HVAC 모드: {_mode_label} (heatSource={_heat_src_id}, geo={is_geothermal})")
+
+    # 적용된 설비 내역 — 결과 화면 '설비 내역' 패널용 (입력값/자동 추정 구분)
+    equipment_log = []
+    fuel_label = {"NaturalGas": "가스보일러", "FuelOilNo2": "등유보일러",
+                  "OtherFuel1": "지역난방"}.get(fuel_type, fuel_type or "")
 
     custom_sch = project_data.get("customSchedule", {})
     use_custom = custom_sch.get("useCustom", False)
@@ -761,19 +843,38 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
                 idf.add_zone_sizing(z_id)
                 idf.add_pthp(z_id, cooling_cop=pthp_ccop, heating_cop=pthp_hcop,
                              op_schedule=op_sch)
+                equipment_log.append({
+                    "zone": z['id'],
+                    "heating": f"{'지열 ' if is_geothermal else ''}히트펌프 난방 · COP {pthp_hcop}",
+                    "cooling": f"히트펌프 냉방 · COP {pthp_ccop} (용량 자동산정)",
+                    "source": "user" if equip["is_user_input"] else "auto",
+                })
             elif use_fuel_system:
                 idf.add_zone_sizing(z_id)
                 idf.add_unit_heater(z_id, fuel_type=fuel_type, efficiency=fuel_eff,
                                     op_schedule=op_sch)
-                # 계단실·샤프트 등 비거주 구역엔 냉방기 미설치 (실제와 부합).
-                # 용량은 면적 기반 명시값(150W/㎡, 최소 600W) — 냉방부하 0인 존에서
-                # autosize가 0이 되어 Fatal 나는 문제를 원천 차단.
-                if not is_non_habitable(z):
-                    idf.add_window_ac(z_id, cooling_cop=WINDOW_AC_COP,
-                                      cooling_capacity_w=max(z_area * 150.0, 600.0),
+                # 냉방기 설치: 사용자 오버라이드 > 자동(비거주 제외).
+                # 용량 기본은 면적 기반 명시값(150W/㎡, 최소 600W — 냉방부하 0존의
+                # autosize=0 Fatal 방지), 평형 입력 시 실기기 용량 사용.
+                plan = zone_cooling_plan(z, default_capacity_w=max(z_area * 150.0, 600.0))
+                if plan["installed"]:
+                    idf.add_window_ac(z_id, cooling_cop=window_ac_cop,
+                                      cooling_capacity_w=plan["capacity_w"],
                                       op_schedule=op_sch)
+                equipment_log.append({
+                    "zone": z['id'],
+                    "heating": f"{fuel_label} 난방기 (효율 {fuel_eff})",
+                    "cooling": (f"에어컨 {plan['capacity_w']/1000.0:.1f}kW · COP {window_ac_cop}"
+                                if plan["installed"] else "냉방 없음"),
+                    "source": plan["source"],
+                })
             else:
                 idf.add_ideal_hvac(z_id, op_sch)
+                equipment_log.append({
+                    "zone": z['id'],
+                    "heating": "이상부하(간이 모델)", "cooling": "이상부하(간이 모델)",
+                    "source": "auto",
+                })
             idf.add_schedule_compact(f"{z_id}_HeatSch", "AnyNumber", heat_sch_text)
             idf.add_schedule_compact(f"{z_id}_CoolSch", "AnyNumber", cool_sch_text)
             idf.add_thermostat(z_id, f"{z_id}_HeatSch", f"{z_id}_CoolSch")
@@ -983,6 +1084,19 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
             sim_base_elec_bill=(baseline_result["financial"]["annual_elec_bill"] if baseline_result else None),
             sim_base_heat_bill=(baseline_result["financial"]["annual_heat_bill"] if baseline_result else None)
         )
+
+        # 적용된 설비 내역 동봉 (입력/자동 배지 표시용)
+        hvac_equipment_block = {
+            "building": {
+                "mode": hvac_mode,
+                "coolingGrade": equip["cooling_grade"],
+                "heatingAge": equip["heating_age"],
+                "userInput": equip["is_user_input"],
+            },
+            "zones": equipment_log,
+        }
+        result_data["hvacEquipment"] = hvac_equipment_block
+        result_data["result"]["hvacEquipment"] = hvac_equipment_block
 
         # 개선 전 시뮬 결과를 응답에 동봉 → UI가 전/후 에너지를 나란히 비교 가능
         if baseline_result:

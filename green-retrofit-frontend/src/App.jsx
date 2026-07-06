@@ -70,7 +70,7 @@ import { uploadGbxml, runSimulation } from './api/client';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS, OUTLET_W_PER_ACTIVITY } from './data/constants';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
 import { STRUCTURAL_MATERIALS } from './data/structuralMaterials';
-import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from './data/hvac';
+import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES, COOLING_GRADES, HEATING_AGES } from './data/hvac';
 import { LOADING_MESSAGES, DIR_MAP } from './utils/format';
 import { getPanesCategory, getCoatingType } from './utils/surface';
 import { getZebGradeInfo, buildAnnualChartData, buildCashFlowData } from './utils/resultData';
@@ -1298,6 +1298,48 @@ export default function App() {
                           {projectData.geothermalApplied
                             ? '지열 적용 시 난방은 전기(히트펌프)로 계산됩니다.'
                             : '열원에 따라 난방 요금·1차에너지·CO2 계수가 달라집니다.'}
+                        </p>
+                      </div>
+
+                      {/* 냉난방 실기기 등급/연식 — 시뮬레이션 기기 효율(COP)에 직접 반영 */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className={`flex items-center gap-2 text-sm font-black mb-3 ${theme.textMain}`}>
+                            <Wind className="text-cyan-500" size={16} /> 냉방기(에어컨) 등급·연식
+                          </label>
+                          <select
+                            value={projectData.hvacEquipment?.coolingGrade || 'grade3'}
+                            onChange={(e) => setProjectData((prev) => ({
+                              ...prev,
+                              hvacEquipment: { ...(prev.hvacEquipment || {}), coolingGrade: e.target.value },
+                            }))}
+                            className={`w-full p-3 text-sm font-bold rounded-xl border outline-none ${theme.input} focus:border-cyan-500`}
+                          >
+                            {COOLING_GRADES.map((g) => (
+                              <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={`flex items-center gap-2 text-sm font-black mb-3 ${theme.textMain}`}>
+                            <Flame className="text-rose-400" size={16} /> 난방기(보일러) 연식
+                          </label>
+                          <select
+                            value={projectData.hvacEquipment?.heatingAge || 'new'}
+                            onChange={(e) => setProjectData((prev) => ({
+                              ...prev,
+                              hvacEquipment: { ...(prev.hvacEquipment || {}), heatingAge: e.target.value },
+                            }))}
+                            className={`w-full p-3 text-sm font-bold rounded-xl border outline-none ${theme.input} focus:border-rose-400`}
+                          >
+                            {HEATING_AGES.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <p className="md:col-span-2 text-[10px] opacity-60 -mt-2">
+                          입력한 등급·연식이 시뮬레이션 기기 효율(COP)에 직접 반영됩니다.
+                          존별 냉방기 설치 여부·용량은 3D 편집 단계에서 조정할 수 있어요.
                         </p>
                       </div>
 

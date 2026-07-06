@@ -764,6 +764,42 @@ export default function FloorEditor(props) {
                                   ))}
                                 </select>
                               </div>
+                              {/* 존별 냉방기 오버라이드 — 시뮬레이션 실기기(설치/용량)에 직접 반영 */}
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="text-xs font-black block mb-2 opacity-70">
+                                    냉방기(에어컨) 설치
+                                  </label>
+                                  <select
+                                    value={editState.coolingInstalled || 'auto'}
+                                    onChange={(e) =>
+                                      setEditState((prev) => ({ ...prev, coolingInstalled: e.target.value }))
+                                    }
+                                    className={`w-full p-3 text-xs font-bold rounded-lg border outline-none ${theme.input} focus:border-cyan-500`}
+                                  >
+                                    <option value="auto">자동 (거주 구역만 설치)</option>
+                                    <option value="yes">설치</option>
+                                    <option value="no">미설치</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-xs font-black block mb-2 opacity-70">
+                                    냉방 용량 (평형, 비우면 자동)
+                                  </label>
+                                  <input
+                                    type="number" min="0" step="1"
+                                    placeholder="예: 6 (≈2.3kW)"
+                                    value={editState.coolingCapacityPyeong ?? ''}
+                                    onChange={(e) =>
+                                      setEditState((prev) => ({
+                                        ...prev,
+                                        coolingCapacityPyeong: e.target.value === '' ? null : parseFloat(e.target.value),
+                                      }))
+                                    }
+                                    className={`w-full p-3 text-xs font-bold rounded-lg border outline-none ${theme.input} focus:border-cyan-500`}
+                                  />
+                                </div>
+                              </div>
                               <div>
                                 <label className="text-xs font-black block mb-2 opacity-70">
                                   난방 열원 (Heating Fuel)

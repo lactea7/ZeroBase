@@ -606,6 +606,14 @@ class LCCAnalyzer:
             proj_heat_source = kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
             fan_kwh = np.zeros(total_rows)
 
+            # 실기기 미터가 없어 추정 폴백을 쓴 경우 사용자 경고로 남긴다 (조용한 추정 방지)
+            _meter_fallback_notes = []
+
+            def _note_fallback(what, how):
+                _meter_fallback_notes.append(
+                    f"실기기 미터({what})가 시뮬레이션 출력에 없어 {how}로 추정했습니다 — 해당 항목은 실소비가 아닌 근사치입니다"
+                )
+
             if hvac_mode in ("pthp", "fuel"):
                 sh_cols = [c for c in df.columns if 'Zone Air System Sensible Heating Energy' in c]
                 sc_cols = [c for c in df.columns if 'Zone Air System Sensible Cooling Energy' in c]
@@ -613,15 +621,21 @@ class LCCAnalyzer:
                 total_c_req_kwh = (df[sc_cols].sum(axis=1).values / 3600000.0) if sc_cols else np.zeros(total_rows)
                 ce_col = next((c for c in df.columns if 'Cooling:Electricity' in c and '[J]' in c), None)
                 fe_col = next((c for c in df.columns if 'Fans:Electricity' in c and '[J]' in c), None)
+                if not ce_col:
+                    _note_fallback("Cooling:Electricity", "냉방 요구량÷대표COP")
 
                 if hvac_mode == "pthp":
                     he_col = next((c for c in df.columns if 'Heating:Electricity' in c and '[J]' in c), None)
+                    if not he_col:
+                        _note_fallback("Heating:Electricity", "난방 요구량÷대표COP 3.5")
                     # 실소비(전력). 미터가 없으면 요구량/대표COP로 보수적 추정.
                     total_h_con_kwh = (df[he_col].values / 3600000.0) if he_col else (total_h_req_kwh / 3.5)
                     total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 4.2)
                 else:
                     hf_col = next((c for c in df.columns
                                    if heating_fuel and f'Heating:{heating_fuel}' in c and '[J]' in c), None)
+                    if not hf_col:
+                        _note_fallback(f"Heating:{heating_fuel}", f"난방 요구량÷효율 {heating_fuel_eff}")
                     # 난방 = 연료 실소비(연소효율 반영). 미터 없으면 요구량/효율로 추정.
                     total_h_con_kwh = (df[hf_col].values / 3600000.0) if hf_col else (total_h_req_kwh / heating_fuel_eff)
                     # 냉방 = 개별 에어컨 DX 실소비(전기)
@@ -900,7 +914,8 @@ class LCCAnalyzer:
 
             # 공사비 비중 새너티 점검: 단가/물량 오매핑으로 한 공종이 비정상 지배하면 경고
             # (설비는 전면교체 시 정상적으로 클 수 있어 임계 제외)
-            cost_warnings = list(self.load_warnings)  # DB 품질 이슈(가드 발동 등)도 사용자에게 노출
+            # DB 품질 이슈(가드 발동 등) + 미터 폴백을 사용자에게 노출
+            cost_warnings = list(self.load_warnings) + _meter_fallback_notes
             if total_capital_cost > 0:
                 _shares = {"창호": window_cost, "단열": insulation_cost, "LED": led_cost}
                 for _label, _val in _shares.items():
@@ -1107,7 +1122,7 @@ class LCCAnalyzer:
                 "estimate_notes": [
                     {
                         "label": "공사비 단가",
-                        "note": "친환경건설자재 DB의 등급별 중앙값 단가입니다. 실제 시공 견적과 ±20% 이상 차이 날 수 있습니다."
+                        "note": "친환경건설자재 DB의 등급별 중앙값 단가입니다. 브랜드·시공 조건에 따라 실제 견적과 차이가 날 수 있습니다."
                     },
                     {
                         "label": "설비(HVAC) 비용",

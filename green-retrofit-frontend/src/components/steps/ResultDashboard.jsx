@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, PiggyBank, Coins, Wallet, Percent, Check, Calculator,
   AlertTriangle, Lightbulb, LineChart as LineChartIcon,
-  Box as BoxIcon, FileSpreadsheet, LayoutDashboard, Info,
+  Box as BoxIcon, FileSpreadsheet, LayoutDashboard, Info, Fan,
 } from 'lucide-react';
 import { formatWon } from '../../utils/format';
 import BuildingViewer from '../viewer/BuildingViewer';
@@ -964,6 +964,51 @@ export default function ResultDashboard({
                       </ResponsiveContainer>
                     </div>
                   </motion.div>
+
+                  {/* 적용된 설비 내역 — 이 수치가 어떤 기기 구성으로 계산됐는지 투명하게 표시 */}
+                  {res.hvacEquipment?.zones?.length > 0 && (
+                    <details className={`border rounded-2xl overflow-hidden ${isDarkMode ? 'bg-white/[0.03] border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                      <summary className={`flex items-center gap-2 p-5 cursor-pointer select-none ${theme.textMain}`}>
+                        <Fan size={17} className="text-cyan-500 shrink-0" />
+                        <span className="text-sm font-black tracking-tight">적용된 설비 내역</span>
+                        <span className={`text-[11px] font-medium ${theme.textSub}`}>
+                          — 존 {res.hvacEquipment.zones.length}개 ·
+                          {res.hvacEquipment.building?.userInput
+                            ? ' 사용자 입력 등급/연식 반영'
+                            : ' 자동 추정 (설비 설정에서 등급·연식을 입력하면 반영됩니다)'}
+                        </span>
+                        <span className={`ml-auto text-[10px] font-black px-2 py-0.5 rounded-full ${res.hvacEquipment.building?.userInput ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}>
+                          {res.hvacEquipment.building?.userInput ? '입력값' : '자동'}
+                        </span>
+                      </summary>
+                      <div className="px-5 pb-5 overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className={`text-left text-[10px] uppercase tracking-wide ${theme.textSub}`}>
+                              <th className="py-1.5 pr-3 font-black">존</th>
+                              <th className="py-1.5 pr-3 font-black">난방</th>
+                              <th className="py-1.5 pr-3 font-black">냉방</th>
+                              <th className="py-1.5 font-black">출처</th>
+                            </tr>
+                          </thead>
+                          <tbody className={theme.textSub}>
+                            {res.hvacEquipment.zones.map((z, i) => (
+                              <tr key={i} className={`border-t ${isDarkMode ? 'border-white/5' : 'border-slate-200/70'}`}>
+                                <td className={`py-1.5 pr-3 font-bold ${theme.textMain}`}>{z.zone}</td>
+                                <td className="py-1.5 pr-3">{z.heating}</td>
+                                <td className="py-1.5 pr-3">{z.cooling}</td>
+                                <td className="py-1.5">
+                                  <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${z.source === 'user' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-slate-500/15 opacity-70'}`}>
+                                    {z.source === 'user' ? '입력' : '자동'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  )}
 
                   {/* 추정 가정 고지 — 수치가 전제하는 조건을 투명하게 표시 */}
                   {res.financial.estimate_notes && res.financial.estimate_notes.length > 0 && (
