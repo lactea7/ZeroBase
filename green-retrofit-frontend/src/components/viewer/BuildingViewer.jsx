@@ -8,6 +8,19 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { ACTIVITIES } from '../../data/constants';
 import { createTextSprite, clearGroup } from '../../utils/threeHelper';
+
+// 3D 폴리곤 면적 (뉴웰 법선 크기 / 2) — 창 실형상의 원본 WWR 산출용
+const polyArea3D = (verts) => {
+  if (!verts || verts.length < 3) return 0;
+  let nx = 0, ny = 0, nz = 0;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i], b = verts[(i + 1) % verts.length];
+    nx += (a[1] - b[1]) * (a[2] + b[2]);
+    ny += (a[2] - b[2]) * (a[0] + b[0]);
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  return Math.sqrt(nx * nx + ny * ny + nz * nz) / 2;
+};
 import { getSolarPosition, drawSunPathDome } from '../../utils/solarHelper';
 import { getRadiationColor, getTemperatureColor, drawThermalLabel } from '../../utils/thermalHelper';
 import { drawAirflowVisuals } from '../../utils/airflowHelper';
@@ -461,14 +474,34 @@ const BuildingViewer = ({
           winMesh.receiveShadow = mesh.receiveShadow;
           mesh.add(winMesh);
         } else if (surf.openings && surf.openings.length > 0) {
-          surf.openings.forEach((op) => {
-            if (op.vertices && op.vertices.length >= 3) {
+          // 실측 창 형상 + WWR 편집 반영: 파싱 원본 비율과 다르게 수정하면
+          // 각 창을 자기 중심으로 스케일 (시뮬레이션 build_window_geometries와 동일 규칙)
+          const realOps = surf.openings.filter(
+            (op) => (op.type || '').toLowerCase() !== 'air' && op.vertices && op.vertices.length >= 3
+          );
+          const origArea = realOps.reduce((acc, op) => acc + polyArea3D(op.vertices), 0);
+          const origPct = surf.area > 0 ? (origArea / surf.area) * 100 : 0;
+          let opScale = 1.0;
+          if (origPct > 0 && Math.abs(safeWwr - origPct) > 1.5) {
+            opScale = Math.sqrt(Math.max(safeWwr, 0.01) / origPct);
+          }
+          realOps.forEach((op) => {
+            {
+              // 중심 스케일된 꼭짓점
+              const n = op.vertices.length;
+              const c = op.vertices.reduce(
+                (acc, v) => [acc[0] + v[0] / n, acc[1] + v[1] / n, acc[2] + v[2] / n], [0, 0, 0]);
+              const sv = op.vertices.map((v) => [
+                c[0] + (v[0] - c[0]) * opScale,
+                c[1] + (v[1] - c[1]) * opScale,
+                c[2] + (v[2] - c[2]) * opScale,
+              ]);
               const opGeom = new THREE.BufferGeometry();
               const opVerts = [];
-              const ov0 = op.vertices[0];
-              for (let i = 1; i < op.vertices.length - 1; i++) {
-                const ov1 = op.vertices[i];
-                const ov2 = op.vertices[i + 1];
+              const ov0 = sv[0];
+              for (let i = 1; i < sv.length - 1; i++) {
+                const ov1 = sv[i];
+                const ov2 = sv[i + 1];
                 opVerts.push(ov0[0], ov0[2], -ov0[1]);
                 opVerts.push(ov1[0], ov1[2], -ov1[1]);
                 opVerts.push(ov2[0], ov2[2], -ov2[1]);

@@ -255,6 +255,58 @@ def condense_daily_schedule(day_type_str: str, hourly_values: list) -> str:
                 
     return ", ".join(parts)
 
+def build_window_geometries(surface: dict, wall_verts: list) -> list:
+    """벽면의 창 형상 목록 생성 — 실측 opening 우선.
+
+    규칙(정확도·안전성 순):
+    1) gbXML opening 실좌표가 있고 WWR 미수정 → 실형상 그대로 (위치·개수·모양 보존)
+    2) 실좌표가 있고 WWR을 원본보다 '축소' → 각 창을 자기 중심으로 축소 (벽 안 보장)
+    3) 실좌표가 없거나 WWR을 '확대' → 기존 합성 창(벽 중앙 √WWR) 폴백
+       (실형상 확대는 벽 경계를 벗어나 E+ Severe를 유발할 수 있어 폴백이 안전)
+    """
+    wwr = surface.get("wwr", 0)
+    if not wwr or wwr <= 0:
+        return []
+
+    openings = [op for op in (surface.get("openings") or [])
+                if (op.get("type") or "").lower() != "air"
+                and len(op.get("vertices", [])) >= 3]
+    if not openings:
+        wv = get_scaled_window_vertices(wall_verts, wwr)
+        return [wv] if wv else []
+
+    wall_area = calculate_surface_area(wall_verts)
+    orig_area = sum(calculate_surface_area(op["vertices"]) for op in openings)
+    if wall_area <= 0 or orig_area <= 0:
+        wv = get_scaled_window_vertices(wall_verts, wwr)
+        return [wv] if wv else []
+
+    orig_pct = orig_area / wall_area * 100.0
+    # 파서는 wwr=int(원본비율)로 저장 → 1.5%p 이내 차이는 '미수정'으로 간주
+    if wwr > orig_pct + 1.5:
+        wv = get_scaled_window_vertices(wall_verts, wwr)   # 확대 → 합성 폴백
+        return [wv] if wv else []
+
+    scale2 = 100.0 if abs(wwr - orig_pct) <= 1.5 else (wwr / orig_pct) * 100.0
+
+    result = []
+    for op in openings:
+        ov = op["vertices"]
+        if len(ov) <= 4:
+            # 중심 축소(scale²=wwr 인자). 100.0이면 원형 유지
+            wv = ov if scale2 >= 100.0 else get_scaled_window_vertices(ov, scale2)
+        else:
+            # E+는 창 꼭짓점 4개 제한 → 동일 면적의 직사각형 근사
+            bbox = get_scaled_window_vertices(ov, 100.0)
+            bbox_area = calculate_surface_area(bbox)
+            op_area = calculate_surface_area(ov)
+            eff = min((op_area * (scale2 / 100.0)) / bbox_area * 100.0, 100.0) if bbox_area > 0 else scale2
+            wv = get_scaled_window_vertices(ov, eff)
+        if wv:
+            result.append(wv)
+    return result
+
+
 def generate_idf_and_simulate(payload: dict, temp_dir: str):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
@@ -832,9 +884,12 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str):
 
             wwr = s.get("wwr", 0)
             if ep_type == "Wall" and wwr > 0 and obc == "Outdoors":
-                win_verts = get_scaled_window_vertices(verts, wwr)
-                if win_verts:
-                    idf.add_window(f"Win_{s['id']}", f"WinConst_{s['id']}", s['id'], win_verts)
+                # 실측 opening 형상 우선 (위치·개수·모양 보존 → 일사 계산 정확도)
+                win_list = build_window_geometries(s, verts)
+                for wi, wv in enumerate(win_list):
+                    # 첫 창은 기존 명명 유지 (AFN·surfaceAirflow 계약 호환)
+                    wname = f"Win_{s['id']}" if wi == 0 else f"Win_{s['id']}_{wi + 1}"
+                    idf.add_window(wname, f"WinConst_{s['id']}", s['id'], wv)
 
             # AirflowNetwork Surface 및 개구부(Window) 등록
             if obc == "Outdoors" and s.get("zone") in valid_afn_zones:
