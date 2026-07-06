@@ -9,7 +9,7 @@ import {
   AlertTriangle, Lightbulb, LineChart as LineChartIcon,
   Box as BoxIcon, FileSpreadsheet, LayoutDashboard, Info, Fan,
 } from 'lucide-react';
-import { formatWon } from '../../utils/format';
+import { formatWon, formatWonShort } from '../../utils/format';
 import BuildingViewer from '../viewer/BuildingViewer';
 
 // App.jsx에서 분리된 STEP 6: 분석 결과 대시보드 (에너지 성능 / LCC 경제성 탭)
@@ -915,7 +915,7 @@ export default function ResultDashboard({
                             dy={10}
                           />
                           <YAxis
-                            tickFormatter={(val) => `${Math.round(val / 10000000)}천만`}
+                            tickFormatter={formatWonShort}
                             tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
                             axisLine={false}
                             tickLine={false}

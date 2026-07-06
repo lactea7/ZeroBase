@@ -33,3 +33,17 @@ export const formatWon = (val) => {
   if (!val) return '0 원';
   return Math.round(val / 10000).toLocaleString() + ' 만 원';
 };
+
+// 차트 축용 짧은 원화 표기 — 값 크기에 맞는 단위(억/천만/백만/만)를 고른다.
+// (단위를 천만으로 고정하면 ±1천만 이내 값이 전부 '0천만'으로 뭉개진다)
+export const formatWonShort = (val) => {
+  const abs = Math.abs(val);
+  if (abs >= 100_000_000) {
+    const eok = val / 100_000_000;
+    return `${Number.isInteger(eok) ? eok : eok.toFixed(1)}억`;
+  }
+  if (abs >= 10_000_000) return `${Math.round(val / 10_000_000)}천만`;
+  if (abs >= 1_000_000) return `${Math.round(val / 1_000_000)}백만`;
+  if (abs >= 10_000) return `${Math.round(val / 10_000)}만`;
+  return val === 0 ? '0' : `${Math.round(val).toLocaleString()}원`;
+};
