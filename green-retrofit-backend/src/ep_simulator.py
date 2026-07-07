@@ -801,7 +801,19 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     for z in zones:
         z_id = z['id'].replace(" ", "_")
         z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and ("floor" in s.get("type", "").lower() or "slab" in s.get("type", "").lower())]
-        z_area = sum(z_area_list) if sum(z_area_list) >= 1.0 else 100.0
+        z_area = sum(z_area_list)
+        if z_area < 1.0:
+            # 바닥 폴리곤이 없거나 퇴화된 존(샤프트·설비존, 바닥면 누락 화장실 등):
+            # 천장/지붕 면적으로 대체하고, 그래도 없으면 1㎡ 하한만 적용.
+            # 기존 100㎡ 고정 폴백은 실면적 ~5㎡ 존에 100㎡분 내부발열(조명·기기·인체)을
+            # 주입해 한겨울에도 냉방이 도는 왜곡을 만들었음 (1월 냉방 버그).
+            ceil_area = sum(
+                calculate_surface_area(s.get("vertices", []))
+                for s in surfaces
+                if s.get("zone") == z['id']
+                and ("ceiling" in s.get("type", "").lower() or "roof" in s.get("type", "").lower())
+            )
+            z_area = max(z_area, ceil_area, 1.0)
         z_height = z.get("height", 3.0)  # 💡 Zone별 자동역산 높이 사용
         
         idf.add_zone(z_id, z_area, z_height)

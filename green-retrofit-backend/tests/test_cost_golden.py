@@ -1,5 +1,11 @@
 # 골든(회귀) 테스트: ARK 샘플 건물 + 월별 EnergyPlus 출력 기준의 기대값을 고정한다.
 # 산식을 의도적으로 바꿨다면 아래 golden 값을 함께 갱신할 것 — 그 외의 값 변화는 회귀다.
+#
+# 2026-07-07 픽스처·골든 전면 갱신:
+#  - 구 픽스처 CSV는 다른 건물(12존 박스)의 출력이라 ARK 존과 하나도 매칭되지 않았고,
+#    'HEATING'이라는 존이 부분문자열 매칭으로 모든 난방 컬럼을 합산한 값이 골든에 박혀 있었다.
+#  - 존-컬럼 매칭을 '{존ID}_IDEAL:' 접두 정확 매칭으로 수정하고, 존 면적 100㎡ 고정 폴백
+#    (겨울 냉방 버그의 원인)을 고친 뒤 ARK 건물을 이상부하 모드로 재실행해 픽스처를 재생성.
 import pytest
 
 
@@ -10,19 +16,30 @@ def result(analyzer, base_kwargs):
 
 def test_summary_golden(result):
     s = result["summary"]
-    assert s["consume_per_m2"] == pytest.approx(104.5, abs=0.1)
-    assert s["demand_per_m2"] == pytest.approx(102.6, abs=0.1)
-    assert s["primary_per_m2"] == pytest.approx(100.9, abs=0.1)
-    assert s["co2_per_m2"] == pytest.approx(38.67, abs=0.01)
+    assert s["consume_per_m2"] == pytest.approx(221.2, abs=0.1)
+    assert s["demand_per_m2"] == pytest.approx(247.6, abs=0.1)
+    assert s["primary_per_m2"] == pytest.approx(239.0, abs=0.1)
+    assert s["co2_per_m2"] == pytest.approx(59.85, abs=0.01)
 
 
 def test_matrix_golden(result):
     m = result["matrix"]
-    assert m["heating"]["con"] == pytest.approx(37.7, abs=0.1)
-    assert m["lighting"]["con"] == pytest.approx(26.7, abs=0.1)
-    assert m["equipment"]["con"] == pytest.approx(40.1, abs=0.1)
-    # 월별 CSV엔 냉방 부하가 없어야 함 (난방 지배 기후 샘플)
-    assert m["cooling"]["con"] == 0.0
+    assert m["heating"]["con"] == pytest.approx(142.9, abs=0.1)
+    assert m["cooling"]["con"] == pytest.approx(19.3, abs=0.1)
+    assert m["lighting"]["con"] == pytest.approx(22.0, abs=0.1)
+    assert m["equipment"]["con"] == pytest.approx(14.8, abs=0.1)
+
+
+def test_no_winter_cooling(result):
+    """겨울(11~3월)에 냉방이 잡히면 안 된다.
+
+    존 면적 폴백(바닥 폴리곤 <1㎡ → 100㎡ 고정)이 5㎡ 화장실·0.5㎡ 샤프트에 100㎡분
+    내부발열을 주입해 한겨울에도 냉방이 돌던 버그의 회귀 가드. 여름 냉방은 있어야 한다.
+    """
+    monthly = {m["name"]: m for m in result["monthly"]}
+    for name in ("1월", "2월", "3월", "11월", "12월"):
+        assert monthly[name]["cooling"] == 0.0, f"{name}에 냉방 발생"
+    assert monthly["8월"]["cooling"] > 1.0
 
 
 def test_capital_cost_golden(result):
@@ -42,14 +59,14 @@ def test_capital_cost_golden(result):
 
 def test_energy_bills_golden(result):
     fin = result["financial"]
-    assert fin["annual_elec_bill"] == 11_805_449
-    assert fin["annual_heat_bill"] == 4_259_969
+    assert fin["annual_elec_bill"] == 11_032_473
+    assert fin["annual_heat_bill"] == 18_383_548
 
 
 def test_lcc_metrics_golden(result):
     fin = result["financial"]
-    assert fin["npv"] == pytest.approx(-203_271_679, rel=1e-6)
-    assert fin["irr"] == pytest.approx(-15.01, abs=0.01)
+    assert fin["npv"] == pytest.approx(-58_158_941, rel=1e-6)
+    assert fin["irr"] == pytest.approx(1.93, abs=0.01)
 
 
 def test_monthly_structure(result):

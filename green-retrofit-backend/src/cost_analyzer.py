@@ -654,11 +654,15 @@ class LCCAnalyzer:
                 fan_kwh = (df[fe_col].values / 3600000.0) if fe_col else np.zeros(total_rows)
             else:
                 for z in zones:
-                    z_id = z['id'].replace(" ", "_").upper()
-                    zh_cols = [c for c in h_cols if z_id in c.upper()]
-                    zc_cols = [c for c in c_cols if z_id in c.upper()]
-                    zr_h_cols = [c for c in h_rate_cols if z_id in c.upper()]
-                    zr_c_cols = [c for c in c_rate_cols if z_id in c.upper()]
+                    # 컬럼명은 "{존ID}_IDEAL:Zone Ideal Loads ..." 형식 → 접두 정확 매칭.
+                    # 부분문자열(in) 매칭은 (1) 'HEATING'이라는 존이 모든 존의 Heating 컬럼과
+                    # 매칭돼 난방이 통째로 이중집계되고 (2) '1 TOILET'이 '1 TOILET / ACCESSIBLE'
+                    # 컬럼에도 매칭돼 중복 합산되는 버그가 있었음.
+                    z_key = z['id'].replace(" ", "_").upper() + "_IDEAL:"
+                    zh_cols = [c for c in h_cols if c.upper().startswith(z_key)]
+                    zc_cols = [c for c in c_cols if c.upper().startswith(z_key)]
+                    zr_h_cols = [c for c in h_rate_cols if c.upper().startswith(z_key)]
+                    zr_c_cols = [c for c in c_rate_cols if c.upper().startswith(z_key)]
 
                     zh_kwh = df[zh_cols].sum(axis=1).values / 3600000.0 if zh_cols else 0.0
                     zc_kwh = df[zc_cols].sum(axis=1).values / 3600000.0 if zc_cols else 0.0
