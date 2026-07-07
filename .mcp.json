@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "green-retrofit": {
+      "command": "python3",
+      "args": ["green-retrofit-backend/mcp_server.py"]
+    }
+  }
+}
