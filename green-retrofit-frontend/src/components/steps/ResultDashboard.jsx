@@ -294,6 +294,53 @@ export default function ResultDashboard({
                           />
                           <Bar dataKey="heating" name="난방" fill="#F87171" radius={[8, 8, 0, 0]} barSize={12} />
                           <Bar dataKey="cooling" name="냉방" fill="#60A5FA" radius={[8, 8, 0, 0]} barSize={12} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="flex justify-between items-center mb-8 mt-12">
+                      <h3 className={`text-lg font-black flex items-center gap-2 ${theme.textMain}`}>
+                        <LayoutDashboard size={20} className="text-emerald-500" /> 월별 조명·기기·급탕 에너지
+                        요구량 [kWh/m²a]
+                      </h3>
+                      <div className={`flex gap-4 text-xs font-bold ${theme.textSub}`}>
+                        <span className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-yellow-400"></div> 조명
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-violet-400"></div> 기기
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-orange-400"></div> 급탕
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-[280px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={res?.monthly || []} barGap={4}>
+                          <CartesianGrid vertical={false} stroke={theme.chartGrid} />
+                          <XAxis
+                            dataKey="name"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
+                            dy={10}
+                          />
+                          <YAxis
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: theme.chartText, fontSize: 12, fontWeight: 'bold' }}
+                          />
+                          <Tooltip
+                            cursor={{ fill: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
+                            formatter={(value) => Number(value).toFixed(1)}
+                            contentStyle={{
+                              borderRadius: '16px',
+                              border: isDarkMode ? 'none' : '1px solid #e2e8f0',
+                              backgroundColor: isDarkMode ? '#1e293b' : '#fff',
+                              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                            }}
+                          />
                           <Bar dataKey="lighting" name="조명" fill="#FACC15" radius={[8, 8, 0, 0]} barSize={12} />
                           <Bar dataKey="equipment" name="기기" fill="#A78BFA" radius={[8, 8, 0, 0]} barSize={12} />
                           <Bar dataKey="hotwater" name="급탕" fill="#FB923C" radius={[8, 8, 0, 0]} barSize={12} />

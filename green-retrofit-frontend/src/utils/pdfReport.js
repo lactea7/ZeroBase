@@ -1,7 +1,7 @@
 // utils/pdfReport.js - 결과 리포트 PDF 생성 (인쇄 최적화 A4 2페이지)
-// 1페이지: 요약 / 2페이지: 섹션별 선택 사항·자재 상세
-// 디자인: DESIGN-apple.md — 화이트/파치먼트(#f5f5f7)/니어블랙 타일 교차, 단일 Action Blue(#0066cc),
-// SF Pro 네거티브 트래킹 600 헤드라인, 그림자 0(표면색 전환이 구분선), 밀도 높은 파치먼트 푸터
+// 1페이지: 요약 + 월별 에너지 그래프 / 2페이지: 섹션별 선택 사항·자재 상세
+// 디자인: 에디토리얼 리포트 스타일 — 화이트 캔버스, 잉크 룰(2px)로 위계 구분,
+// 단일 에메랄드 액센트, 업퍼케이스 마이크로 라벨, 차트는 인라인 SVG(검증 팔레트)
 import { COOLING_GRADES, HEATING_AGES, FUEL_TYPES } from '../data/hvac';
 import { formatWon } from './format';
 
@@ -11,6 +11,17 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
 const num = (v, d = 1) => (Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '—');
 const won = (v) => (v || v === 0 ? formatWon(v) : '—');
 const label = (list, id, fallback = '—') => list.find((x) => String(x.id) === String(id))?.name || fallback;
+
+// ── 차트 시리즈 정의 (dataviz 검증 팔레트: 흰 배경 대비·CVD 분리 통과) ──
+const SERIES_HVAC = [
+  { key: 'heating', name: '난방', color: '#e34948' },
+  { key: 'cooling', name: '냉방', color: '#2a78d6' },
+];
+const SERIES_INTERNAL = [
+  { key: 'lighting', name: '조명', color: '#c98500' },
+  { key: 'equipment', name: '기기', color: '#4a3aa7' },
+  { key: 'hotwater', name: '급탕', color: '#eb6834' },
+];
 
 // 존별 설비 내역을 '고유 구성'으로 그룹핑 (82존을 표로 나열하지 않기 위함)
 function groupEquipment(zonesLog = []) {
@@ -38,7 +49,65 @@ function groupInsulation(details = []) {
   return [...map.values()].sort((a, b) => b.cost - a.cost);
 }
 
-export function openPdfReport({ res, projectData = {}, lccAnalysis = {}, zones = [], regionName }) {
+// ── 인라인 SVG 그룹 막대차트 (Recharts 없이 인쇄용으로 직접 렌더) ──
+function niceCeil(v) {
+  if (!(v > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(v));
+  const m = v / p;
+  const s = m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10;
+  return s * p;
+}
+
+function fmtTick(v) {
+  if (v === 0) return '0';
+  return v >= 10 ? String(Math.round(v)) : String(Math.round(v * 10) / 10);
+}
+
+// 데이터 끝(윗변)만 둥근 막대 — 베이스라인에 붙는 아랫변은 직각 유지
+function barPath(x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h);
+  const x2 = x + w;
+  return `M${x},${(y + h).toFixed(1)} L${x},${(y + rr).toFixed(1)} Q${x},${y.toFixed(1)} ${(x + rr).toFixed(1)},${y.toFixed(1)} L${(x2 - rr).toFixed(1)},${y.toFixed(1)} Q${x2},${y.toFixed(1)} ${x2},${(y + rr).toFixed(1)} L${x2},${(y + h).toFixed(1)} Z`;
+}
+
+function monthlyChartSvg(data, series, { w = 356, h = 196 } = {}) {
+  const padL = 26, padR = 2, padT = 8, padB = 16;
+  const pw = w - padL - padR, ph = h - padT - padB;
+  const rawMax = Math.max(0, ...data.flatMap((d) => series.map((s) => Number(d[s.key]) || 0)));
+  const yMax = niceCeil(rawMax || 1);
+  // 눈금 간격이 0.5/1/2 같은 깔끔한 값이 되도록 눈금 수를 최대값 유효숫자에 맞춤
+  const mant = yMax / 10 ** Math.floor(Math.log10(yMax));
+  const ticks = mant === 2 ? 4 : 5;
+  let el = '';
+  for (let i = 0; i <= ticks; i++) {
+    const v = (yMax / ticks) * i;
+    const y = padT + ph - (v / yMax) * ph;
+    el += `<line x1="${padL}" x2="${w - padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${i === 0 ? '#c9ccd2' : '#eef0f3'}" stroke-width="1"/>`;
+    el += `<text x="${padL - 5}" y="${(y + 2.4).toFixed(1)}" text-anchor="end" font-size="6.8" fill="#9095a0">${fmtTick(v)}</text>`;
+  }
+  const n = series.length;
+  const gap = 2;                              // 인접 막대 사이 2px 표면 간격
+  const gw = pw / data.length;
+  const bw = Math.max(2.5, Math.min(9, (gw - 7 - gap * (n - 1)) / n));
+  const inner = n * bw + (n - 1) * gap;
+  data.forEach((d, i) => {
+    const gx = padL + gw * i + (gw - inner) / 2;
+    series.forEach((s, j) => {
+      const v = Number(d[s.key]) || 0;
+      const bh = (v / yMax) * ph;
+      if (bh > 0.4) {
+        el += `<path d="${barPath(gx + j * (bw + gap), padT + ph - bh, bw, bh, 1.6)}" fill="${s.color}"/>`;
+      }
+    });
+    el += `<text x="${(gx + inner / 2).toFixed(1)}" y="${h - 4}" text-anchor="middle" font-size="6.8" fill="#9095a0">${esc(String(d.name).replace('월', ''))}</text>`;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="display:block" xmlns="http://www.w3.org/2000/svg" role="img">${el}</svg>`;
+}
+
+const legendHtml = (series) => series.map((s) =>
+  `<span class="lg"><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('');
+
+export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones = [], regionName }) {
   const fin = res?.financial || {};
   const sum = res?.summary || {};
   const ba = fin.baseline_assumptions || {};
@@ -49,6 +118,7 @@ export function openPdfReport({ res, projectData = {}, lccAnalysis = {}, zones =
   const warns = fin.cost_warnings || [];
   const cd = fin.cost_details || {};
   const lcc = fin.lcc_parameters || {};
+  const monthly = Array.isArray(res?.monthly) ? res.monthly : [];
   const today = new Date().toISOString().slice(0, 10);
 
   const zebRate = Math.round(Number(sum.independence) || 0);
@@ -68,213 +138,240 @@ export function openPdfReport({ res, projectData = {}, lccAnalysis = {}, zones =
   const recTotal = recs.reduce((a, r) => a + (r.saved_cost || 0), 0);
   const savingsPct = ba.savings_pct ?? '—';
 
-  const kpi = (labelTxt, value, unit, note = '') => `
-    <div class="card">
-      <div class="card-label">${esc(labelTxt)}</div>
-      <div class="card-value">${esc(value)}<span class="card-unit">${esc(unit)}</span></div>
-      ${note ? `<div class="card-note">${esc(note)}</div>` : ''}
+  const stat = (labelTxt, value, unit, note = '') => `
+    <div class="stat">
+      <div class="stat-label">${esc(labelTxt)}</div>
+      <div class="stat-value">${esc(value)}${unit ? `<span class="stat-unit">${esc(unit)}</span>` : ''}</div>
+      ${note ? `<div class="stat-note">${esc(note)}</div>` : ''}
     </div>`;
 
   const row = (k, v) => `<div class="row"><div class="row-k">${esc(k)}</div><div class="row-v">${v}</div></div>`;
 
+  const masthead = (aux) => `
+  <div class="band"></div>
+  <header class="mast">
+    <div>
+      <div class="brand">ZeroBase</div>
+      <div class="brand-sub">GREEN RETROFIT REPORT</div>
+    </div>
+    <div class="mast-meta">
+      <div class="mm-title">${esc(projectData.name || '건물 그린 리트로핏')}</div>
+      <div class="mm-sub">${[regionName || projectData.location, aux, today].filter(Boolean).map(esc).join(' · ')}</div>
+    </div>
+  </header>`;
+
   const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>ZeroBase 리포트 — ${esc(projectData.name || '건물 분석')}</title>
 <style>
-  /* ── DESIGN-apple.md 토큰 ── */
   :root {
-    --primary: #0066cc;           /* Action Blue — 유일한 액센트 */
-    --primary-on-dark: #2997ff;   /* Sky Link Blue — 다크 타일 전용 */
-    --ink: #1d1d1f;
-    --ink-80: #333333;
-    --ink-48: #7a7a7a;
-    --body-muted: #cccccc;        /* 다크 타일 보조 카피 */
-    --divider-soft: #f0f0f0;
-    --hairline: #e0e0e0;
-    --canvas: #ffffff;
-    --parchment: #f5f5f7;
-    --tile-dark: #272729;
-    --black: #000000;
+    --ink: #16181d;
+    --ink-2: #565b64;
+    --ink-3: #9095a0;
+    --hairline: #e4e6ea;
+    --soft: #f5f6f8;
+    --accent: #047857;        /* 유일한 액센트 — 에메랄드 (본문·수치용 700) */
+    --accent-bright: #059669; /* 대형 숫자·밴드용 600 */
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { background: #fff; color: var(--ink);
-    /* SF Pro Display/Text — macOS에서 system-ui가 실제 SF Pro로 해석됨 */
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-      "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { size: A4; margin: 0; }
   /* 297mm 정확값은 인쇄 px 반올림으로 하단이 잘림 → 296mm로 안전 확보 */
   .sheet { width: 210mm; height: 296mm; page-break-after: always;
-    display: flex; flex-direction: column; overflow: hidden; background: var(--canvas); }
+    display: flex; flex-direction: column; overflow: hidden; background: #fff;
+    padding: 0 15mm; }
   .sheet:last-child { page-break-after: auto; }
 
-  /* ── global-nav: 순수 블랙은 나브에만 (spec: surface-black) ── */
-  .gnav { background: var(--black); color: #fff; height: 34px; padding: 0 15mm;
-    display: flex; align-items: center; justify-content: space-between; }
-  .gnav .brand { font-size: 11px; font-weight: 600; letter-spacing: -0.01em; }
-  .gnav .meta { font-size: 9px; font-weight: 400; letter-spacing: -0.01em; color: rgba(255,255,255,.8); }
-  .gnav .meta span + span::before { content: "·"; margin: 0 7px; color: rgba(255,255,255,.35); }
+  /* ── 마스트헤드: 액센트 밴드 + 브랜드 / 2px 잉크 룰 ── */
+  .band { height: 5px; background: var(--accent-bright); margin: 0 -15mm; }
+  .mast { display: flex; justify-content: space-between; align-items: flex-end;
+    padding: 16px 0 12px; border-bottom: 2px solid var(--ink); }
+  .brand { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
+  .brand-sub { font-size: 7px; font-weight: 700; letter-spacing: 0.22em; color: var(--accent);
+    margin-top: 2px; }
+  .mast-meta { text-align: right; }
+  .mm-title { font-size: 11px; font-weight: 700; }
+  .mm-sub { font-size: 8.5px; color: var(--ink-3); margin-top: 2px; }
 
-  /* ── sub-nav: 파치먼트 스트립 (frosted 대응 — 인쇄에선 불투명) ── */
-  .subnav { background: var(--parchment); height: 30px; padding: 0 15mm;
-    display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid rgba(0,0,0,.08); }
-  .subnav .cat { font-size: 12px; font-weight: 600; letter-spacing: 0.011em; }
-  .subnav .aux { font-size: 9px; color: var(--ink-48); letter-spacing: -0.01em; }
+  /* ── 히어로: 좌 핵심 수치 / 우 개선 전후 비교 ── */
+  .hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; align-items: center;
+    padding: 30px 0 26px; border-bottom: 1px solid var(--hairline); }
+  .kicker { font-size: 8px; font-weight: 700; letter-spacing: 0.18em; color: var(--ink-3); }
+  .hero .display { font-size: 48px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05;
+    margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .hero .display .u { font-size: 13px; font-weight: 500; color: var(--ink-3); margin-left: 6px;
+    letter-spacing: 0; }
+  .hero .lead { margin-top: 8px; font-size: 9.5px; line-height: 1.5; color: var(--ink-2); }
+  .hero .save { margin-top: 10px; font-size: 11px; font-weight: 700; }
+  .hero .save b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .hero .save span + span { margin-left: 14px; }
 
-  /* ── 히어로 타일 (화이트, 센터 스택 — 헤드라인 위 64px급 여백) ── */
-  .hero { text-align: center; padding: 46px 15mm 40px; background: var(--canvas); }
-  .hero .eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: 0.011em; color: var(--ink); }
-  .hero .display { font-size: 38px; font-weight: 600; line-height: 1.07; letter-spacing: -0.005em;
-    margin-top: 10px; font-variant-numeric: tabular-nums; }
-  .hero .display .u { font-size: 14px; font-weight: 400; color: var(--ink-48); margin-left: 6px; letter-spacing: 0; }
-  .hero .lead { margin-top: 10px; font-size: 12px; font-weight: 400; line-height: 1.47;
-    letter-spacing: -0.022em; color: var(--ink-80); }
-  /* 두 개의 필 CTA 문법: 채운 블루 / 고스트 블루 */
-  .hero .pills { margin-top: 16px; display: flex; justify-content: center; gap: 10px; }
-  .pill { display: inline-block; border-radius: 9999px; padding: 6px 15px;
-    font-size: 10.5px; font-weight: 400; letter-spacing: -0.01em; }
-  .pill.fill { background: var(--primary); color: #fff; }
-  .pill.ghost { color: var(--primary); border: 1px solid var(--primary); }
-
-  /* ── 유틸리티 카드 그리드: 파치먼트 캔버스 위 화이트 카드(18px·헤어라인·그림자 없음) ── */
-  .util { background: var(--parchment); padding: 22px 15mm 26px; }
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-  .card { background: var(--canvas); border: 1px solid var(--hairline); border-radius: 18px;
-    padding: 16px 14px 14px; text-align: center; }
-  .card-label { font-size: 9px; font-weight: 600; letter-spacing: -0.016em; color: var(--ink-48); }
-  .card-value { font-size: 17px; font-weight: 600; letter-spacing: -0.022em; margin-top: 7px;
+  .ba { background: var(--soft); border-radius: 12px; padding: 16px 18px; }
+  .ba-t { font-size: 8px; font-weight: 700; letter-spacing: 0.14em; color: var(--ink-3); }
+  .ba-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center; gap: 12px; }
+  .ba-k { font-size: 8px; color: var(--ink-3); font-weight: 600; }
+  .ba-v { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; margin-top: 3px;
     font-variant-numeric: tabular-nums; }
-  .card-unit { font-size: 9.5px; font-weight: 400; color: var(--ink-48); margin-left: 3px; }
-  .card-note { margin-top: 5px; font-size: 8.5px; font-weight: 400; color: var(--ink-48);
-    letter-spacing: -0.016em; }
+  .ba-v .u { font-size: 8.5px; font-weight: 500; color: var(--ink-3); }
+  .ba-cost { margin-top: 4px; font-size: 8.5px; color: var(--ink-2); }
+  .ba-arrow { font-size: 15px; color: var(--accent); font-weight: 700; }
+  .ba-note { margin-top: 9px; font-size: 7.5px; color: var(--ink-3); }
 
-  /* ── 다크 타일: 표면색 전환이 곧 구분선 (rounded.none, 풀블리드) ── */
-  .dark-tile { background: var(--tile-dark); color: #fff; padding: 26px 15mm; text-align: center; }
-  .dark-tile .t { font-size: 13px; font-weight: 600; letter-spacing: 0.011em; }
-  .dark-tile .s { margin-top: 4px; font-size: 9px; font-weight: 400; color: var(--body-muted);
-    letter-spacing: -0.016em; }
-  .ba { margin-top: 16px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
-  .ba-k { font-size: 9px; font-weight: 400; color: var(--body-muted); letter-spacing: -0.016em; }
-  .ba-v { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin-top: 5px;
+  /* ── KPI: 카드 없이 2px 톱룰 스탯 (에디토리얼) ── */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px 22px;
+    padding: 22px 0 24px; border-bottom: 1px solid var(--hairline); }
+  .stat { border-top: 2px solid var(--ink); padding-top: 8px; }
+  .stat-label { font-size: 7.5px; font-weight: 700; letter-spacing: 0.1em; color: var(--ink-3); }
+  .stat-value { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; margin-top: 5px;
     font-variant-numeric: tabular-nums; }
-  .ba-cost { margin-top: 7px; font-size: 9.5px; font-weight: 400; color: var(--primary-on-dark); }
-  .ba-arrow { font-size: 17px; color: var(--primary-on-dark); font-weight: 400; }
+  .stat-unit { font-size: 8.5px; font-weight: 500; color: var(--ink-3); margin-left: 3px; }
+  .stat-note { margin-top: 3px; font-size: 7.8px; color: var(--ink-2); }
 
-  /* ── 추천 타일 (화이트) — 인라인 블루 텍스트 링크 문법 ── */
-  .recs { background: var(--canvas); padding: 22px 15mm; text-align: center; }
-  .recs .t { font-size: 13px; font-weight: 600; letter-spacing: 0.011em; }
-  .recs .list { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 26px;
-    text-align: left; }
-  .recs .item { font-size: 9.5px; font-weight: 400; letter-spacing: -0.016em; line-height: 1.47;
-    padding: 3px 0; color: var(--ink-80); }
-  .recs .item b { font-weight: 600; color: var(--ink); }
-  .recs .item .amt { color: var(--primary); }
+  /* ── 월별 차트 2분할: 냉난방 / 조명·기기·급탕 ── */
+  .charts { padding: 24px 0 6px; }
+  .charts-h { display: flex; align-items: baseline; gap: 10px; }
+  .charts-h h2 { font-size: 12.5px; font-weight: 800; letter-spacing: -0.01em; }
+  .charts-h .unit { font-size: 8px; color: var(--ink-3); }
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 10px; }
+  .chart-box .ch-h { display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 6px; }
+  .chart-box .ch-t { font-size: 9.5px; font-weight: 700; }
+  .legend { display: flex; gap: 9px; }
+  .lg { display: inline-flex; align-items: center; gap: 4px; font-size: 7.8px; font-weight: 600;
+    color: var(--ink-2); }
+  .lg i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
 
-  /* ── 섹션 (2페이지, 화이트 캔버스·헤어라인 룰) ── */
-  .content { padding: 4px 15mm 0; }
-  .section { margin-top: 22px; }
-  .section-h { display: flex; align-items: baseline; gap: 9px; padding-bottom: 7px;
-    border-bottom: 1px solid var(--hairline); margin-bottom: 9px; }
-  .section-no { font-size: 9px; font-weight: 600; color: var(--ink-48); letter-spacing: -0.016em;
+  /* ── 추천 대안 ── */
+  .recs { padding: 22px 0 0; border-top: 1px solid var(--hairline); margin-top: 18px; }
+  .recs .t { font-size: 11.5px; font-weight: 800; }
+  .recs .t b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .recs .list { margin-top: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 26px; }
+  .recs .item { font-size: 9.2px; line-height: 1.55; padding: 3.5px 0; color: var(--ink-2);
+    border-bottom: 1px solid var(--soft); }
+  .recs .item b { font-weight: 700; color: var(--ink); }
+  .recs .item .amt { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ── 2페이지 섹션 ── */
+  .section { margin-top: 18px; }
+  .section-h { display: flex; align-items: baseline; gap: 9px; padding-bottom: 6px;
+    border-bottom: 2px solid var(--ink); margin-bottom: 8px; }
+  .section-no { font-size: 9px; font-weight: 800; color: var(--accent);
     font-variant-numeric: tabular-nums; }
-  .section-h h2 { font-size: 14px; font-weight: 600; letter-spacing: -0.011em; }
-  .section-h .cost { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--primary);
-    font-variant-numeric: tabular-nums; letter-spacing: -0.022em; }
-  .row { display: grid; grid-template-columns: 34% 1fr; padding: 5.5px 0;
-    border-bottom: 1px solid var(--divider-soft); font-size: 10.5px; letter-spacing: -0.022em; }
+  .section-h h2 { font-size: 12.5px; font-weight: 800; letter-spacing: -0.01em; }
+  .section-h .cost { margin-left: auto; font-size: 11px; font-weight: 800;
+    font-variant-numeric: tabular-nums; }
+  .section-h .cost::before { content: "공사비 "; font-size: 7.5px; font-weight: 600;
+    color: var(--ink-3); letter-spacing: 0.08em; margin-right: 3px; }
+  .row { display: grid; grid-template-columns: 34% 1fr; padding: 5px 0;
+    border-bottom: 1px solid var(--soft); font-size: 9.8px; }
   .row:last-child { border-bottom: none; }
-  .row-k { color: var(--ink-48); font-weight: 400; }
-  .row-v { font-weight: 600; color: var(--ink); }
-  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 40px; }
+  .row-k { color: var(--ink-3); font-weight: 500; }
+  .row-v { font-weight: 700; color: var(--ink); }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 36px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 2px;
-    letter-spacing: -0.016em; }
-  th { text-align: left; font-size: 8.5px; font-weight: 600; letter-spacing: -0.016em;
-    color: var(--ink-48); padding: 4px 8px; border-bottom: 1px solid var(--hairline); }
-  td { padding: 5.5px 8px; border-bottom: 1px solid var(--divider-soft); font-weight: 400;
+  table { width: 100%; border-collapse: collapse; font-size: 9.3px; margin-top: 4px; }
+  th { text-align: left; font-size: 7.2px; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--ink-3); padding: 4px 8px; border-bottom: 1px solid var(--ink); }
+  td { padding: 5px 8px; border-bottom: 1px solid var(--soft); font-weight: 500;
     vertical-align: top; color: var(--ink); }
   tr:last-child td { border-bottom: none; }
   td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  /* configurator-option-chip 문법: 화이트+헤어라인 필 / 선택(입력값) = 블루 보더 */
-  .chip { display: inline-block; font-size: 8px; font-weight: 400; padding: 2px 9px;
-    border-radius: 9999px; background: var(--canvas); border: 1px solid var(--hairline);
-    color: var(--ink); }
-  .chip.user { border: 1.5px solid var(--primary); color: var(--primary); font-weight: 600; }
+  .chip { display: inline-block; font-size: 7.5px; font-weight: 600; padding: 2px 8px;
+    border-radius: 9999px; background: var(--soft); color: var(--ink-2); }
+  .chip.user { background: #fff; border: 1px solid var(--accent); color: var(--accent); }
 
-  /* ── 가정·유의 파치먼트 타일 ── */
-  .assump { background: var(--parchment); padding: 18px 15mm 16px; margin-top: 22px; }
-  .assump .t { font-size: 12px; font-weight: 600; letter-spacing: -0.011em; margin-bottom: 9px; }
-  .note-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 26px; font-size: 8.8px;
-    color: var(--ink-80); letter-spacing: -0.016em; }
-  .note-grid b { color: var(--ink); font-weight: 600; }
-  .note-item { padding: 3px 0; line-height: 1.47; }
-  .warn-item { font-size: 8.8px; color: var(--ink-80); padding: 2.5px 0; line-height: 1.47; }
-  .warn-item::before { content: "◦ "; color: var(--ink-48); }
+  /* ── 가정·유의 ── */
+  .assump { background: var(--soft); border-radius: 12px; padding: 14px 16px 12px;
+    margin-top: 18px; }
+  .assump .t { font-size: 10.5px; font-weight: 800; margin-bottom: 7px; }
+  .note-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 22px; font-size: 8.2px;
+    color: var(--ink-2); }
+  .note-grid b { color: var(--ink); font-weight: 700; }
+  .note-item { padding: 2.5px 0; line-height: 1.5; }
+  .warn-item { font-size: 8.2px; color: var(--ink-2); padding: 2px 0; line-height: 1.5; }
+  .warn-item::before { content: "◦ "; color: var(--ink-3); }
 
-  /* ── 밀도 높은 파치먼트 푸터 (fine-print 문법) ── */
-  .foot { margin-top: auto; background: var(--parchment); padding: 12px 15mm 13px;
+  /* ── 푸터 ── */
+  .foot { margin-top: auto; border-top: 1px solid var(--hairline); padding: 10px 0 14px;
     display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
-    font-size: 8px; color: var(--ink-48); line-height: 1.5; letter-spacing: -0.01em; }
-  .foot b { color: var(--ink-80); font-weight: 600; }
-  .pageno { font-weight: 600; white-space: nowrap; color: var(--ink-80);
+    font-size: 7.5px; color: var(--ink-3); line-height: 1.55; }
+  .foot b { color: var(--ink-2); font-weight: 700; }
+  .pageno { font-weight: 800; white-space: nowrap; color: var(--ink);
     font-variant-numeric: tabular-nums; }
 </style></head><body>
 
-<!-- ═══════════ PAGE 1 · 요약 ═══════════ -->
+<!-- ═══════════ PAGE 1 · 요약 + 월별 그래프 ═══════════ -->
 <section class="sheet">
-  <div class="gnav">
-    <div class="brand">ZeroBase</div>
-    <div class="meta">
-      <span>${esc(projectData.name || '건물 그린 리트로핏')}</span>
-      <span>${esc(regionName || projectData.location || '')}</span>
-      <span>존 ${zones.length || (eq?.zones?.length ?? '—')}개</span>
-      <span>${today}</span>
-    </div>
-  </div>
+  ${masthead(`존 ${zones.length || (eq?.zones?.length ?? '—')}개`)}
 
   <div class="hero">
-    <div class="eyebrow">연간 에너지 소요량</div>
-    <div class="display">${num(sum.consume_per_m2)}<span class="u">kWh/㎡·년</span></div>
-    <div class="lead">기준 건물(${esc(baselineLabel)}) 대비 — 난방 열원 ${esc(heatLabel)}</div>
-    <div class="pills">
-      <span class="pill fill">절감률 ${esc(savingsPct)}%</span>
-      <span class="pill ghost">연간 절감액 ${won(lccAnalysis.annualSavings)}</span>
-    </div>
-  </div>
-
-  <div class="util">
-    <div class="grid3">
-      ${kpi('1차에너지 소요량', num(sum.primary_per_m2), 'kWh/㎡·년')}
-      ${kpi('CO2 배출량', num(sum.co2_per_m2, 2), 'kg/㎡·년')}
-      ${kpi('에너지 자립률', `${zebRate}`, '%', `ZEB ${zebGrade}`)}
-      ${kpi('총 공사비', won(fin.capital_cost), '')}
-      ${kpi('연간 에너지 요금', won(fin.total_energy_bill ?? ((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))), '', `전기 ${won(fin.annual_elec_bill)} · 열 ${won(fin.annual_heat_bill)}`)}
-      ${kpi('투자 회수기간', lccAnalysis.paybackYears ? num(lccAnalysis.paybackYears) : '—', '년', `NPV ${won(fin.npv)} · IRR ${num(fin.irr)}%`)}
-    </div>
-  </div>
-
-  ${base ? `
-  <div class="dark-tile">
-    <div class="t">개선 전 · 후 비교</div>
-    <div class="s">동일 물리 엔진(EnergyPlus) 산출</div>
-    <div class="ba">
-      <div>
-        <div class="ba-k">개선 전 (원본 건물)</div>
-        <div class="ba-v">${num(base.summary?.consume_per_m2)} kWh/㎡</div>
-        <div class="ba-cost">연간 운영비 ${won((base.annual_elec_bill || 0) + (base.annual_heat_bill || 0))}</div>
+    <div>
+      <div class="kicker">연간 에너지 소요량</div>
+      <div class="display">${num(sum.consume_per_m2)}<span class="u">kWh/㎡·년</span></div>
+      <div class="lead">기준 건물(${esc(baselineLabel)}) 대비 · 난방 열원 ${esc(heatLabel)}</div>
+      <div class="save">
+        <span>절감률 <b>${esc(savingsPct)}%</b></span>
+        <span>연간 절감액 <b>${won(lccAnalysis.annualSavings)}</b></span>
       </div>
-      <div class="ba-arrow">→</div>
-      <div>
-        <div class="ba-k">개선 후 (리모델링안)</div>
-        <div class="ba-v">${num(sum.consume_per_m2)} kWh/㎡</div>
-        <div class="ba-cost">연간 운영비 ${won((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))}</div>
+    </div>
+    ${base ? `
+    <div class="ba">
+      <div class="ba-t">개선 전 · 후 비교</div>
+      <div class="ba-grid">
+        <div>
+          <div class="ba-k">개선 전 (원본 건물)</div>
+          <div class="ba-v">${num(base.summary?.consume_per_m2)}<span class="u"> kWh/㎡</span></div>
+          <div class="ba-cost">연간 운영비 ${won((base.annual_elec_bill || 0) + (base.annual_heat_bill || 0))}</div>
+        </div>
+        <div class="ba-arrow">→</div>
+        <div>
+          <div class="ba-k">개선 후 (리모델링안)</div>
+          <div class="ba-v">${num(sum.consume_per_m2)}<span class="u"> kWh/㎡</span></div>
+          <div class="ba-cost">연간 운영비 ${won((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))}</div>
+        </div>
+      </div>
+      <div class="ba-note">동일 물리 엔진(EnergyPlus) 산출</div>
+    </div>` : ''}
+  </div>
+
+  <div class="stats">
+    ${stat('1차에너지 소요량', num(sum.primary_per_m2), 'kWh/㎡·년')}
+    ${stat('CO2 배출량', num(sum.co2_per_m2, 2), 'kg/㎡·년')}
+    ${stat('에너지 자립률', `${zebRate}`, '%', `ZEB ${zebGrade}`)}
+    ${stat('총 공사비', won(fin.capital_cost), '')}
+    ${stat('연간 에너지 요금', won(fin.total_energy_bill ?? ((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))), '', `전기 ${won(fin.annual_elec_bill)} · 열 ${won(fin.annual_heat_bill)}`)}
+    ${stat('투자 회수기간', lccAnalysis.paybackYears ? num(lccAnalysis.paybackYears) : '—', '년', `NPV ${won(fin.npv)} · IRR ${num(fin.irr)}%`)}
+  </div>
+
+  ${monthly.length ? `
+  <div class="charts">
+    <div class="charts-h">
+      <h2>월별 에너지 요구량</h2>
+      <span class="unit">단위: kWh/㎡ · 가로축: 월</span>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-box">
+        <div class="ch-h">
+          <div class="ch-t">냉난방</div>
+          <div class="legend">${legendHtml(SERIES_HVAC)}</div>
+        </div>
+        ${monthlyChartSvg(monthly, SERIES_HVAC)}
+      </div>
+      <div class="chart-box">
+        <div class="ch-h">
+          <div class="ch-t">조명 · 기기 · 급탕</div>
+          <div class="legend">${legendHtml(SERIES_INTERNAL)}</div>
+        </div>
+        ${monthlyChartSvg(monthly, SERIES_INTERNAL)}
       </div>
     </div>
   </div>` : ''}
 
   ${recs.length ? `
   <div class="recs">
-    <div class="t">추가 절감 대안 ${recs.length}건 — 모두 적용 시 −${won(recTotal)}</div>
+    <div class="t">추가 절감 대안 ${recs.length}건 — 모두 적용 시 <b>−${won(recTotal)}</b></div>
     <div class="list">
       ${recs.map((r) => `<div class="item"><b>${esc(r.title)}</b> — 절감 <span class="amt">${won(r.saved_cost)}</span></div>`).join('')}
     </div>
@@ -292,82 +389,73 @@ export function openPdfReport({ res, projectData = {}, lccAnalysis = {}, zones =
 
 <!-- ═══════════ PAGE 2 · 섹션별 선택 사항 · 자재 상세 ═══════════ -->
 <section class="sheet">
-  <div class="gnav">
-    <div class="brand">ZeroBase</div>
-    <div class="meta"><span>${esc(projectData.name || '건물 그린 리트로핏')}</span><span>${today}</span></div>
-  </div>
-  <div class="subnav">
-    <div class="cat">적용 사양 및 자재 상세</div>
-    <div class="aux">${esc(regionName || projectData.location || '')}</div>
-  </div>
+  ${masthead('적용 사양 및 자재 상세')}
 
-  <div class="content">
-    <div class="section">
-      <div class="section-h"><span class="section-no">01</span><h2>프로젝트 설정</h2></div>
-      <div class="grid2">
-        <div>
-          ${row('지역 (기상데이터)', esc(regionName || projectData.location || '—'))}
-          ${row('난방 열원', esc(heatLabel))}
-          ${row('지열 히트펌프', projectData.geothermalApplied ? '적용 (COP 5.0/4.5)' : '미적용')}
-          ${row('태양광(PV)', projectData.pvCapacity ? `${esc(projectData.pvCapacity)} kW (연 ${(projectData.pvCapacity * 1300).toLocaleString()} kWh 자가소비)` : '미설치')}
-        </div>
-        <div>
-          ${row('목표 예산', projectData.targetBudget ? `${Number(projectData.targetBudget).toLocaleString()} 만원` : '미설정')}
-          ${row('LCC 분석 기간', `${lcc.lifecycle_years ?? 20}년`)}
-          ${row('할인율 / 물가 / 요금상승', `${num(lcc.discount_rate)}% / ${num(lcc.inflation_rate)}% / ${num(lcc.utility_inflation)}%`)}
-          ${row('기준 건물 산정', esc(baselineLabel))}
-        </div>
+  <div class="section">
+    <div class="section-h"><span class="section-no">01</span><h2>프로젝트 설정</h2></div>
+    <div class="grid2">
+      <div>
+        ${row('지역 (기상데이터)', esc(regionName || projectData.location || '—'))}
+        ${row('난방 열원', esc(heatLabel))}
+        ${row('지열 히트펌프', projectData.geothermalApplied ? '적용 (COP 5.0/4.5)' : '미적용')}
+        ${row('태양광(PV)', projectData.pvCapacity ? `${esc(projectData.pvCapacity)} kW (연 ${(projectData.pvCapacity * 1300).toLocaleString()} kWh 자가소비)` : '미설치')}
+      </div>
+      <div>
+        ${row('목표 예산', projectData.targetBudget ? `${Number(projectData.targetBudget).toLocaleString()} 만원` : '미설정')}
+        ${row('LCC 분석 기간', `${lcc.lifecycle_years ?? 20}년`)}
+        ${row('할인율 / 물가 / 요금상승', `${num(lcc.discount_rate)}% / ${num(lcc.inflation_rate)}% / ${num(lcc.utility_inflation)}%`)}
+        ${row('기준 건물 산정', esc(baselineLabel))}
       </div>
     </div>
+  </div>
 
-    <div class="section">
-      <div class="section-h"><span class="section-no">02</span><h2>냉난방 설비</h2>
-        <span class="cost">${won(cd.hvac)}</span></div>
-      ${row('냉방기 등급·연식 (건물 기본)', esc(coolGrade))}
-      ${row('난방기 연식 (건물 기본)', esc(heatAge))}
-      ${eqGroups.length ? `
-      <table>
-        <tr><th>구성 (난방 / 냉방)</th><th style="text-align:right">존 수</th><th>적용 예</th><th>출처</th></tr>
-        ${eqGroups.slice(0, 6).map((g) => `
-        <tr>
-          <td>${esc(g.heating)}<br>${esc(g.cooling)}</td>
-          <td class="n" style="text-align:right">${g.count}</td>
-          <td>${esc(g.examples.join(', '))}${g.count > g.examples.length ? ' 외' : ''}</td>
-          <td><span class="chip ${g.source === 'user' ? 'user' : ''}">${g.source === 'user' ? '입력값' : '자동'}</span></td>
-        </tr>`).join('')}
-        ${eqGroups.length > 6 ? `<tr><td colspan="4" style="color:var(--ink-48)">…외 구성 ${eqGroups.length - 6}종</td></tr>` : ''}
-      </table>` : ''}
-    </div>
+  <div class="section">
+    <div class="section-h"><span class="section-no">02</span><h2>냉난방 설비</h2>
+      <span class="cost">${won(cd.hvac)}</span></div>
+    ${row('냉방기 등급·연식 (건물 기본)', esc(coolGrade))}
+    ${row('난방기 연식 (건물 기본)', esc(heatAge))}
+    ${eqGroups.length ? `
+    <table>
+      <tr><th>구성 (난방 / 냉방)</th><th style="text-align:right">존 수</th><th>적용 예</th><th>출처</th></tr>
+      ${eqGroups.slice(0, 6).map((g) => `
+      <tr>
+        <td>${esc(g.heating)}<br>${esc(g.cooling)}</td>
+        <td class="n" style="text-align:right">${g.count}</td>
+        <td>${esc(g.examples.join(', '))}${g.count > g.examples.length ? ' 외' : ''}</td>
+        <td><span class="chip ${g.source === 'user' ? 'user' : ''}">${g.source === 'user' ? '입력값' : '자동'}</span></td>
+      </tr>`).join('')}
+      ${eqGroups.length > 6 ? `<tr><td colspan="4" style="color:var(--ink-3)">…외 구성 ${eqGroups.length - 6}종</td></tr>` : ''}
+    </table>` : ''}
+  </div>
 
-    <div class="section">
-      <div class="section-h"><span class="section-no">03</span><h2>창호</h2>
-        <span class="cost">${won(cd.window)}</span></div>
-      ${row('적용 등급 (U값 기반 매칭)', esc(fin.mapped_window_name || '—'))}
-      ${row('산정 방식', '창 면적가중 실측 U/SHGC → 친환경건설자재 DB 창세트 중앙값 단가')}
-    </div>
+  <div class="section">
+    <div class="section-h"><span class="section-no">03</span><h2>창호</h2>
+      <span class="cost">${won(cd.window)}</span></div>
+    ${row('적용 등급 (U값 기반 매칭)', esc(fin.mapped_window_name || '—'))}
+    ${row('산정 방식', '창 면적가중 실측 U/SHGC → 친환경건설자재 DB 창세트 중앙값 단가')}
+  </div>
 
-    <div class="section">
-      <div class="section-h"><span class="section-no">04</span><h2>단열재</h2>
-        <span class="cost">${won(cd.insulation)}</span></div>
-      ${insGroups.length ? `
-      <table>
-        <tr><th>등급</th><th style="text-align:right">시공 면적</th><th style="text-align:right">단가</th><th style="text-align:right">비용</th><th style="text-align:right">부위 수</th></tr>
-        ${insGroups.map((g) => `
-        <tr>
-          <td>${esc(g.tier)}</td>
-          <td class="n" style="text-align:right">${g.area.toFixed(1)} ㎡</td>
-          <td class="n" style="text-align:right">₩${(g.price || 0).toLocaleString()}/㎡</td>
-          <td class="n" style="text-align:right">${won(g.cost)}</td>
-          <td class="n" style="text-align:right">${g.count}</td>
-        </tr>`).join('')}
-      </table>` : row('산정 방식', '단열층 미검출 — 벽면적 × DB 폴백 단가 적용')}
-    </div>
+  <div class="section">
+    <div class="section-h"><span class="section-no">04</span><h2>단열재</h2>
+      <span class="cost">${won(cd.insulation)}</span></div>
+    ${insGroups.length ? `
+    <table>
+      <tr><th>등급</th><th style="text-align:right">시공 면적</th><th style="text-align:right">단가</th><th style="text-align:right">비용</th><th style="text-align:right">부위 수</th></tr>
+      ${insGroups.map((g) => `
+      <tr>
+        <td>${esc(g.tier)}</td>
+        <td class="n" style="text-align:right">${g.area.toFixed(1)} ㎡</td>
+        <td class="n" style="text-align:right">₩${(g.price || 0).toLocaleString()}/㎡</td>
+        <td class="n" style="text-align:right">${won(g.cost)}</td>
+        <td class="n" style="text-align:right">${g.count}</td>
+      </tr>`).join('')}
+    </table>` : row('산정 방식', '단열층 미검출 — 벽면적 × DB 폴백 단가 적용')}
+  </div>
 
-    <div class="section">
-      <div class="section-h"><span class="section-no">05</span><h2>LED 조명</h2>
-        <span class="cost">${won(cd.led)}</span></div>
-      ${row('산정 방식', '거주면적 10㎡당 등기구 1개 환산 × 개당 중앙값 단가 (비거주 구역 30% 반영)')}
-    </div>
+  <div class="section">
+    <div class="section-h"><span class="section-no">05</span><h2>LED 조명</h2>
+      <span class="cost">${won(cd.led)}</span></div>
+    ${row('산정 방식', '거주면적 10㎡당 등기구 1개 환산 × 개당 중앙값 단가 (비거주 구역 30% 반영)')}
   </div>
 
   <div class="assump">
@@ -375,7 +463,7 @@ export function openPdfReport({ res, projectData = {}, lccAnalysis = {}, zones =
     <div class="note-grid">
       ${notes.map((n) => `<div class="note-item"><b>${esc(n.label)}</b> — ${esc(n.note)}</div>`).join('')}
     </div>
-    ${warns.length ? `<div style="margin-top:7px">${warns.map((w) => `<div class="warn-item">${esc(w)}</div>`).join('')}</div>` : ''}
+    ${warns.length ? `<div style="margin-top:6px">${warns.map((w) => `<div class="warn-item">${esc(w)}</div>`).join('')}</div>` : ''}
   </div>
 
   <div class="foot">
@@ -390,6 +478,11 @@ export function openPdfReport({ res, projectData = {}, lccAnalysis = {}, zones =
 </script>
 </body></html>`;
 
+  return html;
+}
+
+export function openPdfReport(params) {
+  const html = buildReportHtml(params);
   const win = window.open('', '_blank');
   if (!win) {
     alert('팝업이 차단되어 리포트를 열 수 없습니다. 팝업을 허용해 주세요.');
