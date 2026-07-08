@@ -49,7 +49,6 @@ import {
   Lightbulb,
   Monitor,
   Zap,
-  Compass,
   Activity,
   Calculator,
   MapPin,
@@ -1192,19 +1191,6 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      <div>
-                        <label className={`block text-[10px] font-black uppercase tracking-widest mb-2 mt-2 ${theme.textSub}`}>건물 정북방향 회전각(°)</label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            value={projectData.orientation}
-                            onChange={(e) => setProjectData({ ...projectData, orientation: parseInt(e.target.value) || 0 })}
-                            className={`w-full p-4 pl-10 rounded-2xl outline-none border ${theme.input} focus:border-emerald-500`}
-                          />
-                          <Compass size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                        </div>
-                      </div>
-
                       <div
                         className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.customSchedule.useCustom ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-500/30 bg-black/5'}`}
                         onClick={() => {
