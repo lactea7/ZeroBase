@@ -136,13 +136,25 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   const eqGroups = groupEquipment(eq?.zones);
   const insGroups = groupInsulation(fin.insulation_details);
   const recTotal = recs.reduce((a, r) => a + (r.saved_cost || 0), 0);
-  const savingsPct = ba.savings_pct ?? '—';
+  const savingsPct = ba.savings_pct ?? '—'; // 운영비 기준 절감률 (에너지 아님)
 
-  const stat = (labelTxt, value, unit, note = '') => `
+  // 목표 예산 초과 판단 — 대시보드(ResultDashboard)와 동일 기준 (둘 다 원 단위)
+  const targetBudget = Number(fin.target_budget) || 0;
+  const overAmt = targetBudget > 0 ? (Number(fin.capital_cost) || 0) - targetBudget : 0;
+  const overBudget = overAmt > 0;
+  const overPct = overBudget ? Math.round((overAmt / targetBudget) * 100) : 0;
+
+  // 개선 후 소요량이 개선 전보다 큰 경우 — PV 자가소비는 kWh에 미반영(요금에만 차감)이라
+  // "소요량 증가 + 운영비 감소"가 동시에 성립할 수 있음을 리포트에서 설명해야 함
+  const pvKw = Number(projectData.pvCapacity) || 0;
+  const energyUp = base && Number(sum.consume_per_m2) > Number(base.summary?.consume_per_m2);
+  const sens = Array.isArray(fin.npv_sensitivity) ? fin.npv_sensitivity : [];
+
+  const stat = (labelTxt, value, unit, note = '', noteWarn = false) => `
     <div class="stat">
       <div class="stat-label">${esc(labelTxt)}</div>
       <div class="stat-value">${esc(value)}${unit ? `<span class="stat-unit">${esc(unit)}</span>` : ''}</div>
-      ${note ? `<div class="stat-note">${esc(note)}</div>` : ''}
+      ${note ? `<div class="stat-note${noteWarn ? ' warn' : ''}">${esc(note)}</div>` : ''}
     </div>`;
 
   const row = (k, v) => `<div class="row"><div class="row-k">${esc(k)}</div><div class="row-v">${v}</div></div>`;
@@ -228,6 +240,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
     font-variant-numeric: tabular-nums; }
   .stat-unit { font-size: 8.5px; font-weight: 500; color: var(--ink-3); margin-left: 3px; }
   .stat-note { margin-top: 3px; font-size: 7.8px; color: var(--ink-2); }
+  .stat-note.warn { color: #b91c1c; font-weight: 700; }
 
   /* ── 월별 차트 2분할: 냉난방 / 조명·기기·급탕 ── */
   .charts { padding: 24px 0 6px; }
@@ -312,8 +325,8 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
       <div class="display">${num(sum.consume_per_m2)}<span class="u">kWh/㎡·년</span></div>
       <div class="lead">기준 건물(${esc(baselineLabel)}) 대비 · 난방 열원 ${esc(heatLabel)}</div>
       <div class="save">
-        <span>절감률 <b>${esc(savingsPct)}%</b></span>
-        <span>연간 절감액 <b>${won(lccAnalysis.annualSavings)}</b></span>
+        <span>운영비 절감률 <b>${esc(savingsPct)}%</b></span>
+        <span>연간 운영비 절감액 <b>${won(lccAnalysis.annualSavings)}</b></span>
       </div>
     </div>
     ${base ? `
@@ -332,7 +345,13 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
           <div class="ba-cost">연간 운영비 ${won((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))}</div>
         </div>
       </div>
-      <div class="ba-note">동일 물리 엔진(EnergyPlus) 산출</div>
+      <div class="ba-note">${[
+        'kWh 수치는 동일 물리 엔진(EnergyPlus) 산출',
+        energyUp ? (pvKw > 0
+          ? `소요량에는 PV 자가소비(연 ${(pvKw * 1300).toLocaleString()} kWh)가 차감되지 않고 요금에서만 상쇄되어, 소요량이 늘어도 운영비는 감소할 수 있습니다`
+          : '열원·요금 구조에 따라 소요량이 늘어도 운영비는 감소할 수 있습니다') : '',
+        ba.source && ba.source !== 'simulated' ? `절감액 산정 기준: ${esc(baselineLabel)}` : '',
+      ].filter(Boolean).join(' · ')}</div>
     </div>` : ''}
   </div>
 
@@ -340,7 +359,10 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
     ${stat('1차에너지 소요량', num(sum.primary_per_m2), 'kWh/㎡·년')}
     ${stat('CO2 배출량', num(sum.co2_per_m2, 2), 'kg/㎡·년')}
     ${stat('에너지 자립률', `${zebRate}`, '%', `ZEB ${zebGrade}`)}
-    ${stat('총 공사비', won(fin.capital_cost), '')}
+    ${stat('총 공사비', won(fin.capital_cost), '',
+      targetBudget > 0
+        ? (overBudget ? `목표 예산 ${won(overAmt)} (${overPct}%) 초과` : '목표 예산 이내')
+        : '', overBudget)}
     ${stat('연간 에너지 요금', won(fin.total_energy_bill ?? ((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))), '', `전기 ${won(fin.annual_elec_bill)} · 열 ${won(fin.annual_heat_bill)}`)}
     ${stat('투자 회수기간', lccAnalysis.paybackYears ? num(lccAnalysis.paybackYears) : '—', '년', `NPV ${won(fin.npv)} · IRR ${num(fin.irr)}%`)}
   </div>
@@ -373,7 +395,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   <div class="recs">
     <div class="t">추가 절감 대안 ${recs.length}건 — 모두 적용 시 <b>−${won(recTotal)}</b></div>
     <div class="list">
-      ${recs.map((r) => `<div class="item"><b>${esc(r.title)}</b> — 절감 <span class="amt">${won(r.saved_cost)}</span></div>`).join('')}
+      ${recs.map((r) => `<div class="item"><b>${esc(r.title)}</b> — 절감 <span class="amt">${won(r.saved_cost)}</span>${r.performance_note ? `<br><span style="color:var(--ink-3); font-size:8px">↳ ${esc(r.performance_note)}</span>` : ''}</div>`).join('')}
     </div>
   </div>` : ''}
 
@@ -401,7 +423,11 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
         ${row('태양광(PV)', projectData.pvCapacity ? `${esc(projectData.pvCapacity)} kW (연 ${(projectData.pvCapacity * 1300).toLocaleString()} kWh 자가소비)` : '미설치')}
       </div>
       <div>
-        ${row('목표 예산', projectData.targetBudget ? `${Number(projectData.targetBudget).toLocaleString()} 만원` : '미설정')}
+        ${row('목표 예산', targetBudget > 0
+          ? `${won(targetBudget)}${overBudget
+              ? ` <span style="color:#b91c1c">— 공사비가 ${won(overAmt)} (${overPct}%) 초과</span>`
+              : ' — 공사비 예산 이내'}`
+          : '미설정')}
         ${row('LCC 분석 기간', `${lcc.lifecycle_years ?? 20}년`)}
         ${row('할인율 / 물가 / 요금상승', `${num(lcc.discount_rate)}% / ${num(lcc.inflation_rate)}% / ${num(lcc.utility_inflation)}%`)}
         ${row('기준 건물 산정', esc(baselineLabel))}
@@ -414,6 +440,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
       <span class="cost">${won(cd.hvac)}</span></div>
     ${row('냉방기 등급·연식 (건물 기본)', esc(coolGrade))}
     ${row('난방기 연식 (건물 기본)', esc(heatAge))}
+    ${fin.hvac_capacity_kw ? row('공사비 산정 용량', `건물 전체 피크부하 기준 ${num(fin.hvac_capacity_kw, 0)} kW × kW당 시스템 단가 — 아래 표의 기기 용량은 존 1개당 모델 값이며, '존 수'만큼 설치를 가정한 것으로 두 수치는 산정 목적이 다릅니다`) : ''}
     ${eqGroups.length ? `
     <table>
       <tr><th>구성 (난방 / 냉방)</th><th style="text-align:right">존 수</th><th>적용 예</th><th>출처</th></tr>
@@ -464,6 +491,11 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
       ${notes.map((n) => `<div class="note-item"><b>${esc(n.label)}</b> — ${esc(n.note)}</div>`).join('')}
     </div>
     ${warns.length ? `<div style="margin-top:6px">${warns.map((w) => `<div class="warn-item">${esc(w)}</div>`).join('')}</div>` : ''}
+    ${sens.length ? `
+    <div style="margin-top:8px; border-top:1px solid var(--hairline); padding-top:7px">
+      <div style="font-size:8.2px; font-weight:700; margin-bottom:2px">NPV 민감도 — 기본 ${won(fin.npv)} (${lcc.lifecycle_years ?? 20}년, 재시뮬레이션 없이 가정만 변경)</div>
+      ${sens.map((s) => `<div class="note-item">${esc(s.param)} ${esc(s.low_label)} → <b>${won(s.low)}</b> · ${esc(s.high_label)} → <b>${won(s.high)}</b></div>`).join('')}
+    </div>` : ''}
   </div>
 
   <div class="foot">

@@ -970,7 +970,15 @@ class LCCAnalyzer:
             inflation_rate = kwargs.get("inflation_rate", 0.03)
             utility_inflation = kwargs.get("utility_inflation", 0.04)
             years = kwargs.get("lifecycle_years", 20)
-            
+
+            # 창호·단열재·PV의 통상 내구연한(20~30년)보다 짧은 분석 기간은
+            # 투자 회수 전에 분석이 끝나 NPV·IRR이 구조적으로 불리하게 나온다.
+            if years < 15:
+                cost_warnings.append(
+                    f"LCC 분석 기간 {years}년은 창호·단열재·태양광의 통상 내구연한(20~30년)보다 짧습니다 — "
+                    "투자 회수 전에 분석이 끝나 NPV·IRR이 불리하게 산출될 수 있으니 20년 이상 설정을 권장합니다"
+                )
+
             # 누적 생애주기비용(LCC) 곡선: 초기투자비 + 연차별 할인 운영/유지/교체비
             # (순절감액이 아닌 '총 소유비용'의 현재가치 누적 → 손익분기 차트용)
             cumulative_lcc_30y = []
@@ -1101,22 +1109,28 @@ class LCCAnalyzer:
                     "절감액이 음수가 될 수 있으니 입력값 또는 개선 항목을 확인하세요"
                 )
 
-            cash_flows = [-total_capital_cost]
-            for y in range(1, years + 1):
-                base_cost_y = base_running_cost * ((1 + utility_inflation) ** y)
-                yearly_op_cost_y = (annual_elec_bill + annual_heat_bill) * ((1 + utility_inflation) ** y)
-                maint_cost_y = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
-                
-                rep_cost_y = 0
-                # NPV 누적 계산(cumulative_lcc_30y)과 동일한 교체 가정 사용:
-                #   15년차 핵심기기 50% 부분 교체, 10년차 LED 40% 교체
-                if y % 15 == 0: rep_cost_y += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
-                if y % 10 == 0: rep_cost_y += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
+            def _build_cash_flows(ui):
+                """요금상승률 ui 가정의 연차별 순절감액 현금흐름 (민감도 재계산에도 사용)."""
+                flows = [-total_capital_cost]
+                for y in range(1, years + 1):
+                    base_cost_y = base_running_cost * ((1 + ui) ** y)
+                    yearly_op_cost_y = (annual_elec_bill + annual_heat_bill) * ((1 + ui) ** y)
+                    maint_cost_y = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
 
-                # 절감액 = (기존 건물 운영비) - (리모델링 후 운영비 + 유지보수 + 교체비)
-                net_savings = base_cost_y - (yearly_op_cost_y + maint_cost_y + rep_cost_y)
-                cash_flows.append(net_savings)
+                    rep_cost_y = 0
+                    # NPV 누적 계산(cumulative_lcc_30y)과 동일한 교체 가정 사용:
+                    #   15년차 핵심기기 50% 부분 교체, 10년차 LED 40% 교체
+                    if y % 15 == 0: rep_cost_y += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
+                    if y % 10 == 0: rep_cost_y += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
 
+                    # 절감액 = (기존 건물 운영비) - (리모델링 후 운영비 + 유지보수 + 교체비)
+                    flows.append(base_cost_y - (yearly_op_cost_y + maint_cost_y + rep_cost_y))
+                return flows
+
+            def _npv_of(flows, dr):
+                return sum(cf / ((1 + dr) ** t) for t, cf in enumerate(flows))
+
+            cash_flows = _build_cash_flows(utility_inflation)
             irr_val = calculate_irr(cash_flows) * 100
 
             # 비현실적으로 높은 IRR은 (초기투자비 대비 절감액 과다) 가정 민감도 경고
@@ -1129,7 +1143,26 @@ class LCCAnalyzer:
             # 순현재가치(NPV) = 순절감액 현금흐름을 할인율로 할인한 현재가치의 합
             #   (cash_flows[0] = -초기투자비 이므로 자본비가 이미 반영됨)
             #   IRR과 동일한 현금흐름을 사용 → 두 지표가 일관됨. 0 이상이면 투자 타당.
-            npv_real = sum(cf / ((1 + discount_rate) ** t) for t, cf in enumerate(cash_flows))
+            npv_real = _npv_of(cash_flows, discount_rate)
+
+            # NPV 민감도 — 재시뮬레이션 없이 동일 현금흐름 로직으로
+            # 할인율 ±2%p, 요금상승률 ±1%p 가정만 바꿔 재할인 (결과 견고성 판단용)
+            dr_lo, dr_hi = max(discount_rate - 0.02, 0.0), discount_rate + 0.02
+            ui_lo, ui_hi = max(utility_inflation - 0.01, 0.0), utility_inflation + 0.01
+            npv_sensitivity = [
+                {
+                    "param": "할인율",
+                    "low_label": f"{dr_lo*100:.1f}%", "low": int(_npv_of(cash_flows, dr_lo)),
+                    "base_label": f"{discount_rate*100:.1f}%", "base": int(npv_real),
+                    "high_label": f"{dr_hi*100:.1f}%", "high": int(_npv_of(cash_flows, dr_hi)),
+                },
+                {
+                    "param": "요금상승률",
+                    "low_label": f"{ui_lo*100:.1f}%", "low": int(_npv_of(_build_cash_flows(ui_lo), discount_rate)),
+                    "base_label": f"{utility_inflation*100:.1f}%", "base": int(npv_real),
+                    "high_label": f"{ui_hi*100:.1f}%", "high": int(_npv_of(_build_cash_flows(ui_hi), discount_rate)),
+                },
+            ]
 
             financial = {
                 "annual_elec_bill": int(annual_elec_bill),
@@ -1155,6 +1188,8 @@ class LCCAnalyzer:
                     "lifecycle_years": years
                 },
                 "npv": int(npv_real),
+                "npv_sensitivity": npv_sensitivity,
+                "hvac_capacity_kw": round(hvac_capacity_kw, 1),  # 공사비 산정 기준 용량 (UI 각주용)
                 "total_lcc": int(lcc_pv),
                 "irr": round(irr_val, 2),
                 "cost_warnings": cost_warnings,
@@ -1242,7 +1277,8 @@ class LCCAnalyzer:
                     "type": "window",
                     "title": "창호 등급 하향 (Premium → Standard)",
                     "description": "최상급 창호 대신 일반 복층 유리로 변경하면 공사비를 크게 절감할 수 있습니다.",
-                    "saved_cost": int(saved_cost)
+                    "saved_cost": int(saved_cost),
+                    "performance_note": "창호 U값 상승으로 냉난방 부하·운영비가 증가합니다 — 적용 전 재시뮬레이션 권장"
                 })
         elif '중성능' in mapped_window_name or 'high' in mapped_window_name.lower():
             std_price = self.cost_db.get("window_tiers", {}).get("standard", {}).get("avg", 180000)
@@ -1252,7 +1288,8 @@ class LCCAnalyzer:
                     "type": "window",
                     "title": "창호 등급 하향 (High → Standard)",
                     "description": "로이 복층유리 대신 일반 복층 유리로 변경하여 예산을 아낄 수 있습니다.",
-                    "saved_cost": int(saved_cost)
+                    "saved_cost": int(saved_cost),
+                    "performance_note": "창호 U값 상승으로 냉난방 부하·운영비가 증가합니다 — 적용 전 재시뮬레이션 권장"
                 })
 
         high_tier_insul_cost = 0
@@ -1268,7 +1305,8 @@ class LCCAnalyzer:
                 "type": "insulation",
                 "title": "단열재 사양 하향 (일반 EPS/미네랄울 활용)",
                 "description": "고성능 단열재 대신 일반 단열재로 변경할 경우 초기 비용이 감소합니다.",
-                "saved_cost": int(high_tier_insul_cost - std_insul_cost_sum)
+                "saved_cost": int(high_tier_insul_cost - std_insul_cost_sum),
+                "performance_note": "외피 열관류율 상승으로 난방 요구량·CO₂가 증가합니다 — 적용 전 재시뮬레이션 권장"
             })
 
         if is_geothermal:
@@ -1278,7 +1316,8 @@ class LCCAnalyzer:
                 "type": "hvac",
                 "title": "지열 난방 시스템 해제",
                 "description": "초기 설치비가 높은 지열(GSHP) 시스템을 일반 시스템으로 변경하여 천공·지중 열교환기 비용을 절감합니다.",
-                "saved_cost": int(hvac_cost * (1.2 / 2.2))
+                "saved_cost": int(hvac_cost * (1.2 / 2.2)),
+                "performance_note": "열원 COP 하락(5.0→일반)으로 난방 운영비가 증가합니다 — 적용 전 재시뮬레이션 권장"
             })
         else:
             # 비지열: 고효율 설비(EHP·FCU·AHU)를 표준 개별 냉난방기(Generic, id 5)로 하향.
@@ -1292,7 +1331,8 @@ class LCCAnalyzer:
                         "type": "hvac",
                         "title": "고효율 냉난방 설비 → 표준 설비로 변경",
                         "description": "고가의 개별 히트펌프(EHP)·팬코일(FCU) 대신 표준 개별 냉난방기로 변경하여 설비 공사비를 절감합니다.",
-                        "saved_cost": int(saved_hvac)
+                        "saved_cost": int(saved_hvac),
+                        "performance_note": "설비 효율(COP) 하락으로 냉난방 운영비가 증가할 수 있습니다"
                     })
 
         # 이미 표준 설비여도 쓸 수 있는 대안: 비거주 구역(계단실·창고·기계실 등)을
@@ -1303,7 +1343,8 @@ class LCCAnalyzer:
                 "type": "hvac_scope",
                 "title": "비거주 구역 냉난방 설비 제외",
                 "description": f"계단실·창고·기계실 등 비거주 구역(전체 면적의 약 {non_hab_share*100:.0f}%)을 설비 설치 범위에서 제외해 설비 용량과 공사비를 줄입니다.",
-                "saved_cost": int(hvac_cost * non_hab_share)
+                "saved_cost": int(hvac_cost * non_hab_share),
+                "performance_note": "해당 구역의 냉난방이 제공되지 않아 동파 방지 등 최소 온도 유지가 필요하면 부적합합니다"
             })
 
         # 절감액은 '적용 시 실제 차액'(led_saving)만 제시. 이미 적용됐거나 효과가 0이면 미표시.
@@ -1313,14 +1354,16 @@ class LCCAnalyzer:
                     "type": "led",
                     "title": "LED 조명 교체 수량 축소 (50%)",
                     "description": "직접 입력한 LED 교체 수량을 50% 축소하여 필수 구역만 우선 교체합니다.",
-                    "saved_cost": int(led_saving)
+                    "saved_cost": int(led_saving),
+                    "performance_note": "미교체 구역의 조명 전력 절감 효과가 사라져 운영비 절감액이 줄어듭니다"
                 })
             elif not led_reduction_active:
                 recommendations.append({
                     "type": "led",
                     "title": "LED 조명 부분 교체 (공용구역 제외)",
                     "description": "계단실, 복도, 창고 등 공용 구역을 제외하고 주요 거주 구역 위주로 부분 교체합니다.",
-                    "saved_cost": int(led_saving)
+                    "saved_cost": int(led_saving),
+                    "performance_note": "공용 구역의 조명 전력 절감 효과는 제외되어 운영비 절감액이 줄어듭니다"
                 })
 
         return recommendations

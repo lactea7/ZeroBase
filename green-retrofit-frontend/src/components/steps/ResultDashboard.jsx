@@ -604,6 +604,12 @@ export default function ResultDashboard({
                                   </span>
                                 </div>
                                 <p className={`text-xs leading-relaxed z-10 opacity-80 ${theme.textSub}`}>{rec.description}</p>
+                                {rec.performance_note && (
+                                  <p className={`text-[11px] leading-relaxed z-10 flex items-start gap-1 ${isDarkMode ? 'text-amber-400/90' : 'text-amber-600'}`}>
+                                    <span className="shrink-0">⚠</span>
+                                    <span>{rec.performance_note}</span>
+                                  </p>
+                                )}
 
                                 <div className="mt-auto pt-4 flex flex-wrap items-center justify-between gap-2 z-10 border-t border-slate-500/10">
                                   <span className="text-[11px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg border border-emerald-500/20">
@@ -774,19 +780,19 @@ export default function ResultDashboard({
                             <span>
                               NPV·IRR·회수기간은 입력하신 <b>실제 기존 건물 운영비</b>
                               (연 {Math.round((ba.base_running_cost || 0) / 10000).toLocaleString()}만원,
-                              절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다.
+                              운영비 절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다.
                             </span>
                           ) : isSimulated ? (
                             <span>
                               업로드하신 <b>원본 건물(개선 전)을 별도 시뮬레이션</b>한 운영비
                               (연 {Math.round((ba.base_running_cost || 0) / 10000).toLocaleString()}만원,
-                              절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다 — 전/후 모두 동일한
+                              운영비 절감률 {ba.savings_pct}%) 대비 절감액으로 산출되었습니다 — 전/후 모두 동일한
                               물리 엔진으로 계산된 값입니다.
                             </span>
                           ) : (
                             <span>
                               실측값 미입력 — <b>추정 기준 건물</b>(기존 운영비를 리모델링 후의{' '}
-                              {ba.running_cost_multiplier}배 ≈ 절감률 {ba.savings_pct}%로 가정) 대비 산출된
+                              {ba.running_cost_multiplier}배 ≈ 운영비 절감률 {ba.savings_pct}%로 가정) 대비 산출된
                               값입니다. 정확한 분석을 원하면 설정에서 기존 건물 실제 사용량을 입력하세요.
                             </span>
                           )}
