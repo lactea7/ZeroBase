@@ -8,7 +8,7 @@ import {
   SlidersHorizontal, Thermometer, ToggleLeft, ToggleRight, Users, Wind, X,
 } from 'lucide-react';
 
-import { ACTIVITIES, OUTLET_W_PER_ACTIVITY } from '../../data/constants';
+import { ACTIVITIES, ACTIVITIES_UNIQUE, OUTLET_W_PER_ACTIVITY } from '../../data/constants';
 import { INSULATION_TYPES, INSULATION_CATEGORIES, getLayerColor } from '../../data/insulation';
 import { STRUCTURAL_MATERIALS, getMaterialsByCategory } from '../../data/structuralMaterials';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES } from '../../data/hvac';
@@ -34,8 +34,20 @@ export default function FloorEditor(props) {
     handleZoneClick, handleSurfaceClick, handleSaveClose, handleModeSwitch,
     handleTypeChange, handlePanesChange, handleSimulation,
     getZoneFloorArea, calcOutletPower, isVirtualFloor, getActivityCategory,
-    calculateUpdatedUValue,
+    calculateUpdatedUValue, applyToSimilarZones, setApplyToSimilarZones,
   } = props;
+
+  // 편집 중인 존과 같은 용도(activityId)의 다른 존 — 화장실·계단실처럼 여러 존이
+  // 거의 동일한 설정을 갖는 경우, 하나씩 편집하지 않도록 일괄 적용을 제안한다.
+  const similarZoneCount = editMode === 'zone' && editState.activityId != null
+    ? zones.filter((z) => z.activityId === editState.activityId && z.id !== selectedId).length
+    : 0;
+  const activityLabel = ACTIVITIES.find((a) => a.id === editState.activityId)?.name || '이 용도';
+  // 드롭다운은 이름 중복 제거본을 쓰되, 이전에 저장된 존이 제거된 쪽 id(예: 1121)를
+  // 이미 갖고 있으면 선택값이 빈칸처럼 보이지 않도록 그 항목만 예외로 포함시킨다.
+  const activityOptions = ACTIVITIES_UNIQUE.some((a) => a.id === editState.activityId)
+    ? ACTIVITIES_UNIQUE
+    : [...ACTIVITIES_UNIQUE, ACTIVITIES.find((a) => a.id === editState.activityId)].filter(Boolean);
 
   return (
             <div className="flex-1 flex flex-col animate-in fade-in min-h-0 w-full h-full">
@@ -363,12 +375,36 @@ export default function FloorEditor(props) {
                               }
                               className={`w-full p-4 text-[12px] font-bold rounded-xl border outline-none ${theme.input} focus:border-emerald-500`}
                             >
-                              {ACTIVITIES.map((a) => (
+                              {activityOptions.map((a) => (
                                 <option key={a.id} value={a.id}>
                                   {a.name}
                                 </option>
                               ))}
                             </select>
+
+                            {similarZoneCount > 0 && (
+                              <label
+                                className={`mt-4 flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all ${
+                                  applyToSimilarZones
+                                    ? 'border-emerald-500 bg-emerald-500/10'
+                                    : isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-300/60 bg-slate-500/5'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 shrink-0 accent-emerald-500"
+                                  checked={applyToSimilarZones}
+                                  onChange={(e) => setApplyToSimilarZones(e.target.checked)}
+                                />
+                                <span className={`text-xs font-bold leading-relaxed ${theme.textMain}`}>
+                                  같은 용도(&apos;{activityLabel}&apos;)로 분류된 존이 {similarZoneCount}개 더 있습니다.
+                                  저장 시 이 설정(용도·부하·냉난방)을 전부 동일하게 적용할까요?
+                                  <span className={`block mt-1 font-normal ${theme.textSub}`}>
+                                    체크 후 저장하면 {similarZoneCount}개 존에 하나하나 반복 입력할 필요 없이 한 번에 반영됩니다.
+                                  </span>
+                                </span>
+                              </label>
+                            )}
                           </div>
 
                           <div

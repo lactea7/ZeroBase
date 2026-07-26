@@ -14,21 +14,18 @@ export const applyRecommendation = (type, ctx) => {
     // gbXML 모델은 별도 Window 면이 없고 벽면의 WWR/glazingId로 창을 표현한다.
     // 따라서 Window/Skylight 면뿐 아니라 '창을 가진 면'(glazingId 지정 or wwr>0)도 하향해야
     // 백엔드 창호비가 실제로 줄어든다. (기존엔 type 체크만 해 gbXML에서 무반응이었음)
-    let changed = 0;
+    const hasGlass = (s) =>
+      s.type === 'Window' || s.type === 'Skylight' ||
+      s.glazingId != null ||
+      ((s.wwr && s.wwr > 0) && /wall/i.test(s.type || ''));
+    // 상향(window_upgrade)과 같은 이유로 개수는 업데이터 '밖'에서 미리 센다.
+    const targets = surfaces.filter((s) => hasGlass(s) && s.glazingId !== 42);
+    if (targets.length === 0) return null;
+    const targetIds = new Set(targets.map((s) => s.id));
     setSurfaces((prev) =>
-      prev.map((s) => {
-        const hasGlass =
-          s.type === 'Window' || s.type === 'Skylight' ||
-          s.glazingId != null ||
-          ((s.wwr && s.wwr > 0) && /wall/i.test(s.type || ''));
-        if (hasGlass && s.glazingId !== 42) {
-          changed++;
-          return { ...s, glazingId: 42 }; // 일반 복층 유리(ID 42)로 하향
-        }
-        return s;
-      })
+      prev.map((s) => (targetIds.has(s.id) ? { ...s, glazingId: 42 } : s)) // 일반 복층 유리(ID 42)로 하향
     );
-    return changed > 0 ? `창호 ${changed}개 면을 일반 복층유리로 하향` : null;
+    return `창호 ${targets.length}개 면을 일반 복층유리로 하향`;
   } else if (type === 'insulation') {
     // 모든 구조체의 단열재를 일반 등급 제품(비드법 1종 1호, ID 1)으로 일괄 교체
     const stdProduct = INSULATION_TYPES.find(p => p.tier === 'standard') || INSULATION_TYPES[0];
@@ -123,6 +120,78 @@ export const applyRecommendation = (type, ctx) => {
     if (projectData.ledReductionActive) return null; // 이미 적용됨 → 변경 없음
     setProjectData((prev) => ({ ...prev, ledReductionActive: true }));
     return '비필수 구역 LED 교체 제외';
+  } else if (type === 'hvac_upgrade') {
+    // 노후 냉난방 설비 → 1등급 신형 (설비 교체 토글 활성화 → 시뮬 COP 신형 적용)
+    if (projectData.hvacUpgradeActive) return null;
+    setProjectData((prev) => ({ ...prev, hvacUpgradeActive: true }));
+    return '노후 냉난방 설비를 1등급 신형으로 교체';
+  } else if (type === 'window_upgrade') {
+    // 창 가진 면 전체를 고성능 Low-E+Ar 복층(ID 154, U 1.32)으로 상향 — 백엔드 변형과 동일
+    const hasGlass = (s) =>
+      s.type === 'Window' || s.type === 'Skylight' ||
+      s.glazingId != null ||
+      ((s.wwr && s.wwr > 0) && /wall/i.test(s.type || ''));
+    // 개수는 setSurfaces 업데이터 '밖'에서 미리 센다. 업데이터는 나중에 실행되므로
+    // 그 안에서 증가시킨 값은 여기서 읽을 수 없고(항상 0), StrictMode에선 두 번 돈다.
+    const targets = surfaces.filter((s) => hasGlass(s) && s.glazingId !== 154);
+    if (targets.length === 0) return null;
+    const targetIds = new Set(targets.map((s) => s.id));
+    setSurfaces((prev) =>
+      prev.map((s) => (targetIds.has(s.id) ? { ...s, glazingId: 154 } : s))
+    );
+    return `창호 ${targets.length}개 면을 고성능 Low-E 복층으로 상향`;
+  } else if (type === 'insulation_upgrade') {
+    // 일반/저성능 단열(λ>0.045) → 중성능(high) 제품(비드법 1종 2호, ID 2)으로 상향
+    const hiProduct = INSULATION_TYPES.find(p => p.tier === 'high') || INSULATION_TYPES[1];
+    const newOverrides = { ...constructionOverrides };
+    const updatedUValues = {};
+    let changedCount = 0;
+
+    Object.keys(newOverrides).forEach((id) => {
+      if (newOverrides[id].tier === 'standard' || newOverrides[id].tier === 'basic') {
+        changedCount++;
+        const newOverride = { insulationId: hiProduct.id, tier: 'high', thickness: newOverrides[id].thickness || 100 };
+        const s = surfaces.find(surf => surf.id === id);
+        if (s && materials?.constructions) {
+          const c_ref = s.constructionRef || s.constructionId;
+          const c = materials.constructions.find(con => con.id === c_ref);
+          if (c) {
+            const newU = calculateUpdatedUValue(c, newOverride);
+            newOverride.uValue = newU;
+            updatedUValues[id] = newU;
+          }
+        }
+        newOverrides[id] = newOverride;
+      }
+    });
+
+    if (materials?.constructions) {
+      surfaces.forEach((s) => {
+        if (!newOverrides[s.id]) {
+          const c_ref = s.constructionRef || s.constructionId;
+          const c = materials.constructions.find(con => con.id === c_ref);
+          if (c) {
+            const insul = c.layers?.find(l => l.isInsulation);
+            if (insul && insul.conductivity > 0.045) {
+              changedCount++;
+              const newOverride = { insulationId: hiProduct.id, tier: 'high', thickness: insul.thickness || 100 };
+              const newU = calculateUpdatedUValue(c, newOverride);
+              newOverride.uValue = newU;
+              updatedUValues[s.id] = newU;
+              newOverrides[s.id] = newOverride;
+            }
+          }
+        }
+      });
+    }
+
+    setConstructionOverrides(newOverrides);
+    if (Object.keys(updatedUValues).length > 0) {
+      setSurfaces(prevSurfaces => prevSurfaces.map(s =>
+        updatedUValues[s.id] !== undefined ? { ...s, uValue: updatedUValues[s.id] } : s
+      ));
+    }
+    return changedCount > 0 ? `단열재 ${changedCount}개 부위를 중성능 등급으로 상향` : null;
   }
   return null;
 };

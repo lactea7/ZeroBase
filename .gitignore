@@ -60,3 +60,6 @@ __pycache__/
 # 작업 상태 DB (SQLite, 런타임 생성)
 green-retrofit-backend/tasks.db*
 green-retrofit-backend/mcp_tasks.db*
+
+# relay pipeline 산출물
+.relay/

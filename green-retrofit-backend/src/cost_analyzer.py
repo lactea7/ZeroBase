@@ -1051,6 +1051,9 @@ class LCCAnalyzer:
                 led_saving=led_saving,
                 led_fixture_count=led_fixture_count,
                 led_reduction_active=led_reduction_active,
+                cooling_grade=kwargs.get("cooling_grade", "grade3"),
+                heating_age=kwargs.get("heating_age", "new"),
+                hvac_upgraded=kwargs.get("hvac_upgraded", False),
             )
 
             # 단순 IRR (내부수익률) 계산기 (Bisection method)
@@ -1177,6 +1180,13 @@ class LCCAnalyzer:
                     "hvac": int(hvac_cost)
                 },
                 "mapped_window_name": mapped_window_name,
+                # 창호 산정 근거 상세 — UI에 '어떤 유리를 얼마에 계상했는지' 명시용
+                "window_details": {
+                    "u_value": round(target_u, 2),          # 창 면적가중 대표 U (W/㎡K)
+                    "shgc": round(target_shgc, 2),
+                    "unit_price": int(target_window_price),  # 등급 중앙값 단가 (원/㎡)
+                    "area_m2": round(total_window_area, 1),
+                },
                 "insulation_details": detailed_insulation_costs if 'detailed_insulation_costs' in locals() else [],
                 "recommendations": recommendations,
                 "csv_db_loaded": self.cost_db["status"],
@@ -1223,6 +1233,11 @@ class LCCAnalyzer:
                                 "주거 건물의 세대별 주택용 누진제는 반영되지 않습니다."
                     },
                     {
+                        "label": "냉방기간",
+                        "note": "냉방은 5월 1일~10월 31일에만 가동하는 것으로 가정합니다. 동절기에는 일사·내부발열로 "
+                                "실내온도가 올라도 냉방을 돌리지 않습니다(실제 운영 관행 반영)."
+                    },
+                    {
                         "label": "기존 건물 기준선",
                         "note": ("입력하신 실측 요금/사용량을 기준으로 절감액을 계산했습니다."
                                  if baseline_source in ("actual_bill", "actual_usage") else
@@ -1260,10 +1275,13 @@ class LCCAnalyzer:
                                detailed_insulation_costs, is_geothermal, hvac_cost,
                                hvac_capacity_kw, hvac_unit_cost, hvac_exclude_non_habitable,
                                non_hab_share, led_cost, led_saving, led_fixture_count,
-                               led_reduction_active):
-        """비용 절감 추천 목록 생성. 예산 입력 여부와 무관하게 항상 생성한다.
+                               led_reduction_active, cooling_grade="grade3",
+                               heating_age="new", hvac_upgraded=False):
+        """개선 대안 추천 목록 생성 — 양방향. 예산 입력 여부와 무관하게 항상 생성한다.
 
-        기존엔 '예산 입력 + 초과'일 때만 만들어 설비비가 지배적이어도 대안이 안 보였다.
+        · 하향(direction 없음): 공사비 절감 — 예산 초과 대응. saved_cost = 적용 시 실제 차액.
+        · 상향(direction="upgrade"): kWh/운영비 절감 — 노후 설비 교체·단열/창호 상향.
+          정량 효과(에너지·실공사비·회수기간)는 ep_simulator의 대안 재시뮬레이션(impact)이 산출.
         예산 초과 여부에 따른 강조는 프론트가 target_budget/capital_cost로 판단한다.
         각 대안은 이미 적용된 상태면 반복 제시하지 않는다.
         """
@@ -1303,8 +1321,8 @@ class LCCAnalyzer:
         if high_tier_insul_cost > std_insul_cost_sum:
             recommendations.append({
                 "type": "insulation",
-                "title": "단열재 사양 하향 (일반 EPS/미네랄울 활용)",
-                "description": "고성능 단열재 대신 일반 단열재로 변경할 경우 초기 비용이 감소합니다.",
+                "title": "단열재 사양 하향 (일반 등급 EPS)",
+                "description": "고성능 단열재 대신 일반 등급 EPS(비드법 1종 1호, λ0.036)로 변경해 초기 비용을 줄입니다.",
                 "saved_cost": int(high_tier_insul_cost - std_insul_cost_sum),
                 "performance_note": "외피 열관류율 상승으로 난방 요구량·CO₂가 증가합니다 — 적용 전 재시뮬레이션 권장"
             })
@@ -1365,6 +1383,51 @@ class LCCAnalyzer:
                     "saved_cost": int(led_saving),
                     "performance_note": "공용 구역의 조명 전력 절감 효과는 제외되어 운영비 절감액이 줄어듭니다"
                 })
+
+        # ── 상향(성능 개선) 대안: kWh·운영비를 낮추는 방향 ──────────────────
+        # 냉난방 설비 1등급 교체 (COP 향상). 이미 1등급 신형이 아니면 3등급(기본)도 제안 —
+        # 3등급→1등급만으로 냉방 COP 3.3→4.0 (~20% 절감). 효과·회수기간은 재시뮬로 산출.
+        is_old = cooling_grade in ("grade5", "old10", "old15") or heating_age in ("mid", "old")
+        if (not hvac_upgraded) and (cooling_grade != "grade1" or heating_age != "new"):
+            recommendations.append({
+                "type": "hvac_upgrade",
+                "direction": "upgrade",
+                "title": ("노후 냉난방 설비 → 1등급 신형 교체" if is_old
+                          else "냉난방 설비 1등급 고효율 교체"),
+                "description": "현재 설비보다 효율(COP)이 높은 1등급 신형으로 교체해 냉난방 에너지를 줄입니다. "
+                               "설비 교체비는 공사비에 이미 계상되어 있어(단가는 등급 무관 평균), "
+                               "운영비 절감이 그대로 순이득이 됩니다.",
+                "saved_cost": 0,
+            })
+
+        # 창호 상향: 일반/단층 → 고성능 Low-E 복층 (U≈1.3)
+        if ('일반' in mapped_window_name or '단층' in mapped_window_name) and total_window_area > 0:
+            prem_price = self.cost_db.get("window_tiers", {}).get("premium", {}).get("avg", 172610)
+            added = int(total_window_area * prem_price - window_cost)
+            recommendations.append({
+                "type": "window_upgrade",
+                "direction": "upgrade",
+                "title": "창호 상향 (일반 → 고성능 Low-E 복층)",
+                "description": "일반 복층유리를 고성능 Low-E+아르곤 복층(U≈1.3)으로 상향해 냉난방 손실을 줄입니다.",
+                "saved_cost": 0,
+                "added_cost": max(added, 0),   # 자재 단가 차액 추정 — 실공사비 변화는 impact가 대체
+            })
+
+        # 단열 상향: 일반/저성능 단열 부위 → 중성능(high, λ0.035)
+        up_targets = [d for d in (detailed_insulation_costs or [])
+                      if ('일반' in d["tier"] or '저성능' in d["tier"]
+                          or 'standard' in d["tier"].lower() or 'basic' in d["tier"].lower())]
+        if up_targets:
+            high_price = self.cost_db.get("insulation_tiers", {}).get("high", {}).get("avg", 27000)
+            added = sum(d["area"] * max(high_price - d["price"], 0) for d in up_targets)
+            recommendations.append({
+                "type": "insulation_upgrade",
+                "direction": "upgrade",
+                "title": "단열재 상향 (일반 → 중성능 등급)",
+                "description": f"일반 등급 단열 부위 {len(up_targets)}곳을 중성능 단열재(λ 0.035)로 상향해 난방 손실을 줄입니다.",
+                "saved_cost": 0,
+                "added_cost": int(added),
+            })
 
         return recommendations
 

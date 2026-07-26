@@ -132,28 +132,35 @@ def detect_zone_gaps(surfaces_list):
     
     zone_normals = {}  # zone_name -> [nx_sum, ny_sum, nz_sum]
     zone_areas = {}    # zone_name -> total_area
-    
-    for s in surfaces_list:
-        zone = s.get("zone", "Unknown")
-        if zone == "Unknown":
-            continue
-        
-        verts = s.get("vertices", [])
-        if len(verts) < 3:
-            continue
-        
-        normal = calculate_surface_normal(verts)
-        area = calculate_surface_area(verts)
-        
+
+    def _accumulate(zone, normal, area):
+        if not zone or zone == "Unknown":
+            return
         if zone not in zone_normals:
             zone_normals[zone] = [0.0, 0.0, 0.0]
             zone_areas[zone] = 0.0
-        
         zone_normals[zone][0] += normal[0]
         zone_normals[zone][1] += normal[1]
         zone_normals[zone][2] += normal[2]
         zone_areas[zone] += area
-    
+
+    for s in surfaces_list:
+        verts = s.get("vertices", [])
+        if len(verts) < 3:
+            continue
+
+        normal = calculate_surface_normal(verts)
+        area = calculate_surface_area(verts)
+
+        _accumulate(s.get("zone"), normal, area)
+        # 공유 내부면(두 Zone이 한 Surface를 공유): gbXML의 폴리루프 방향은
+        # space_1(=zone) 기준 바깥쪽이므로, space_2(=adjacentZone) 입장에서는
+        # 안쪽을 향한다 — 법선을 반전해 집계하지 않으면 그 Zone은 이 면이
+        # 통째로 누락된 채 폐합 검증을 받아 항상 오탐 경고가 뜬다.
+        adj_zone = s.get("adjacentZone")
+        if adj_zone:
+            _accumulate(adj_zone, (-normal[0], -normal[1], -normal[2]), area)
+
     warnings = []
     for zone, normal_sum in zone_normals.items():
         total_area = zone_areas.get(zone, 0)
@@ -454,7 +461,8 @@ def parse_gbxml_to_json(filepath: str):
     # 💡 [1차 패스] Surface 파싱 및 Zone별 Z좌표 수집
     # =====================================================
     zone_z_coords = {}  # space_id -> [z1, z2, z3, ...]  (모든 꼭짓점의 Z좌표)
-    
+    self_adjacent_surfaces = []  # AdjacentSpaceId가 같은 Space로 중복된 면 (익스포터 결함)
+
     all_surfaces = root.findall('.//surface')
     for surf in all_surfaces:
         surf_id = get_attr(surf, 'id')
@@ -463,6 +471,18 @@ def parse_gbxml_to_json(filepath: str):
         adj_spaces = surf.findall('.//adjacentspaceid')
         space_1 = get_attr(adj_spaces[0], 'spaceidref') if len(adj_spaces) > 0 else None
         space_2 = get_attr(adj_spaces[1], 'spaceidref') if len(adj_spaces) > 1 else None
+
+        # ⚠️ 자기 자신을 인접 공간으로 적은 면은 유효한 경계가 아니다.
+        # 일부 익스포터가 최하층 바닥을 SlabOnGrade 대신 같은 Space를 두 번 적은
+        # InteriorFloor로 내보낸다. 그대로 두면 시뮬레이터가 이를 정상 인접으로 보고
+        # 같은 Zone 안에 원본+미러 쌍을 만들어, 자기 자신과 맞닿은 내부면이 생긴다.
+        # 인접관계만 지우면 ep_simulator의 내부면 경로에서 Adiabatic으로 처리된다.
+        # (지면 경계로의 승격은 지하층·필로티·외기노출 바닥을 오분류할 수 있어
+        #  여기서 자동으로 하지 않는다.)
+        is_self_adjacent = bool(space_2 and space_1 == space_2)
+        if is_self_adjacent:
+            self_adjacent_surfaces.append(surf_id)
+            space_2 = None
 
         zone_name = spaces.get(space_1, {}).get('name', "Unknown") if space_1 else "Unknown"
         adj_zone_name = spaces.get(space_2, {}).get('name') if space_2 else None
@@ -554,6 +574,11 @@ def parse_gbxml_to_json(filepath: str):
             "type": mapped_type,
             "zone": zone_name,
             "adjacentZone": adj_zone_name,
+            # 자기 자신을 인접 공간으로 적었던 면. adjacentZone 을 비웠기 때문에
+            # 타입만으로는 시뮬레이터가 이 사실을 알 수 없다. Air 처럼 타입에
+            # 'interior' 가 없는 면이 외기 노출로 잘못 빠지는 것을 막으려면
+            # 이 플래그가 필요하다.
+            "selfAdjacent": is_self_adjacent,
             "floor": 1,  # 임시값, 아래에서 클러스터링 후 재배정
             "direction": direction,
             "azimuth": azimuth_value,
@@ -781,6 +806,27 @@ def parse_gbxml_to_json(filepath: str):
     print(f"   U-value: gbXML 원본 {u_from_gbxml}개 / 기본값 {u_from_default}개")
     print(f"   방향(Direction) 매핑: {dir_count}개")
     print(f"   층 수: {len(floor_levels)}개 층")
+    if self_adjacent_surfaces:
+        _preview = ', '.join(self_adjacent_surfaces[:5]) + (
+            f" 외 {len(self_adjacent_surfaces) - 5}개" if len(self_adjacent_surfaces) > 5 else "")
+        print(f"   ⚠️ 자기 자신을 인접 공간으로 적은 면 {len(self_adjacent_surfaces)}개 → 인접관계 무시(Adiabatic 처리)")
+        print(f"      익스포터가 지면 접촉 바닥을 SlabOnGrade 대신 InteriorFloor로 내보낸 것일 수 있습니다.")
+        print(f"      해당 면은 지면 열손실이 반영되지 않습니다: {_preview}")
+        # 표준출력만으로는 사용자가 볼 수 없다. 결과 왜곡 가능성을 알리는 경고이므로
+        # API 응답의 warnings 에 실어 프론트에서 표시되게 한다.
+        gap_warnings.append({
+            "zone": None,
+            "issue": "self_adjacent_surface",
+            "count": len(self_adjacent_surfaces),
+            "surfaces": self_adjacent_surfaces[:20],
+            "message": (
+                f"자기 자신을 인접 공간으로 지정한 면이 {len(self_adjacent_surfaces)}개 있습니다 "
+                f"({_preview}). 지면에 접한 바닥이 SlabOnGrade 대신 InteriorFloor로 "
+                f"작성된 경우일 수 있습니다. 해당 면은 열이 통과하지 않는 단열 경계"
+                f"(Adiabatic)로 처리합니다. 바닥이 실제로 지면에 접해 있다면 지면 열손실이 "
+                f"반영되지 않아 난방 부하가 실제보다 작게 산출될 수 있습니다."
+            ),
+        })
 
     # =====================================================
     # 💡 Construction별 사용 면적 · 단열재 요약 정보 생성

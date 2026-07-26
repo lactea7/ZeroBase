@@ -199,6 +199,21 @@ _NAME_TO_ACTIVITY = [
       "corridor", "circulation", "lobby", "locker", "changing"], 1101),  # Circulation
     (["plant", "boiler", "mechanical", "vent", "heating", "electrical"], 1104),  # Plant room
     (["office"], 1105),
+    # ── 한글 Space 이름 ──────────────────────────────────────────────
+    # 영문 키워드만 있어 한글 실명(예: "103 계단실", "101 남자화장실")이 전부
+    # DEFAULT_ACTIVITY_ID(1105 일반 사무실)로 폴백되던 문제 수정. 이 폴백은
+    # 이름만 잘못 표시하는 게 아니라 ep_simulator가 activity_names[1105]="Generic
+    # Office Area"→classify_activity()로 office 아키타입(사무 스케줄·냉난방
+    # 설정)을 배정해, 실제로는 비공조·저점유인 화장실·계단실이 업무시간 내내
+    # 냉난방되는 것처럼 계산되는 에너지 오차로 이어진다. 아래는 일반(비주거)
+    # 카테고리로 매핑해 auxiliary 아키타입(24h 저점유, 냉난방 setback)이 정확히
+    # 배정되도록 한다 — _KEYWORD_RULES의 한글 매핑과 동일한 의도.
+    (["화장실", "욕실", "세면", "샤워"], 1102),        # Toilet
+    (["계단", "복도", "승강기", "엘리베이터"], 1101),  # Circulation
+    (["창고", "주차"], 1100),                          # Store Room
+    (["기계실", "전기실", "설비실", "펌프실"], 1104),  # Plant room
+    (["로비", "접수", "안내"], 1103),                  # Reception
+    (["사무", "민원", "상담", "회의", "전산"], 1105),   # Generic Office Area
     (["bedroom", "room"], 1180),       # 남은 ROOM = 침실(주거) — 반드시 맨 뒤
 ]
 DEFAULT_ACTIVITY_ID = 1105
@@ -279,6 +294,61 @@ def _weekly_compact(weekday24, weekend24):
     return f"Through: 12/31, {_day_block(weekday24, weekend24)}"
 
 
+# ── 냉방기간(냉방 가용 계절) ────────────────────────────────────────────────
+# 실건물은 동절기에 냉방을 가동하지 않지만, 연중 동일 냉방 설정(26℃)이면 겨울에도
+# 일사·내부발열로 존 온도가 설정을 넘는 순간 시뮬레이션이 냉방을 돌린다(1~2월 유령 냉방).
+# 냉방기간 밖에는 설정온도를 COOLING_OFF_TEMP로 올려 냉방을 원천 차단한다.
+# (서모스탯 기준이므로 WindowAC·PTHP·이상부하 전 모드에 동일하게 적용된다)
+COOLING_SEASON_START = (5, 1)    # 냉방기간 시작 (5/1)
+COOLING_SEASON_END = (10, 31)    # 냉방기간 끝 (10/31)
+COOLING_OFF_TEMP = 35.0          # 기간 밖 냉방 설정온도 — 실내가 도달할 수 없는 값
+
+
+def _cooling_season_segments(segments):
+    """(학사)세그먼트에 냉방기간 마스크를 일 단위로 교차해 [(through, state)]로 재압축.
+
+    state: 'off'(냉방기간 밖) | 'session'(기간 내 재학/일반) | 'vac'(기간 내 방학)
+    segments는 (Through "M/D", 재학여부) 오름차순, 마지막 12/31 가정.
+    """
+    import datetime as _dt
+
+    def _md(s):
+        m, d = s.split("/")
+        return (int(m), int(d))
+
+    seg_keys = [(_md(t), b) for t, b in segments]
+    days = []
+    for i in range(365):  # 비윤년 기준 (E+ 기본 RunPeriod와 동일)
+        d = _dt.date(2025, 1, 1) + _dt.timedelta(days=i)
+        md = (d.month, d.day)
+        in_session = next(b for t, b in seg_keys if md <= t)
+        in_season = COOLING_SEASON_START <= md <= COOLING_SEASON_END
+        state = ("session" if in_session else "vac") if in_season else "off"
+        days.append((md, state))
+
+    out = []
+    for i, (md, st) in enumerate(days):
+        if i + 1 == len(days) or days[i + 1][1] != st:
+            out.append((f"{md[0]}/{md[1]}", st))
+    return out
+
+
+def cooling_compact_with_season(session_wd, session_we, vac_day=None, segments=None):
+    """냉방 Schedule:Compact 본문 — 냉방기간 밖은 미가동(고온 설정)으로 마스크."""
+    off_day = [COOLING_OFF_TEMP] * 24
+    segs = segments or [("12/31", True)]
+    parts = []
+    for through, state in _cooling_season_segments(segs):
+        if state == "session":
+            parts.append(f"Through: {through}, {_day_block(session_wd, session_we)}")
+        elif state == "vac":
+            v = vac_day if vac_day is not None else session_we
+            parts.append(f"Through: {through}, {_day_block(v, v)}")
+        else:
+            parts.append(f"Through: {through}, {_day_block(off_day, off_day)}")
+    return ", ".join(parts)
+
+
 def _seasonal_compact(segments, session_wd, session_we, vac_day):
     """학기/방학 등 날짜구간별 Schedule:Compact. segments=[(through, 재학여부)...].
     재학=session 평일/주말 배열, 방학=vac_day 종일."""
@@ -313,7 +383,7 @@ def build_schedules(archetype_key: str, heat_set: float, cool_set: float) -> dic
         return {
             "op": _weekly_compact(op_day, op_day),
             "heating": _weekly_compact(hb, hb),
-            "cooling": _weekly_compact(cb, cb),
+            "cooling": cooling_compact_with_season(cb, cb),
         }
 
     wd, we = occ["weekday"], occ["weekend"]
@@ -334,14 +404,16 @@ def build_schedules(archetype_key: str, heat_set: float, cool_set: float) -> dic
             "op": _seasonal_compact(segs, wd, we, op_vac),
             "heating": _seasonal_compact(segs, setp(wd, heat_set, arch["heat_setback"]),
                                          setp(we, heat_set, arch["heat_setback"]), heat_vac),
-            "cooling": _seasonal_compact(segs, setp(wd, cool_set, arch["cool_setback"]),
-                                         setp(we, cool_set, arch["cool_setback"]), cool_vac),
+            "cooling": cooling_compact_with_season(
+                setp(wd, cool_set, arch["cool_setback"]),
+                setp(we, cool_set, arch["cool_setback"]),
+                vac_day=cool_vac, segments=segs),
         }
 
     return {
         "op": _weekly_compact(wd, we),
         "heating": _weekly_compact(setp(wd, heat_set, arch["heat_setback"]),
                                    setp(we, heat_set, arch["heat_setback"])),
-        "cooling": _weekly_compact(setp(wd, cool_set, arch["cool_setback"]),
-                                   setp(we, cool_set, arch["cool_setback"])),
+        "cooling": cooling_compact_with_season(setp(wd, cool_set, arch["cool_setback"]),
+                                                setp(we, cool_set, arch["cool_setback"])),
     }

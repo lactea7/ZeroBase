@@ -539,7 +539,7 @@ export default function ResultDashboard({
                       <div className={`flex items-center gap-3 mb-4 ${overBudget ? 'text-rose-500' : 'text-emerald-600'}`}>
                         {overBudget ? <AlertTriangle size={24} /> : <PiggyBank size={24} />}
                         <h3 className="text-lg font-black tracking-tight">
-                          {overBudget ? '목표 예산 초과 안내 및 비용 절감 제안' : '공사비 절감 제안'}
+                          {overBudget ? '목표 예산 초과 안내 및 개선 대안 제안' : '개선 대안 제안 (비용 절감 · 성능 상향)'}
                         </h3>
                       </div>
                       <p className={`mb-6 text-sm font-medium leading-relaxed ${theme.textMain}`}>
@@ -596,7 +596,12 @@ export default function ResultDashboard({
 
                                 <div className="flex justify-between items-start gap-2 z-10">
                                   <span className={`font-black flex items-center gap-2 text-[13px] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                                    <Lightbulb size={16} className="shrink-0 text-emerald-500" /> {rec.title}
+                                    <Lightbulb size={16} className={`shrink-0 ${rec.advisable === false ? 'text-red-400' : 'text-emerald-500'}`} /> {rec.title}
+                                    {rec.advisable === false && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 shrink-0">
+                                        비권장 · 장기 손해
+                                      </span>
+                                    )}
                                   </span>
                                   {/* 선택 표시 체크박스 */}
                                   <span className={`shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-400/50 text-transparent'}`}>
@@ -604,16 +609,47 @@ export default function ResultDashboard({
                                   </span>
                                 </div>
                                 <p className={`text-xs leading-relaxed z-10 opacity-80 ${theme.textSub}`}>{rec.description}</p>
-                                {rec.performance_note && (
-                                  <p className={`text-[11px] leading-relaxed z-10 flex items-start gap-1 ${isDarkMode ? 'text-amber-400/90' : 'text-amber-600'}`}>
-                                    <span className="shrink-0">⚠</span>
-                                    <span>{rec.performance_note}</span>
-                                  </p>
+                                {/* 정량 영향(재시뮬레이션 산출)이 있으면 수치를, 없으면 정성 주석을 표시 */}
+                                {rec.impact?.simulated ? (
+                                  <div className={`text-[11px] leading-relaxed z-10 rounded-lg px-2.5 py-1.5 ${isDarkMode ? 'bg-white/5' : 'bg-slate-500/5'}`}>
+                                    <p className={theme.textSub}>
+                                      에너지 <b className={rec.impact.delta_kwh_m2 > 0 ? 'text-amber-500' : 'text-emerald-500'}>
+                                        {rec.impact.delta_kwh_m2 > 0 ? '+' : ''}{rec.impact.delta_kwh_m2} kWh/㎡·년
+                                      </b>
+                                      {' · '}운영비 <b className={rec.impact.annual_bill_delta > 0 ? 'text-amber-500' : 'text-emerald-500'}>
+                                        {rec.impact.annual_bill_delta > 0 ? '+' : ''}{formatWon(rec.impact.annual_bill_delta)}/년
+                                      </b>
+                                      {' · '}실공사비 <b className={rec.impact.capital_delta > 0 ? 'text-amber-500' : 'text-emerald-500'}>
+                                        {rec.impact.capital_delta > 0 ? '+' : ''}{formatWon(rec.impact.capital_delta)}
+                                      </b>
+                                    </p>
+                                    <p className={`mt-0.5 font-bold ${rec.impact.net_effect >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                                      {rec.impact.lifecycle_years}년 순효과 {rec.impact.net_effect >= 0 ? '+' : ''}{formatWon(rec.impact.net_effect)}
+                                      {rec.impact.net_effect >= 0 ? ' — 공사비·운영비 종합 이득' : ' — 종합 손실'}
+                                      {rec.impact.payback_years ? ` · 투자 회수 ${rec.impact.payback_years}년` : ''}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {rec.impact && (
+                                      <p className={`text-[11px] z-10 ${theme.textSub} opacity-70`}>
+                                        에너지 영향 없음 — 이 대안은 열모델을 바꾸지 않아 공사비만 변동합니다
+                                      </p>
+                                    )}
+                                    {rec.performance_note && (
+                                      <p className={`text-[11px] leading-relaxed z-10 flex items-start gap-1 ${isDarkMode ? 'text-amber-400/90' : 'text-amber-600'}`}>
+                                        <span className="shrink-0">⚠</span>
+                                        <span>{rec.performance_note}</span>
+                                      </p>
+                                    )}
+                                  </>
                                 )}
 
                                 <div className="mt-auto pt-4 flex flex-wrap items-center justify-between gap-2 z-10 border-t border-slate-500/10">
                                   <span className="text-[11px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 rounded-lg border border-emerald-500/20">
-                                    예상 절감: -{formatWon(rec.saved_cost).replace(' 만 원', '만원')}
+                                    {rec.direction === 'upgrade'
+                                      ? <>공사비 {(rec.impact?.capital_delta ?? rec.added_cost ?? 0) > 0 ? '+' : ''}{formatWon(rec.impact?.capital_delta ?? rec.added_cost ?? 0).replace(' 만 원', '만원')}{rec.impact?.payback_years ? ` · 회수 ${rec.impact.payback_years}년` : ''}</>
+                                      : <>예상 절감: -{formatWon(rec.saved_cost).replace(' 만 원', '만원')}</>}
                                   </span>
                                   <span className={`text-[11px] font-bold ${isSelected ? 'text-emerald-500' : 'opacity-50'}`}>
                                     {isSelected ? '✓ 선택됨' : '선택하기'}

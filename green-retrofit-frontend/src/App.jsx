@@ -207,6 +207,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [hoveredId, setHoveredId] = useState(null);
   const [editState, setEditState] = useState({});
+  // 화장실·계단실 등 동일 용도 존 일괄 적용 체크 — handleZoneClick에서 존 전환 시 리셋
+  const [applyToSimilarZones, setApplyToSimilarZones] = useState(false);
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
   const [loadingStage, setLoadingStage] = useState(null); // queued | baseline | retrofit
   const [res, setRes] = useState(null);
@@ -666,7 +668,17 @@ export default function App() {
     if (zData) {
       setEditState({ ...zData });
     }
+    setApplyToSimilarZones(false); // 존 전환 시 일괄적용 체크는 리셋(다음 존에 실수로 이어붙지 않게)
   };
+
+  // 화장실·계단실처럼 같은 용도(activityId)의 존이 여러 개일 때, 하나씩 편집하는
+  // 수고를 덜기 위한 필드 화이트리스트 — 위치·면적 등 존 고유값은 절대 복제하지 않는다.
+  const SIMILAR_ZONE_FIELDS = [
+    'activityId', 'peopleDensity', 'lightingPower', 'equipmentPower',
+    'outletCount', 'outletLoadType', 'ledFixtureCount', 'isConditioned',
+    'hvacSystemId', 'coolingInstalled', 'coolingCapacityPyeong',
+    'heatingFuelId', 'ventilationId', 'heatingSetpoint', 'coolingSetpoint',
+  ];
 
   const handleSaveClose = () => {
     if (!selectedId) return;
@@ -674,12 +686,23 @@ export default function App() {
       setSurfaces((prev) =>
         prev.map((s) => (s.id === selectedId ? { ...s, ...editState } : s))
       );
+    } else if (editMode === 'zone' && applyToSimilarZones && editState.activityId != null) {
+      const shared = {};
+      SIMILAR_ZONE_FIELDS.forEach((k) => { shared[k] = editState[k]; });
+      setZones((prev) =>
+        prev.map((z) => {
+          if (z.id === selectedId) return { ...z, ...editState };
+          if (z.activityId === editState.activityId) return { ...z, ...shared };
+          return z;
+        })
+      );
     } else if (editMode === 'zone') {
       setZones((prev) =>
         prev.map((z) => (z.id === selectedId ? { ...z, ...editState } : z))
       );
     }
 
+    setApplyToSimilarZones(false);
     setSelectedId(null);
     setLightCalc((p) => ({ ...p, active: false }));
     setEquipCalc((p) => ({ ...p, active: false }));
@@ -970,19 +993,32 @@ export default function App() {
             </div>
 
             <p className={`text-sm mb-4 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-              다음 Zone에서 면과 면이 완전히 맞닿지 않는 부분이 감지되었습니다.
-              이는 CAD 모델링 시 발생하는 미세한 틈(Gap)일 수 있습니다.
+              gbXML 모델에서 시뮬레이션 결과에 영향을 줄 수 있는 항목이 감지되었습니다.
+              내용을 확인한 뒤 진행해 주세요.
             </p>
 
             <div className={`rounded-2xl border p-4 mb-6 max-h-48 overflow-y-auto ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              {/* 경고 종류가 둘 이상이다. 갭 경고는 Zone·오차율 쌍으로, 그 외(자기참조 면 등)는
+                  message 본문으로 표시한다. issue 분기 없이 zone/deviation만 읽으면 빈 칸이 된다. */}
               {gapWarnings.map((w, i) => (
-                <div key={i} className={`flex justify-between items-center py-2 ${i > 0 ? (isDarkMode ? 'border-t border-slate-700' : 'border-t border-slate-200') : ''}`}>
-                  <span className={`text-sm font-mono font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{w.zone}</span>
-                  <span className={`text-xs font-bold px-3 py-1 rounded-full ${
-                    w.deviation > 20 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-500'
-                  }`}>
-                    오차: {w.deviation}%
-                  </span>
+                <div key={i} className={`py-2 ${i > 0 ? (isDarkMode ? 'border-t border-slate-700' : 'border-t border-slate-200') : ''}`}>
+                  {w.issue === 'not_enclosed' ? (
+                    <div className="flex justify-between items-center">
+                      <span className={`text-sm font-mono font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{w.zone}</span>
+                      <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                        w.deviation > 20 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-500'
+                      }`}>
+                        오차: {w.deviation}%
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2">
+                      <span className="text-xs font-bold px-2 py-1 rounded-full shrink-0 bg-amber-500/20 text-amber-500">
+                        {w.count != null ? `${w.count}개 면` : '확인 필요'}
+                      </span>
+                      <span className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{w.message}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1675,6 +1711,8 @@ export default function App() {
               isVirtualFloor={isVirtualFloor}
               getActivityCategory={getActivityCategory}
               calculateUpdatedUValue={calculateUpdatedUValue}
+              applyToSimilarZones={applyToSimilarZones}
+              setApplyToSimilarZones={setApplyToSimilarZones}
             />
           )}
 
@@ -1689,6 +1727,7 @@ export default function App() {
                 {loadingStage === 'queued' && '대기열에서 순서를 기다리는 중...'}
                 {loadingStage === 'baseline' && '1/2단계 — 개선 전(원본) 건물 시뮬레이션 중'}
                 {loadingStage === 'retrofit' && '개선안 건물 시뮬레이션 중'}
+                {loadingStage?.startsWith('alt:') && '추가 절감 대안의 에너지 영향 계산 중 (대안별 재시뮬레이션)'}
                 {!loadingStage && 'EnergyPlus 물리 엔진 가동 중'}
               </p>
               <div className="relative flex justify-center items-center h-24">

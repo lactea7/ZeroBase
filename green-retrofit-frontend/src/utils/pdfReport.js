@@ -393,9 +393,22 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
 
   ${recs.length ? `
   <div class="recs">
-    <div class="t">추가 절감 대안 ${recs.length}건 — 모두 적용 시 <b>−${won(recTotal)}</b></div>
+    <div class="t">개선 대안 ${recs.length}건${recTotal > 0 ? ` — 비용 절감안 모두 적용 시 <b>−${won(recTotal)}</b>` : ''}</div>
     <div class="list">
-      ${recs.map((r) => `<div class="item"><b>${esc(r.title)}</b> — 절감 <span class="amt">${won(r.saved_cost)}</span>${r.performance_note ? `<br><span style="color:var(--ink-3); font-size:8px">↳ ${esc(r.performance_note)}</span>` : ''}</div>`).join('')}
+      ${recs.map((r) => {
+        const imp = r.impact;
+        // 재시뮬레이션 산출 정량 영향이 있으면 수치를, 없으면 정성 주석을 병기
+        const isUp = r.direction === 'upgrade';
+        const sub = imp?.simulated
+          ? `↳ 에너지 ${imp.delta_kwh_m2 > 0 ? '+' : ''}${imp.delta_kwh_m2} kWh/㎡·년 · 운영비 ${imp.annual_bill_delta > 0 ? '+' : ''}${won(imp.annual_bill_delta)}/년 · 실공사비 ${imp.capital_delta > 0 ? '+' : ''}${won(imp.capital_delta)}${imp.payback_years ? ` · 회수 ${imp.payback_years}년` : ''} · ${imp.lifecycle_years}년 순효과 <b style="color:${imp.net_effect >= 0 ? 'var(--accent)' : '#b91c1c'}">${imp.net_effect >= 0 ? '+' : ''}${won(imp.net_effect)}</b> (EnergyPlus 재시뮬레이션 산출)`
+          : [imp ? '↳ 에너지 영향 없음(열모델 불변)' : '', r.performance_note ? esc(r.performance_note) : '']
+              .filter(Boolean).join(' · ');
+        const advise = r.advisable === false ? ` <span style="color:#b91c1c; font-weight:700">(비권장 — 장기 손해, 예산 제약 시에만)</span>` : '';
+        const head = (isUp
+          ? `<b>[상향] ${esc(r.title)}</b> — 공사비 <span class="amt">${(imp?.simulated ? imp.capital_delta : (r.added_cost || 0)) > 0 ? '+' : ''}${won(imp?.simulated ? imp.capital_delta : (r.added_cost || 0))}</span>`
+          : `<b>${esc(r.title)}</b> — 절감 <span class="amt">${won(r.saved_cost)}</span>`) + advise;
+        return `<div class="item">${head}${sub ? `<br><span style="color:var(--ink-3); font-size:8px">${sub}</span>` : ''}</div>`;
+      }).join('')}
     </div>
   </div>` : ''}
 
@@ -458,8 +471,12 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   <div class="section">
     <div class="section-h"><span class="section-no">03</span><h2>창호</h2>
       <span class="cost">${won(cd.window)}</span></div>
+    ${fin.window_details ? `
+    ${row('적용 창호', `${esc(fin.mapped_window_name || '—')} — 대표 U값 <b>${num(fin.window_details.u_value, 2)} W/㎡K</b> · SHGC ${num(fin.window_details.shgc, 2)}`)}
+    ${row('산정 단가', `친환경건설자재 DB 창세트 중앙값 <b>₩${(fin.window_details.unit_price || 0).toLocaleString()}/㎡</b> × 창 면적 ${num(fin.window_details.area_m2)}㎡`)}
+    ${row('산정 방식', '창 면적가중 실측 U/SHGC로 성능 등급을 매칭한 뒤 해당 등급 중앙값 단가 적용')}` : `
     ${row('적용 등급 (U값 기반 매칭)', esc(fin.mapped_window_name || '—'))}
-    ${row('산정 방식', '창 면적가중 실측 U/SHGC → 친환경건설자재 DB 창세트 중앙값 단가')}
+    ${row('산정 방식', '창 면적가중 실측 U/SHGC → 친환경건설자재 DB 창세트 중앙값 단가')}`}
   </div>
 
   <div class="section">

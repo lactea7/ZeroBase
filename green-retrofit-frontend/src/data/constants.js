@@ -44,6 +44,19 @@ export const ACTIVITIES = [
   { id: 1458, name: '전문 관리 병동 (Specialist Care Ward)', color: 0xe11d48 },
 ];
 
+// ActivityIdList.txt의 38개 용도를 1:1로 반영하다 보니 같은 이름(예: 화장실 1102/1121,
+// 창고 1100/1451)이 서로 다른 id로 중복 등재돼 있다 — 용도별 스케줄 계산에는 전부 유효한
+// id이므로 ACTIVITIES 자체는 그대로 두되, 사용자가 고르는 드롭다운에서는 이름 기준으로
+// 첫 번째(가장 작은 id)만 남겨 "화장실"이 두 번 보이는 혼란을 없앤다.
+export const ACTIVITIES_UNIQUE = (() => {
+  const seen = new Set();
+  return ACTIVITIES.filter((a) => {
+    if (seen.has(a.name)) return false;
+    seen.add(a.name);
+    return true;
+  });
+})();
+
 // --- [상용 DB 연동: Glazing.txt 207개 유리 전체 100% 반영] ---
 export const GLAZING_TYPES = [
   { id: 1, name: '1: Sgl Clr 3mm', u: 6.61, shgc: 0.84 },

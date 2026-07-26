@@ -16,7 +16,10 @@ except ImportError:
     pd = None
 
 from src.cost_analyzer import LCCAnalyzer, is_non_habitable
-from src.activity_schedules import load_activity_names, classify_activity, build_schedules, get_archetype_loads, daily_op_hours
+from src.activity_schedules import (
+    load_activity_names, classify_activity, build_schedules, get_archetype_loads,
+    daily_op_hours, cooling_compact_with_season,
+)
 
 # ---------------------------------------------------------
 # [상용 데이터베이스 동적 파싱 로직]
@@ -258,7 +261,13 @@ PYEONG_TO_KW = 0.383
 
 
 def resolve_hvac_equipment(project_data: dict) -> dict:
-    """projectData.hvacEquipment(사용자 입력) → 물리 파라미터. 미입력 시 현행 기본값."""
+    """projectData.hvacEquipment(사용자 입력) → 물리 파라미터. 미입력 시 현행 기본값.
+
+    hvacUpgradeActive(설비 교체 토글)가 켜지면 개선 후 모델은 1등급 신형 성능
+    (COP 4.0 / PTHP 4.8·4.1, 보일러 신형 효율)으로 돌아간다 — 노후 설비 건물의
+    설비 교체 리트로핏 효과를 에너지에 반영. 기준선(개선 전) 실행은 이 플래그가
+    제거된 payload로 돌므로 원래 노후 성능을 유지한다.
+    """
     eq = project_data.get("hvacEquipment") or {}
     cooling_grade = eq.get("coolingGrade") or "grade3"
     heating_age = eq.get("heatingAge") or "new"
@@ -266,6 +275,12 @@ def resolve_hvac_equipment(project_data: dict) -> dict:
         cooling_grade = "grade3"
     if heating_age not in HEATING_EFF_FACTOR_BY_AGE:
         heating_age = "new"
+
+    upgraded = bool(project_data.get("hvacUpgradeActive"))
+    if upgraded:
+        cooling_grade = "grade1"
+        heating_age = "new"
+
     return {
         "cooling_grade": cooling_grade,
         "heating_age": heating_age,
@@ -273,6 +288,7 @@ def resolve_hvac_equipment(project_data: dict) -> dict:
         "pthp_cops": PTHP_COP_BY_GRADE[cooling_grade],
         "heat_factor": HEATING_EFF_FACTOR_BY_AGE[heating_age],
         "is_user_input": bool(eq.get("coolingGrade") or eq.get("heatingAge")),
+        "upgraded": upgraded,   # 설비 교체 토글 반영 여부 (UI 표기용)
     }
 
 
@@ -354,6 +370,226 @@ def build_window_geometries(surface: dict, wall_verts: list) -> list:
     return result
 
 
+def _build_variant_payload(payload: dict, rec_type: str):
+    """비용 절감 추천 1건을 적용한 시뮬레이션 페이로드 생성.
+
+    프론트(utils/recommendationActions.js)의 적용 규칙과 동일해야 '적용 시 실제 차액'
+    원칙이 유지된다. 열모델이 바뀌지 않는 대안(hvac 표준 하향·hvac_scope·led)은
+    None을 반환한다 — 에너지 변화가 모델에 없으므로 재시뮬레이션이 무의미하다.
+    """
+    import copy
+    project_data = payload.get("projectData", {}) or {}
+
+    if rec_type == "window":
+        surfaces = copy.deepcopy(payload.get("surfaces", []))
+        changed = 0
+        for s in surfaces:
+            has_glass = (
+                s.get("type") in ("Window", "Skylight")
+                or s.get("glazingId") is not None
+                or ((s.get("wwr") or 0) > 0 and "wall" in (s.get("type") or "").lower())
+            )
+            if has_glass and s.get("glazingId") != 42:
+                s["glazingId"] = 42  # 일반 복층 유리로 하향 (glazingId가 windowU보다 우선)
+                changed += 1
+        if not changed:
+            return None
+        v = dict(payload)
+        v["surfaces"] = surfaces
+        return v
+
+    if rec_type == "insulation":
+        surfaces = copy.deepcopy(payload.get("surfaces", []))
+        materials = payload.get("materials", {}) or {}
+        constructions = {c.get("id"): c for c in materials.get("constructions", [])}
+        overrides = copy.deepcopy(payload.get("constructionOverrides", {}) or {})
+        insul_overrides = {}
+        changed = 0
+        for s in surfaces:
+            s_id = s.get("id")
+            c_ref = s.get("constructionRef") or s.get("constructionId")
+            ov = overrides.get(s_id)
+            if ov and ov.get("tier") in ("premium", "high"):
+                t = ov.get("thickness", 100)
+                overrides[s_id] = {"insulationId": 1, "tier": "standard", "thickness": t}
+                if c_ref:
+                    # λ0.036 = 실제 적용 제품(비드법 1종 1호) — tier 대표값(0.055)이 아닌 제품 물성
+                    insul_overrides[c_ref] = {"tier": "standard", "thickness": t, "conductivity": 0.036}
+                changed += 1
+            elif not ov and c_ref in constructions:
+                insul = next((l for l in constructions[c_ref].get("layers", [])
+                              if l.get("isInsulation")), None)
+                if insul and (insul.get("conductivity") or 1.0) <= 0.045:
+                    t = insul.get("thickness") or 100
+                    overrides[s_id] = {"insulationId": 1, "tier": "standard", "thickness": t}
+                    insul_overrides[c_ref] = {"tier": "standard", "thickness": t, "conductivity": 0.036}
+                    changed += 1
+        if not changed:
+            return None
+        v = dict(payload)
+        v["surfaces"] = surfaces
+        v["constructionOverrides"] = overrides
+        # insulationOverrides는 시뮬 진입부에서 c_ref 기준으로 U값을 재계산해 준다
+        v["insulationOverrides"] = insul_overrides
+        return v
+
+    if rec_type == "hvac" and project_data.get("geothermalApplied"):
+        v = dict(payload)
+        pd2 = dict(project_data)
+        pd2["geothermalApplied"] = False
+        v["projectData"] = pd2
+        return v
+
+    # ── 상향(성능 개선) 변형 — 전부 열모델이 바뀌므로 재시뮬레이션 필수 ──
+    if rec_type == "hvac_upgrade":
+        if project_data.get("hvacUpgradeActive"):
+            return None
+        v = dict(payload)
+        pd2 = dict(project_data)
+        pd2["hvacUpgradeActive"] = True   # resolve_hvac_equipment가 1등급 신형 COP로 전환
+        v["projectData"] = pd2
+        return v
+
+    if rec_type == "window_upgrade":
+        # 일반 복층 → 고성능 Low-E+Ar 복층 (ID 154, U 1.32/SHGC 0.34)
+        surfaces = copy.deepcopy(payload.get("surfaces", []))
+        changed = 0
+        for s in surfaces:
+            has_glass = (
+                s.get("type") in ("Window", "Skylight")
+                or s.get("glazingId") is not None
+                or ((s.get("wwr") or 0) > 0 and "wall" in (s.get("type") or "").lower())
+            )
+            if has_glass and s.get("glazingId") != 154:
+                s["glazingId"] = 154
+                changed += 1
+        if not changed:
+            return None
+        v = dict(payload)
+        v["surfaces"] = surfaces
+        return v
+
+    if rec_type == "insulation_upgrade":
+        # 일반/저성능 단열(λ>0.045) → 중성능(high, λ0.035, 비드법 1종 2호 id 2)
+        surfaces = copy.deepcopy(payload.get("surfaces", []))
+        materials = payload.get("materials", {}) or {}
+        constructions = {c.get("id"): c for c in materials.get("constructions", [])}
+        overrides = copy.deepcopy(payload.get("constructionOverrides", {}) or {})
+        insul_overrides = {}
+        changed = 0
+        for s in surfaces:
+            s_id = s.get("id")
+            c_ref = s.get("constructionRef") or s.get("constructionId")
+            ov = overrides.get(s_id)
+            if ov and ov.get("tier") in ("standard", "basic"):
+                t = ov.get("thickness", 100)
+                overrides[s_id] = {"insulationId": 2, "tier": "high", "thickness": t}
+                if c_ref:
+                    # λ0.031 = 실제 적용 제품(비드법 1종 2호) — 프론트 적용과 동일 물성
+                    insul_overrides[c_ref] = {"tier": "high", "thickness": t, "conductivity": 0.031}
+                changed += 1
+            elif not ov and c_ref in constructions:
+                insul = next((l for l in constructions[c_ref].get("layers", [])
+                              if l.get("isInsulation")), None)
+                if insul and (insul.get("conductivity") or 0) > 0.045:
+                    t = insul.get("thickness") or 100
+                    overrides[s_id] = {"insulationId": 2, "tier": "high", "thickness": t}
+                    insul_overrides[c_ref] = {"tier": "high", "thickness": t, "conductivity": 0.031}
+                    changed += 1
+        if not changed:
+            return None
+        v = dict(payload)
+        v["surfaces"] = surfaces
+        v["constructionOverrides"] = overrides
+        v["insulationOverrides"] = insul_overrides
+        return v
+
+    return None
+
+
+def _evaluate_alternatives(payload: dict, result_data: dict, temp_dir: str, stage_fn):
+    """추천 대안별 정량 영향(kWh/㎡·운영비·LCC 순효과) 산출.
+
+    열모델이 바뀌는 대안(창호·단열 하향, 지열 해제)은 EnergyPlus를 실제로 재실행해
+    소요량과 요금 변화를 계산하고, 비용만 바뀌는 대안은 에너지 delta 0으로 표기한다.
+    각 recommendation에 impact 블록을 붙인다 (financial과 result.financial은 동일 객체
+    이므로 여기서의 변형이 응답 양쪽에 반영된다).
+    """
+    fin = result_data.get("financial", {})
+    recs = fin.get("recommendations") or []
+    if not recs:
+        return
+    base_summary = result_data.get("summary", {})
+    base_bill = fin.get("total_energy_bill") or 0
+    base_capital = fin.get("capital_cost") or 0
+    lccp = fin.get("lcc_parameters", {})
+    dr = (lccp.get("discount_rate") or 5.0) / 100.0
+    ui = (lccp.get("utility_inflation") or 4.0) / 100.0
+    years = int(lccp.get("lifecycle_years") or 20)
+
+    def _net_effect(saved_cost, bill_delta):
+        # 대안 적용의 분석기간 순효과 = 공사비 절감 − 운영비 증가분의 현재가치 합.
+        # 양수면 하향해도 경제적으로 이득, 음수면 절감액보다 운영비 손실이 크다.
+        pv_extra = sum(bill_delta * ((1 + ui) ** y) / ((1 + dr) ** y)
+                       for y in range(1, years + 1))
+        return int(saved_cost - pv_extra)
+
+    for rec in recs:
+        variant = _build_variant_payload(payload, rec.get("type", ""))
+        if variant is None:
+            # 열모델 불변 — 시뮬레이션상 에너지 변화 없음 (LED 조명 효과 등은 미모델 → performance_note로 고지)
+            rec["impact"] = {
+                "simulated": False,
+                "delta_kwh_m2": 0.0,
+                "annual_bill_delta": 0,
+                "net_effect": int(rec.get("saved_cost", 0)),
+                "lifecycle_years": years,
+            }
+            continue
+
+        variant["_variantOf"] = rec["type"]
+        variant.pop("baselineModel", None)  # 대안 평가에 전-시뮬 불필요 (기준은 현재 개선안)
+        stage_fn(f"alt:{rec['type']}")
+        print(f"🔀 [대안 평가] '{rec['title']}' 적용 모델 재시뮬레이션 시작...")
+        try:
+            vres = generate_idf_and_simulate(
+                variant, os.path.join(temp_dir, f"alt_{rec['type']}"))
+        except Exception as e:
+            # 대안 평가 실패가 본 결과를 막으면 안 됨 — 정량 영향만 생략하고 정성 주석 유지
+            print(f"⚠️ [대안 평가] '{rec['type']}' 재시뮬레이션 실패 → 정량 영향 생략: {e}")
+            continue
+
+        v_sum = vres.get("summary", {})
+        v_fin = vres.get("financial", {})
+        bill_delta = int((v_fin.get("total_energy_bill") or 0) - base_bill)
+        capital_delta = int((v_fin.get("capital_cost") or 0) - base_capital)
+        # 단순 회수기간: 공사비가 늘고 운영비가 줄 때만 의미 (상향 대안의 핵심 지표)
+        payback_years = (round(capital_delta / (-bill_delta), 1)
+                         if bill_delta < 0 and capital_delta > 0 else None)
+        rec["impact"] = {
+            "payback_years": payback_years,
+            "simulated": True,
+            "consume_per_m2": v_sum.get("consume_per_m2"),
+            "delta_kwh_m2": round((v_sum.get("consume_per_m2") or 0)
+                                  - (base_summary.get("consume_per_m2") or 0), 1),
+            "co2_delta": round((v_sum.get("co2_per_m2") or 0)
+                               - (base_summary.get("co2_per_m2") or 0), 2),
+            "annual_bill_delta": bill_delta,
+            "capital_delta": capital_delta,
+            # 순효과는 자재 단가 차액(saved_cost)이 아닌 '실제 총공사비 변화' 기준.
+            # 예: 창호 하향 → 열손실 증가 → 피크부하·설비 용량 증가 → 설비비 상승까지
+            # 재시뮬레이션이 잡아내므로, saved_cost보다 -capital_delta가 정직한 절감액이다.
+            "net_effect": _net_effect(-capital_delta, bill_delta),
+            "lifecycle_years": years,
+        }
+        # 순효과가 음수면 '비권장' — 시스템이 손해로 판명한 대안을 그대로 제안하면
+        # 사용자가 적용 → 반대 대안 제안 → 재적용의 핑퐁에 빠진다. 예산 제약 시에만 고려하도록 명시.
+        rec["advisable"] = rec["impact"]["net_effect"] >= 0
+        print(f"✅ [대안 평가] '{rec['title']}': ΔkWh/㎡ {rec['impact']['delta_kwh_m2']:+.1f}, "
+              f"운영비 {bill_delta:+,}원/년, {years}년 순효과 {rec['impact']['net_effect']:+,}원"
+              f"{'' if rec['advisable'] else ' → 비권장(장기 손해)'}")
+
+
 def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
@@ -392,6 +628,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             and not project_data.get("geothermalApplied")
             and not project_data.get("ledReductionActive")
             and not project_data.get("hvacExcludeNonHabitable")
+            and not project_data.get("hvacUpgradeActive")
         )
         if baseline_same:
             print("⏮️ [전/후 비교] 개선 전후 모델 동일 → 전-시뮬 생략 (절감 0으로 처리)")
@@ -409,6 +646,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                 "surfaces": baseline_model["surfaces"],
                 "materials": payload.get("materials", {}),
                 "constructionOverrides": {},
+                "_variantOf": "baseline",  # 기준선 실행은 자기 대안 평가를 돌지 않는다
             }
             baseline_result = generate_idf_and_simulate(base_payload, os.path.join(temp_dir, "baseline"))
             print("⏮️ [전/후 비교] 개선 전 시뮬레이션 완료 → 기준선으로 사용")
@@ -447,14 +685,19 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                         
                         new_tier = override.get("tier")
                         new_thickness = float(override.get("thickness", 0.0)) # mm
-                        
+
                         TIER_CONDUCTIVITY = {
                             "premium": 0.025,
                             "high": 0.035,
                             "standard": 0.055,
                             "basic": 0.085
                         }
-                        lambda_new = TIER_CONDUCTIVITY.get(new_tier, 0.04)
+                        # 제품 λ가 명시되면 tier 대표값 대신 사용 — 실제 적용 제품
+                        # (예: 비드법 1종 1호 λ0.036)과 재시뮬레이션 U가 일치해야
+                        # '약속 = 실제 차액' 원칙이 에너지에서도 유지된다.
+                        lambda_new = (float(override["conductivity"])
+                                      if override.get("conductivity")
+                                      else TIER_CONDUCTIVITY.get(new_tier, 0.04))
                         r_insul_new = (new_thickness / 1000.0) / lambda_new
                         r_total_new = r_other + r_insul_new
                         new_u = 1.0 / r_total_new
@@ -790,7 +1033,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         if adj_zone_id and adj_zone_id in valid_zone_ids:
             continue
         else:
-            if not ("interior" in t or adj_zone_raw):
+            if not ("interior" in t or adj_zone_raw or s.get("selfAdjacent")):
                 z = s.get("zone")
                 if z:
                     outdoor_counts[z] = outdoor_counts.get(z, 0) + 1
@@ -839,10 +1082,13 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             heat_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("heating", [15]*24))
             heat_sch_text = f"Through: 12/31, {heat_wd}, {heat_we}, {heat_ho}, For: AllOtherDays, Until: 24:00, 15.0"
             
-            cool_wd = condense_daily_schedule("Weekdays", profiles.get("weekday", {}).get("cooling", [30]*24))
-            cool_we = condense_daily_schedule("Weekends", profiles.get("weekend", {}).get("cooling", [30]*24))
-            cool_ho = condense_daily_schedule("Holidays", profiles.get("holiday", {}).get("cooling", [30]*24))
-            cool_sch_text = f"Through: 12/31, {cool_wd}, {cool_we}, {cool_ho}, For: AllOtherDays, Until: 24:00, 30.0"
+            # 24시간 커스텀 스케줄도 연중 상시 적용 시 냉방기간 밖(11~4월)에 냉방이
+            # 발생한다 — 표준 스케줄과 동일하게 냉방기간(5~10월) 밖은 미가동 처리.
+            # (공휴일 프로파일은 별도 인자가 없는 cooling_compact_with_season 특성상
+            #  평일/주말 배열만 전달 — 공휴일은 주말 프로파일로 근사)
+            cool_wd_day = profiles.get("weekday", {}).get("cooling", [30]*24)
+            cool_we_day = profiles.get("weekend", {}).get("cooling", [30]*24)
+            cool_sch_text = cooling_compact_with_season(cool_wd_day, cool_we_day)
         else:
             # 용도(activityId) 아키타입별 표준 스케줄 (ASHRAE/DOE 프로파일)
             sched = build_schedules(arch_key, heat_set, cool_set)
@@ -989,7 +1235,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
 
         else:
             # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직
-            if "interior" in t or adj_zone_raw:
+            # selfAdjacent: 파서가 자기참조 인접을 걷어낸 면. 타입에 'interior'가 없는
+            # Air 같은 면이 여기서 외기 노출(일사·풍압)로 빠지면 없던 외피가 생긴다.
+            if "interior" in t or adj_zone_raw or s.get("selfAdjacent"):
                 # adjacentZone이 있지만 유효하지 않은 Zone → Adiabatic fallback
                 obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
             else:
@@ -1082,6 +1330,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             led_fixture_count=sum(int(z.get('ledFixtureCount', 0)) for z in zones),
             led_reduction_active=led_reduction_active,
             hvac_upgrade_active=hvac_upgrade_active,
+            cooling_grade=equip["cooling_grade"],
+            heating_age=equip["heating_age"],
+            hvac_upgraded=equip.get("upgraded", False),
             hvac_exclude_non_habitable=project_data.get('hvacExcludeNonHabitable', False),
             heat_source=heat_source,
             use_pthp=use_pthp,
@@ -1107,6 +1358,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                 "mode": hvac_mode,
                 "coolingGrade": equip["cooling_grade"],
                 "heatingAge": equip["heating_age"],
+                "upgraded": equip.get("upgraded", False),  # 설비 교체 토글로 신형 적용됨
                 "userInput": equip["is_user_input"],
             },
             "zones": equipment_log,
@@ -1124,6 +1376,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             }
             result_data["baseline"] = baseline_block
             result_data["result"]["baseline"] = baseline_block
+
+        # ── 대안별 정량 평가: 추천 대안을 실제 적용해 재시뮬레이션 → kWh/㎡·운영비 변화 산출 ──
+        # 재귀 방지: 대안 평가로 생성된 변형 실행(_variantOf)은 자기 대안을 다시 평가하지 않는다.
+        if not payload.get("_variantOf"):
+            _evaluate_alternatives(payload, result_data, temp_dir, _stage)
 
         return result_data
 
