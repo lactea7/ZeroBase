@@ -110,7 +110,18 @@ send_and_wait() {
   before=$("$CMUX" read-screen --surface "$surface" --scrollback 2>/dev/null | wc -l | tr -d '[:space:]')
   before=$((before + 1))
 
-  "$CMUX" send --surface "$surface" "$text" >/dev/null
+  # cmux send 는 한 번에 보낼 수 있는 양에 한계가 있다. 실측으로 2800자는 통과하고
+  # 3082자는 15초 뒤 "Command timed out" 으로 실패했다(길이보다 공백·줄바꿈 렌더링
+  # 비용에 좌우된다). 나눠 보내면 입력창이 누적하므로 안전한 크기로 쪼갠다.
+  local pos=0 chunk
+  while [ "$pos" -lt "${#text}" ]; do
+    chunk=${text:$pos:1200}
+    if ! "$CMUX" send --surface "$surface" "$chunk" >/dev/null 2>&1; then
+      echo "ERROR: $surface 에 전송 실패 (offset $pos)" >&2
+      return 1
+    fi
+    pos=$((pos + 1200))
+  done
   sleep 1
   "$CMUX" send-key --surface "$surface" Enter >/dev/null
 
