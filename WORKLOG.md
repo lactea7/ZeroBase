@@ -5,6 +5,44 @@
 
 ---
 
+## 재시작 절차 (컴퓨터를 껐다 켠 뒤)
+
+디스크에 남는 것: `scripts/` 도구 4종, 이 파일, codex CLI(`~/.local/bin/codex`)와
+로그인(`~/.codex/auth.json`), ollama 모델. **다시 띄워야 하는 것은 아래뿐이다.**
+
+```bash
+# 1) cmux 레이아웃 복구 (4분할: Claude / 브라우저 / codex / ollama)
+cmux restore-session
+
+# 2) 백엔드 — 저장소 루트의 .venv 를 쓴다
+cd green-retrofit-backend && ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+
+# 3) 프론트 — 반드시 5173 을 잡아야 한다 (ALLOWED_ORIGINS 기본값이 5173뿐)
+cd green-retrofit-frontend && npm run dev
+
+# 4) 브라우저 패널
+cmux open http://localhost:5173
+```
+
+**패널 세션은 수동으로 다시 띄워야 한다.** 좌하단 터미널에서 `codex`,
+우하단에서 `ollama run gemma4:e4b`. 이게 떠 있지 않으면 릴레이 스크립트의
+패널 자동 탐지가 실패한다(탐지는 화면 내용으로 하므로 surface 번호가 바뀌어도 무방).
+
+릴레이 사용법:
+```bash
+./scripts/relay-cmux.sh "무엇을 바꿨는지 브리핑"        # 코드 검토 (codex→ollama)
+./scripts/ask-panels.sh --codex-only <질문파일.md>      # 자유 질문 교차검증
+```
+`.relay/` 는 gitignore 대상이라 재부팅 후 비어 있을 수 있다 — 라운드 카운터가
+초기화될 뿐 문제 없다. 라운드 상한은 3.
+
+**사라지는 것**: 실행 중이던 서버, 패널 세션, `/private/tmp` 의 스크래치패드
+(EPlusSimple 클론, 이전 릴레이 기록 보관분). 전부 재생성 가능하다.
+EPlusSimple 비교가 다시 필요하면:
+`git clone --depth 1 --branch V0-6-3 https://github.com/snu-bslab/EPlusSimple.git`
+
+---
+
 ## 운영 규칙
 
 **Claude 또는 codex 중 하나라도 일일 사용 한도에 도달하면 그 즉시 작업을 멈춘다.**
