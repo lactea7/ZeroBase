@@ -48,7 +48,15 @@ detect_surfaces() {
 require_surfaces() {
   CODEX_SURFACE=${RELAY_CODEX_SURFACE:-}
   OLLAMA_SURFACE=${RELAY_OLLAMA_SURFACE:-}
-  if [ -z "$CODEX_SURFACE" ] || [ -z "$OLLAMA_SURFACE" ]; then detect_surfaces; fi
+  # read-screen 은 앱이 막 뜬 직후 등에 일시적으로 빈 화면을 돌려준다.
+  # 한 번 비었다고 탐지 전체를 포기하면 재부팅 직후마다 실패한다.
+  local attempt=1
+  while [ "$attempt" -le 3 ]; do
+    if [ -n "${CODEX_SURFACE:-}" ] && [ -n "${OLLAMA_SURFACE:-}" ]; then break; fi
+    [ "$attempt" -gt 1 ] && sleep 2
+    detect_surfaces
+    attempt=$((attempt + 1))
+  done
   if [ -z "${CODEX_SURFACE:-}" ] || [ -z "${OLLAMA_SURFACE:-}" ]; then
     echo "ERROR: 패널을 찾지 못했습니다. codex/ollama 세션이 떠 있는지 확인하거나" >&2
     echo "       RELAY_CODEX_SURFACE / RELAY_OLLAMA_SURFACE 로 직접 지정하세요." >&2
