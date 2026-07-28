@@ -419,6 +419,15 @@ export default function App() {
   };
 
   const getZoneFloorArea = (zoneId) => {
+    // 백엔드와 같은 기준을 써야 한다. 백엔드는 gbXML 선언 면적(declaredArea)을 우선하는데
+    // 여기서 기하 합산을 쓰면 화면과 시뮬레이션이 갈린다 — 층간 슬래브가 아래층 존에
+    // 바닥·천장으로 이중 계산돼 104 존이 프론트 223.22㎡ / 백엔드 107.22㎡ 로 2배 차이났다.
+    // 유효성 기준을 백엔드(gbxml_parser: 유한한 양수)와 반드시 같게 둔다.
+    // 임계값이 어긋나면 그 사이 면적의 존에서 화면과 시뮬레이션이 또 갈린다.
+    const zone = zones.find((z) => z.id === zoneId);
+    const declared = Number(zone?.declaredArea ?? zone?.area ?? 0);
+    if (Number.isFinite(declared) && declared > 0) return declared;
+
     const zoneSurfaces = surfaces.filter(
       (s) => s.zone === zoneId && s.type && (s.type.toLowerCase().includes('floor') || s.type.toLowerCase().includes('slab'))
     );

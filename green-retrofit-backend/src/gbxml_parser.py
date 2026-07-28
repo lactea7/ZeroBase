@@ -204,6 +204,29 @@ def parse_gbxml_to_json(filepath: str):
         elif lu == 'feet': unit_scale = 0.3048
         elif lu == 'inches': unit_scale = 0.0254
 
+    # 면적 단위는 length 와 별개 속성이다. 좌표에서 계산한 면적은 lengthUnit² 이지만
+    # <Area> 요소는 areaUnit 을 따른다. 예: lengthUnit="Feet" + areaUnit="SquareMeters"
+    # 인 파일에서 unit_scale² 를 곱하면 이미 m² 인 값을 0.3048² 로 또 줄여버린다.
+    _AREA_SCALES = {
+        'squaremeters': 1.0,
+        'squarecentimeters': 0.0001,
+        'squaremillimeters': 0.000001,
+        'squarefeet': 0.09290304,
+        'squareinches': 0.00064516,
+    }
+    unknown_area_unit = None
+    area_unit = get_attr(root, 'areaunit')
+    if area_unit:
+        au = area_unit.lower()
+        if au in _AREA_SCALES:
+            area_scale = _AREA_SCALES[au]
+        else:
+            # 명시된 단위를 조용히 길이단위²로 해석하면 틀린 면적을 그대로 쓰게 된다.
+            area_scale = unit_scale ** 2
+            unknown_area_unit = area_unit
+    else:
+        area_scale = unit_scale ** 2   # 속성이 없을 때만 길이 단위로 유추
+
     spaces = {}
     zones_list = []
     surfaces_list = []
@@ -449,12 +472,30 @@ def parse_gbxml_to_json(filepath: str):
         
         name_node = space.find('.//name')
         sp_name = name_node.text if name_node is not None and name_node.text else sp_id
-        
+
+        # gbXML이 선언한 <Space><Area>. 기하 계산보다 이 값을 우선한다 —
+        # 층간 슬래브는 하나의 Surface로 표현되고 그 면의 space_1 존에만 귀속되므로,
+        # 기하 합산은 아래층 존에서 바닥과 천장을 이중 계산하고(101 화장실 24.85 vs
+        # 선언 11.22) 최상층 존은 바닥을 아예 못 받는다.
+        area_node = space.find('.//area')
+        sp_area = 0.0
+        if area_node is not None and area_node.text:
+            try:
+                _v = float(area_node.text) * area_scale
+                # 유한한 양수면 채택한다. 절대 하한을 두면 샤프트·덕트처럼 실제로
+                # 아주 작은 존을 부당하게 버리게 되므로, 의심스러운 값은 버리지 않고
+                # 경고로 알린다(아래 tiny_declared_areas).
+                if math.isfinite(_v) and _v > 0:
+                    sp_area = _v
+            except (ValueError, TypeError):
+                sp_area = 0.0
+
         spaces[sp_id] = {
             "id": sp_id,
             "name": sp_name,
             "floor": 1,
-            "isConditioned": True
+            "isConditioned": True,
+            "declaredArea": sp_area if sp_area > 0 else None,
         }
         
     # =====================================================
@@ -784,13 +825,24 @@ def parse_gbxml_to_json(filepath: str):
             zone_floor_area[s["zone"]] = zone_floor_area.get(s["zone"], 0.0) + s.get("area", 0.0)
 
     # 6. 존(Zone) 리스트 완성
+    area_mismatch = []   # (존, 선언, 기하) — 품질 경고용
+    tiny_declared = []   # 0.5㎡ 미만 선언 존 — 버리지 않고 알리기만 한다
     for sp_id, sp_data in spaces.items():
-        z_area = round(zone_floor_area.get(sp_data["name"], 0.0), 2)
+        geom_area = round(zone_floor_area.get(sp_data["name"], 0.0), 2)
+        declared = sp_data.get("declaredArea")
+        # 선언값 우선. 기하 합산은 층간면 귀속 문제로 신뢰할 수 없다.
+        z_area = round(declared, 2) if declared else geom_area
+        if declared and geom_area > 0 and abs(geom_area - declared) / declared > 0.10:
+            area_mismatch.append((sp_data["name"], round(declared, 2), geom_area))
+        if declared and declared < 0.5:
+            tiny_declared.append((sp_data["name"], round(declared, 4)))
         zones_list.append({
             "id": sp_data["name"],
             "floor": sp_data["floor"],
             "height": sp_data.get("height", 3.0),  # 💡 [신규] 역산된 높이
-            "area": z_area,   # 실측 바닥면적 (0이면 소비처에서 폴백)
+            "area": z_area,           # 선언 면적 우선, 없으면 실측 바닥면적
+            "declaredArea": round(declared, 2) if declared else None,
+            "geometricArea": geom_area,
             # gbXML에 spaceType이 없으므로 Space 이름으로 용도 추론 (못 찾으면 1105)
             "activityId": activity_id_from_space_name(sp_data.get("name", "")),
             "isConditioned": True,
@@ -806,6 +858,71 @@ def parse_gbxml_to_json(filepath: str):
     print(f"   U-value: gbXML 원본 {u_from_gbxml}개 / 기본값 {u_from_default}개")
     print(f"   방향(Direction) 매핑: {dir_count}개")
     print(f"   층 수: {len(floor_levels)}개 층")
+    if unknown_area_unit:
+        print(f"   ⚠️ 알 수 없는 areaUnit '{unknown_area_unit}' → lengthUnit² 로 해석했습니다")
+        gap_warnings.append({
+            "zone": None,
+            "issue": "unknown_area_unit",
+            "count": 1,
+            "message": (
+                f"gbXML의 areaUnit 값 '{unknown_area_unit}' 을 인식하지 못해 길이 단위의 제곱으로 "
+                f"해석했습니다. 선언 면적이 실제와 다를 수 있으니 결과 면적을 확인하세요."
+            ),
+        })
+
+    # <Building><Area> 와 Space 면적 합 대조 — 선언값 신뢰도의 근거이자 진단.
+    # 불일치해도 Building 면적을 존별로 임의 배분하지 않는다. 경고만 남긴다.
+    _b_area = None
+    _b_node = root.find('.//building//area')
+    if _b_node is not None and _b_node.text:
+        try:
+            _bv = float(_b_node.text) * area_scale
+            if math.isfinite(_bv) and _bv > 0:
+                _b_area = _bv
+        except (ValueError, TypeError):
+            _b_area = None
+    _sp_sum = sum(sp.get("declaredArea") or 0.0 for sp in spaces.values())
+    if _b_area and _sp_sum > 0 and abs(_b_area - _sp_sum) / _b_area > 0.02:
+        print(f"   ⚠️ Building 면적({_b_area:.2f}㎡)과 Space 면적 합({_sp_sum:.2f}㎡)이 다릅니다")
+        gap_warnings.append({
+            "zone": None,
+            "issue": "building_space_area_mismatch",
+            "count": 1,
+            "message": (
+                f"gbXML의 건물 전체 면적({_b_area:,.2f}㎡)과 각 실 면적의 합({_sp_sum:,.2f}㎡)이 "
+                f"{abs(_b_area - _sp_sum) / _b_area * 100:.1f}% 다릅니다. 일부 실의 면적이 누락됐거나 "
+                f"단위가 잘못 기재됐을 수 있습니다. 시뮬레이션은 각 실의 선언 면적을 사용합니다."
+            ),
+        })
+
+    if tiny_declared:
+        _t = ', '.join(f"{n}({a}㎡)" for n, a in tiny_declared[:3])
+        print(f"   ⚠️ 0.5㎡ 미만으로 선언된 존 {len(tiny_declared)}개: {_t}")
+        gap_warnings.append({
+            "zone": None,
+            "issue": "tiny_declared_area",
+            "count": len(tiny_declared),
+            "message": (
+                f"면적이 0.5㎡ 미만으로 선언된 실이 {len(tiny_declared)}개 있습니다 ({_t}). "
+                f"샤프트·덕트라면 정상이지만 단위 오기재일 수도 있습니다. 선언값을 그대로 사용합니다."
+            ),
+        })
+
+    if area_mismatch:
+        _n = len(area_mismatch)
+        _ex = ', '.join(f"{n}({d}→{g}㎡)" for n, d, g in area_mismatch[:3])
+        print(f"   ⚠️ 선언 면적과 기하 면적이 10% 이상 다른 존 {_n}개 → 선언 면적을 사용: {_ex}")
+        gap_warnings.append({
+            "zone": None,
+            "issue": "area_mismatch",
+            "count": _n,
+            "message": (
+                f"gbXML이 선언한 존 면적과 도형에서 계산한 면적이 10% 이상 다른 존이 {_n}개 있습니다 "
+                f"({_ex}). 층간 슬래브가 한 면으로만 기록되어 아래층 존에서 바닥과 천장이 함께 "
+                f"계산되는 경우 등에서 발생합니다. 시뮬레이션은 선언 면적을 사용합니다."
+            ),
+        })
+
     if self_adjacent_surfaces:
         _preview = ', '.join(self_adjacent_surfaces[:5]) + (
             f" 외 {len(self_adjacent_surfaces) - 5}개" if len(self_adjacent_surfaces) > 5 else "")

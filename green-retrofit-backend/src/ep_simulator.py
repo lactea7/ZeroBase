@@ -83,6 +83,47 @@ def calculate_surface_area(vertices):
         
     return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
 
+def compute_zone_floor_areas(zones, surfaces):
+    """존별 바닥면적을 한 번만 계산해 돌려준다. {zone_id: area}
+
+    이 값이 내부발열(조명·기기·인체)을 주입하는 기준면적이자, 면적당 지표의
+    분모다. 예전에는 두 곳에서 따로 계산했고 폴백 때문에 서로 어긋났다 —
+    바닥 폴리곤이 없는 존은 천장/지붕 면적으로 대체되는데 그 면적은 전체
+    floor/slab 합에는 없어서, 내부발열은 1,050㎡ 기준으로 넣고 지표는 964㎡로
+    나누는 9% 불일치가 생겼다. 한 곳에서 계산해 양쪽이 같은 값을 쓰게 한다.
+    """
+    areas = {}
+    for z in zones:
+        zid = z['id']
+        # gbXML이 선언한 면적이 있으면 그것이 단일 기준이다. 기하 합산은 층간
+        # 슬래브가 space_1 존에만 귀속되는 탓에 아래층은 바닥+천장을 이중 계산하고
+        # 최상층은 바닥을 못 받는다 (101 화장실 24.85 vs 선언 11.22).
+        declared = z.get("declaredArea") or 0.0
+        if declared > 0:
+            areas[zid] = declared
+            continue
+        z_area = sum(
+            calculate_surface_area(s.get("vertices", []))
+            for s in surfaces
+            if s.get("zone") == zid
+            and ("floor" in s.get("type", "").lower() or "slab" in s.get("type", "").lower())
+        )
+        if z_area < 1.0:
+            # 바닥 폴리곤이 없거나 퇴화된 존(샤프트·설비존, 바닥면 누락 화장실 등):
+            # 천장/지붕 면적으로 대체하고, 그래도 없으면 1㎡ 하한만 적용.
+            # 기존 100㎡ 고정 폴백은 실면적 ~5㎡ 존에 100㎡분 내부발열을 주입해
+            # 한겨울에도 냉방이 도는 왜곡을 만들었음 (1월 냉방 버그).
+            ceil_area = sum(
+                calculate_surface_area(s.get("vertices", []))
+                for s in surfaces
+                if s.get("zone") == zid
+                and ("ceiling" in s.get("type", "").lower() or "roof" in s.get("type", "").lower())
+            )
+            z_area = max(z_area, ceil_area, 1.0)
+        areas[zid] = z_area
+    return areas
+
+
 def calc_outlet_power_density(zone, floor_area):
     """콘센트 수 기반 전기 부하 밀도 산정 (NREL 2012 기준)"""
     outlet_count = zone.get("outletCount", 0)
@@ -709,11 +750,10 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     is_geothermal = project_data.get("geothermalApplied", False)
     location_key = project_data.get("location", "KOR_SQ_Seoul")
     
-    calculated_floor_area = 0.0
-    for s in surfaces:
-        if "floor" in s.get("type", "").lower() or "slab" in s.get("type", "").lower():
-            calculated_floor_area += calculate_surface_area(s.get("vertices", []))
-            
+    # 존별 바닥면적 — 내부발열 주입 기준이자 면적당 지표의 분모. 반드시 같은 값을 써야 한다.
+    zone_floor_areas = compute_zone_floor_areas(zones, surfaces)
+    calculated_floor_area = sum(zone_floor_areas.values())
+
     if calculated_floor_area > 1.0:
         total_area = calculated_floor_area
     else:
@@ -1043,20 +1083,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     # 존별 설정
     for z in zones:
         z_id = z['id'].replace(" ", "_")
-        z_area_list = [calculate_surface_area(s.get("vertices", [])) for s in surfaces if s.get("zone") == z['id'] and ("floor" in s.get("type", "").lower() or "slab" in s.get("type", "").lower())]
-        z_area = sum(z_area_list)
-        if z_area < 1.0:
-            # 바닥 폴리곤이 없거나 퇴화된 존(샤프트·설비존, 바닥면 누락 화장실 등):
-            # 천장/지붕 면적으로 대체하고, 그래도 없으면 1㎡ 하한만 적용.
-            # 기존 100㎡ 고정 폴백은 실면적 ~5㎡ 존에 100㎡분 내부발열(조명·기기·인체)을
-            # 주입해 한겨울에도 냉방이 도는 왜곡을 만들었음 (1월 냉방 버그).
-            ceil_area = sum(
-                calculate_surface_area(s.get("vertices", []))
-                for s in surfaces
-                if s.get("zone") == z['id']
-                and ("ceiling" in s.get("type", "").lower() or "roof" in s.get("type", "").lower())
-            )
-            z_area = max(z_area, ceil_area, 1.0)
+        # total_area 와 같은 출처를 쓴다 — 여기서 다시 계산하면 분모와 어긋난다.
+        z_area = zone_floor_areas[z['id']]
         z_height = z.get("height", 3.0)  # 💡 Zone별 자동역산 높이 사용
         
         idf.add_zone(z_id, z_area, z_height)
