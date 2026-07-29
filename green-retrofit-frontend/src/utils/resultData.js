@@ -34,16 +34,15 @@ export const buildAnnualChartData = (res) => {
       name: '소요량',
       ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.con || 0) }), {}),
     },
+    // 1차에너지 계수는 열원마다 다르다(전기 2.75 / 지역난방 0.728 / 가스·등유 1.10).
+    // 백엔드가 항목별로 계산해 matrix 에 담아 주므로 그대로 쓴다.
     {
       name: '1차 소요량',
-      ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.con || 0) * 2.75 }), {}),
+      ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.primary || 0) }), {}),
     },
     {
       name: '등급용 1차',
-      ...categoriesList.reduce((acc, c) => ({
-        ...acc,
-        [c.name]: c.id === 'equipment' ? 0 : Number(m[c.id]?.con || 0) * 2.1
-      }), {}),
+      ...categoriesList.reduce((acc, c) => ({ ...acc, [c.name]: Number(m[c.id]?.gradePrimary || 0) }), {}),
     },
   ];
 };

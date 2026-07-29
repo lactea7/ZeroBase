@@ -84,7 +84,6 @@ export const drawSunPathDome = (group, {
   centerX,
   latitude,
   sunMonth,
-  sunHour,
   size,
   effectiveDarkMode,
   localSunX,

@@ -49,7 +49,9 @@ const BuildingViewer = ({
 }) => {
   const mountRef = useRef(null);
   const ctx = useRef({});
-  const effectiveViewMode = readOnly ? viewMode : 'default';
+  // NOTE: 한때 `readOnly ? viewMode : 'default'` 로 편집 화면의 특수 뷰를 막으려 했으나
+  // 실제로는 어디서도 쓰이지 않았다. 편집 화면(App/FloorEditor)도 setViewMode 를 넘겨
+  // 일조·열·기류 전환 UI를 제공하므로, 그 게이팅을 살리면 기능이 죽는다. 그래서 제거했다.
   const effectiveDarkMode = isDarkMode || (readOnly && (viewMode === 'sunpath' || viewMode === 'thermal' || viewMode === 'airflow'));
 
   useEffect(() => {
@@ -123,20 +125,26 @@ const BuildingViewer = ({
     ro.observe(mountRef.current);
     ctx.current.ro = ro;
 
+    // cleanup 시점의 mountRef.current 는 이미 바뀌었을 수 있다. effect 실행 시점의
+    // 노드를 지역 변수로 붙잡아 두고 그것을 정리한다.
+    const mountNode = mountRef.current;
     return () => {
       if (ctx.current.reqId) cancelAnimationFrame(ctx.current.reqId);
       if (ctx.current.ro) ctx.current.ro.disconnect();
       if (ctx.current.controls) ctx.current.controls.dispose();
       if (ctx.current.renderer) {
         ctx.current.renderer.dispose();
-        if (mountRef.current && ctx.current.renderer.domElement) {
+        if (mountNode && ctx.current.renderer.domElement) {
           try {
-            mountRef.current.removeChild(ctx.current.renderer.domElement);
-          } catch (e) {}
+            mountNode.removeChild(ctx.current.renderer.domElement);
+          } catch { /* 이미 제거된 노드 */ }
         }
       }
       ctx.current = {};
     };
+    // readOnly 를 의존성에 넣으면 값이 바뀔 때마다 Three.js 씬을 통째로 재생성한다.
+    // 초기화는 마운트 1회로 두고, readOnly 변화는 바로 아래 동기화 effect 가 반영한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -144,6 +152,12 @@ const BuildingViewer = ({
     ctx.current.onZoneClick = onZoneClick;
     ctx.current.editMode = editMode;
   }, [onSurfaceClick, onZoneClick, editMode]);
+
+  // 초기화 effect 는 []로 한 번만 돌기 때문에, 마운트 후 readOnly 가 바뀌면
+  // 그때 설정한 autoRotate 가 낡은 값으로 남는다. readOnly 변화에 맞춰 동기화한다.
+  useEffect(() => {
+    if (ctx.current.controls) ctx.current.controls.autoRotate = readOnly;
+  }, [readOnly]);
 
   useEffect(() => {
     if (readOnly || !ctx.current.camera) return;
@@ -570,7 +584,10 @@ const BuildingViewer = ({
       controls.target.set(0, 0, 0);
       controls.update();
     }
-  }, [surfaces, zones, activeFloor, editMode, selectedId, hoveredId, draftState, readOnly, isDarkMode, viewMode, sunMonth, sunHour, res]);
+    // latitude 는 위치 변경 시 태양궤적이 달라지므로 반드시 의존성에 있어야 한다.
+    // effectiveDarkMode 는 isDarkMode·readOnly·viewMode 로부터 파생되지만, 린터가
+    // 그 관계를 알 수 없으므로 명시한다.
+  }, [surfaces, zones, activeFloor, editMode, selectedId, hoveredId, draftState, readOnly, isDarkMode, effectiveDarkMode, viewMode, sunMonth, sunHour, latitude, res]);
 
   return (
     <div className="relative w-full h-full min-h-[500px] overflow-hidden rounded-xl bg-slate-900 shadow-inner border border-slate-700">

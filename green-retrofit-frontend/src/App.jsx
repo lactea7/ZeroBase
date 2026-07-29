@@ -132,22 +132,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   
-  const [showVideoTooltip, setShowVideoTooltip] = useState(false);
   const [showGuide, setShowGuide] = useState(false); // Revit gbXML 추출 가이드 영상 모달
-  const tooltipTimerRef = useRef(null);
-
-  const handleMouseEnterTooltip = () => {
-    tooltipTimerRef.current = setTimeout(() => {
-      setShowVideoTooltip(true);
-    }, 1000);
-  };
-
-  const handleMouseLeaveTooltip = () => {
-    if (tooltipTimerRef.current) {
-      clearTimeout(tooltipTimerRef.current);
-    }
-    setShowVideoTooltip(false);
-  };
 
   const [projectData, setProjectData] = useState({
     name: '신규 프로젝트',
@@ -612,13 +597,17 @@ export default function App() {
         if (response.data.materials) {
           setMaterials(response.data.materials);
         }
+        // 내부발열은 백엔드가 용도별 표준값을 채워 내려준다. 여기서 사무실 기본값을
+        // 덮어쓰면 화장실·계단실에도 사무실 수준 부하가 들어가고, 백엔드의 용도별
+        // 아키타입이 통째로 무력화된다. 값이 없을 때만 최소한으로 보정한다.
+        // (`||` 는 사용자가 명시한 0 까지 덮으므로 `??` 를 쓴다)
         const mappedZones = (response.data.zones || []).map((z) => ({
           ...z,
-          peopleDensity: z.peopleDensity || 0.1,
-          lightingPower: z.lightingPower || 10.0,
-          equipmentPower: z.equipmentPower || 15.0,
-          outletCount: z.outletCount || 0,
-          outletLoadType: z.outletLoadType || 'sum',
+          peopleDensity: z.peopleDensity ?? null,
+          lightingPower: z.lightingPower ?? null,
+          equipmentPower: z.equipmentPower ?? null,
+          outletCount: z.outletCount ?? 0,
+          outletLoadType: z.outletLoadType ?? 'sum',
         }));
         setZones(mappedZones);
         setOriginalModel({ zones: mappedZones, surfaces: response.data.surfaces || [] });

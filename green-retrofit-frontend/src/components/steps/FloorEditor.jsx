@@ -1226,7 +1226,6 @@ export default function FloorEditor(props) {
 
                                       // 라벨 타겟(유리 표면 중앙 부근)
                                       const mid = (x) => ({ x: x + pw / 2 + SH * 0.45, y: (baseY + topY) / 2 + 6 });
-                                      const outer = mid(panes[0].x);
                                       const labelRows = [];
                                       const pushPane = (p) => labelRows.push({ t: p.label, ...mid(p.x), c: p.isLowEpane ? '#d97706' : '#3b82f6' });
                                       pushPane(panes[0]);                                            // 바깥 유리

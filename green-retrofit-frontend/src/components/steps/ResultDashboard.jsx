@@ -475,12 +475,12 @@ export default function ResultDashboard({
                               const base = m[catId];
                               if (row.id === 'req') return Number(base?.req || 0);
                               if (row.id === 'con') return Number(base?.con || 0);
-                              if (row.id === 'pri') return Number(base?.con || 0) * 2.75;
-                              if (row.id === 'co2') return Number(base?.con || 0) * 0.466;
-                              if (row.id === 'grd') {
-                                if (catId === 'equipment') return 0;
-                                return Number(base?.con || 0) * 2.1;
-                              }
+                              // 계수는 백엔드가 열원별로 적용해 matrix 에 담아 내린다.
+                              // 여기서 전기계수를 일괄 곱하면 지역난방·가스 선택 시
+                              // 요약 카드와 이 표의 합계가 서로 달라진다.
+                              if (row.id === 'pri') return Number(base?.primary || 0);
+                              if (row.id === 'co2') return Number(base?.co2 || 0);
+                              if (row.id === 'grd') return Number(base?.gradePrimary || 0);
                               return 0;
                             };
                             const rowDataValues = ['renewable', 'heating', 'cooling', 'hotwater', 'lighting', 'ventilation', 'equipment'].map((id) =>

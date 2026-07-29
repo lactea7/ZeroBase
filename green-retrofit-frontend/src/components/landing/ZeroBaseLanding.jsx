@@ -158,7 +158,7 @@ export default function ZeroBaseLanding({ onStart }) {
           v.src = URL.createObjectURL(b);
           v.load();
           v.play().then(() => { v.pause(); dur = v.duration || 10; reveal(); })
-            .catch(() => { try { v.currentTime = 0.04; } catch (e) {} });
+            .catch(() => { try { v.currentTime = 0.04; } catch { /* 시크 불가 상태는 무시 */ } });
         })
         .catch(() => {});
       const kick = () => { if (v.src) { v.play().then(() => { v.pause(); reveal(); }).catch(() => {}); reveal(); } };
@@ -218,7 +218,7 @@ export default function ZeroBaseLanding({ onStart }) {
       cur += (target - cur) * 0.12;
       if (v && v.readyState >= 1 && !v.seeking) {
         const tt = cur * (dur || 10);
-        if (Math.abs((v.currentTime || 0) - tt) > 0.03) { try { v.currentTime = tt; } catch (e) {} }
+        if (Math.abs((v.currentTime || 0) - tt) > 0.03) { try { v.currentTime = tt; } catch { /* 시크 불가 상태는 무시 */ } }
         if (v.readyState >= 2 && v.style.opacity !== '1') v.style.opacity = '1';
       }
       raf = requestAnimationFrame(loop);

@@ -2,7 +2,9 @@
 import defusedxml.ElementTree as ET
 import re
 import math
-from src.activity_schedules import activity_id_from_space_name
+from src.activity_schedules import (
+    activity_id_from_space_name, archetype_key_for_activity, get_archetype_loads,
+)
 
 def strip_ns_and_lower(tag):
     """XML 태그에서 네임스페이스와 접두사를 모두 제거하고 소문자로 변환합니다."""
@@ -836,6 +838,8 @@ def parse_gbxml_to_json(filepath: str):
             area_mismatch.append((sp_data["name"], round(declared, 2), geom_area))
         if declared and declared < 0.5:
             tiny_declared.append((sp_data["name"], round(declared, 4)))
+        _aid = activity_id_from_space_name(sp_data.get("name", ""))
+        _loads = get_archetype_loads(archetype_key_for_activity(_aid))
         zones_list.append({
             "id": sp_data["name"],
             "floor": sp_data["floor"],
@@ -844,7 +848,13 @@ def parse_gbxml_to_json(filepath: str):
             "declaredArea": round(declared, 2) if declared else None,
             "geometricArea": geom_area,
             # gbXML에 spaceType이 없으므로 Space 이름으로 용도 추론 (못 찾으면 1105)
-            "activityId": activity_id_from_space_name(sp_data.get("name", "")),
+            "activityId": _aid,
+            # 용도별 표준 내부발열을 백엔드가 채워 내려준다. 이렇게 해야 프런트가
+            # 임의의 사무실 기본값(0.1/10/15)을 모든 존에 덮어쓰지 않고, 화면·시뮬레이션이
+            # 같은 값을 본다. 사용자가 화면에서 바꾸면 그 값이 override 로 전달된다.
+            "peopleDensity": _loads["people"],
+            "lightingPower": _loads["lighting"],
+            "equipmentPower": _loads["equipment"],
             "isConditioned": True,
             "heatingSetpoint": 20.0,
             "coolingSetpoint": 26.0

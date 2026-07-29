@@ -17,7 +17,11 @@ def result(analyzer, base_kwargs):
 def test_summary_golden(result):
     s = result["summary"]
     assert s["consume_per_m2"] == pytest.approx(221.2, abs=0.1)
-    assert s["demand_per_m2"] == pytest.approx(247.6, abs=0.1)
+    # 2026-07-29 의도된 변경: 247.6 → 246.9
+    #   환기 '요구량'이 체적유량 적산값(m³)이라 kWh 합계에 차원이 다른 값이 더해지고
+    #   있었다. 소요량과 동일하게 VENT_ENERGY_PER_M3(0.8 kWh/m³)를 적용해 에너지로
+    #   맞추면서 환기 req 가 줄었다. consume/primary/co2 는 불변.
+    assert s["demand_per_m2"] == pytest.approx(246.9, abs=0.1)
     assert s["primary_per_m2"] == pytest.approx(239.0, abs=0.1)
     assert s["co2_per_m2"] == pytest.approx(59.85, abs=0.01)
 

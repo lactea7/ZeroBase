@@ -19,7 +19,8 @@ export const getRadiationColor = (dotValue, isDarkMode) => {
   }
 };
 
-export const getTemperatureColor = (temp, isDarkMode) => {
+// 색상 스케일이 라이트/다크에서 동일하므로 테마 인자는 받지 않는다.
+export const getTemperatureColor = (temp) => {
   const minT = -5;
   const maxT = 45;
   const t = Math.max(0, Math.min(1, (temp - minT) / (maxT - minT)));

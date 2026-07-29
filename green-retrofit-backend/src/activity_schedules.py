@@ -100,6 +100,30 @@ def get_archetype_loads(archetype_key: str) -> dict:
     return ARCHETYPE_LOADS.get(archetype_key, ARCHETYPE_LOADS[DEFAULT_ARCHETYPE])
 
 
+_DEFAULT_DB_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "_data"
+)
+_ACTIVITY_NAME_CACHE = {}
+
+
+def archetype_key_for_activity(activity_id, db_dir: str = None) -> str:
+    """activityId → 아키타입 키. 시뮬레이터와 반드시 같은 경로를 쓴다.
+
+    ep_simulator 는 activityId 를 ActivityIdList DB 의 이름으로 바꾼 뒤 분류한다.
+    파서가 Space 이름으로 따로 분류하면 두 경로가 어긋날 수 있으므로, 기본값을
+    채울 때도 이 함수를 거치게 한다.
+    """
+    key = db_dir or _DEFAULT_DB_DIR
+    if key not in _ACTIVITY_NAME_CACHE:
+        _ACTIVITY_NAME_CACHE[key] = load_activity_names(key)
+    names = _ACTIVITY_NAME_CACHE[key]
+    try:
+        aid = int(activity_id)
+    except (TypeError, ValueError):
+        return DEFAULT_ARCHETYPE
+    return classify_activity(names.get(aid, ""))
+
+
 def daily_op_hours(archetype_key: str) -> float:
     """운영 스케줄의 하루 적분값(=등가 운영시간/일). 급탕 peak-flow 산정에 사용.
     DHW가 op 스케줄로 변조되므로, 일일 사용량을 맞추려면 이 값으로 나눠야 한다."""

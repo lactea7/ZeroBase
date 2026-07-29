@@ -1168,10 +1168,16 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             idf.add_schedule_compact(f"{z_id}_CoolSch", "AnyNumber", cool_sch_text)
             idf.add_thermostat(z_id, f"{z_id}_HeatSch", f"{z_id}_CoolSch")
 
-        ppl_dens = z.get("peopleDensity", loads["people"])
-        light_p = z.get("lightingPower", loads["lighting"])
+        # 키가 있어도 값이 None 이면 '미지정'으로 보고 용도별 기본값을 쓴다.
+        # z.get(k, default) 는 키가 존재하면 None 을 그대로 돌려주므로 방어가 필요하다.
+        def _load_or_default(key, fallback):
+            v = z.get(key)
+            return fallback if v is None else v
 
-        base_equip_p = z.get("equipmentPower", loads["equipment"])
+        ppl_dens = _load_or_default("peopleDensity", loads["people"])
+        light_p = _load_or_default("lightingPower", loads["lighting"])
+
+        base_equip_p = _load_or_default("equipmentPower", loads["equipment"])
         outlet_p = calc_outlet_power_density(z, z_area)
         load_type = z.get("outletLoadType", "sum")
         if load_type == "max":

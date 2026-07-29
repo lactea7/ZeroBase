@@ -76,6 +76,9 @@ class LCCAnalyzer:
     PRIMARY_FACTOR_ELEC = 2.75   # 전력 1차에너지 환산계수 (건축물 에너지효율등급 기준)
     PRIMARY_FACTOR_HEAT = 1.10   # 연료(가스) 기준 (지역난방 0.728)
     CO2_FACTOR_ELEC = 0.466      # 전력 배출계수 (kgCO2/kWh)
+    # 환기 외기 처리 에너지 원단위 (kWh per m³). 요구량·소요량 양쪽에 동일하게 적용해야
+    # 차원이 맞는다. 이 계수가 req 에서 빠져 있어 체적(m³)이 kWh 합계에 더해지고 있었다.
+    VENT_ENERGY_PER_M3 = 0.8
     CO2_FACTOR_HEAT = 0.232      # 가스(LNG) 연소 배출계수 (kgCO2/kWh)
 
     # LED 조명: 단가는 '개당(EA)' 기준이므로 면적은 등기구 개수로 환산해 적용한다.
@@ -700,7 +703,11 @@ class LCCAnalyzer:
 
             v_flow = df[vent_cols].sum(axis=1).values if vent_cols else np.zeros(total_rows)
             vent_multiplier = 1.0 if is_hourly else 730.0
-            vent_kwh = (v_flow / 1.2) * 0.8 * vent_multiplier + fan_kwh  # PTHP 팬 전력 포함
+            # 외기 처리 에너지 = 환기 체적(m³) × 단위체적당 에너지(kWh/m³).
+            # req(요구량)와 con(소요량)이 반드시 같은 계수를 거쳐야 한다 —
+            # 예전에는 req 에만 이 계수가 빠져 체적(m³)이 kWh 합계에 섞여 들어갔다.
+            vent_vol_m3 = (v_flow / 1.2) * vent_multiplier          # 질량유량 → 체적
+            vent_kwh = vent_vol_m3 * self.VENT_ENERGY_PER_M3 + fan_kwh  # PTHP 팬 전력 포함
 
             if use_pthp:
                 # 히트펌프 난방=전기 → 난방 소비도 전기요금으로 (열 요금엔 급탕만)
@@ -758,7 +765,8 @@ class LCCAnalyzer:
             a_h_req = np.sum(total_h_req_kwh)
             a_c_req = np.sum(total_c_req_kwh)
             a_dhw_req = np.sum(dhw_j / 3600000.0) if dhw_cols else 0.0
-            a_vent_req = np.sum((v_flow / 1.2) * vent_multiplier)
+            # 환기 요구량도 에너지(kWh)여야 한다. 팬 전력은 소요량 쪽에만 더한다.
+            a_vent_req = np.sum(vent_vol_m3) * self.VENT_ENERGY_PER_M3
             
             a_h_con = np.sum(total_h_con_kwh)
             a_c_con = np.sum(total_c_con_kwh)
@@ -1027,6 +1035,26 @@ class LCCAnalyzer:
 
             primary_per_m2 = elec_con_zeb * self.PRIMARY_FACTOR_ELEC + heat_con * heat_src["primary"]
             co2_per_m2     = elec_con_actual * self.CO2_FACTOR_ELEC + heat_con * heat_src["co2"]
+
+            # ── 항목별 1차에너지·CO2를 matrix 에 실어 내린다 ──────────────────────
+            # 프런트가 모든 항목에 전기계수(2.75/0.466)를 곱하던 탓에, 지역난방·가스를
+            # 고르면 상세 표 합계와 요약 카드가 서로 달랐다. 계수 적용은 백엔드에서만
+            # 하고 프런트는 받은 값을 그대로 표시한다.
+            #   primary      : 원별 1차계수 적용 (기기 포함 — 정보용 총량)
+            #   gradePrimary : 등급 산정용. 기기·신재생 제외 → 합계가 summary.primary_per_m2
+            #   co2          : 원별 배출계수 적용. 신재생 제외 → 합계가 summary.co2_per_m2
+            _heat_cats = ("heating", "hotwater")
+            for _cat, _v in matrix.items():
+                _con = _v["con"]
+                if _cat in _heat_cats:
+                    _pf, _cf = heat_src["primary"], heat_src["co2"]
+                else:
+                    _pf, _cf = self.PRIMARY_FACTOR_ELEC, self.CO2_FACTOR_ELEC
+                _v["primary"] = round(_con * _pf, 1)
+                _v["co2"] = 0.0 if _cat == "renewable" else round(_con * _cf, 2)
+                _v["gradePrimary"] = (
+                    0.0 if _cat in ("equipment", "renewable") else round(_con * _pf, 1)
+                )
 
             summary = {
                 "demand_per_m2": sum(v["req"] for k,v in matrix.items() if k != "renewable"),
