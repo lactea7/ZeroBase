@@ -183,7 +183,7 @@ def detect_zone_gaps(surfaces_list):
                 "issue": "not_enclosed",
                 "severity": "warn",
                 "count": 1,
-                "countUnit": "존",
+                "countUnit": "개 존",
                 # ⚠️ 이 검사는 면 법선벡터 합의 잔차만 본다. 실제 watertight(모서리
                 # 연결) 검사가 아니므로, 떨어진 면이나 상쇄되는 구멍은 통과할 수 있고
                 # 법선이 뒤집힌 면은 닫혀 있어도 걸린다. 판정을 과신하면 안 된다.
@@ -236,7 +236,23 @@ def parse_gbxml_to_json(filepath: str):
     else:
         area_scale = unit_scale ** 2   # 속성이 없을 때만 길이 단위로 유추
 
+    # 전역 ID 레지스트리: gbXML 의 id 는 문서 범위에서 고유해야 한다.
+    # 타입별 set 을 따로 두면 Material/Construction/WindowType 중복을 놓친다 —
+    # 이들은 dict 에 조용히 덮어써지며 U-value·재료비·창 성능을 바꾼다.
+    _id_registry = {}
+    global_dup_ids = []
+    for _el in root.iter():
+        _eid = _el.attrib.get('id') or _el.attrib.get('Id') or _el.attrib.get('ID')
+        if not _eid:
+            continue
+        _tag = _el.tag if isinstance(_el.tag, str) else str(_el.tag)
+        if _eid in _id_registry:
+            global_dup_ids.append((_eid, _id_registry[_eid], _tag))
+        else:
+            _id_registry[_eid] = _tag
+
     spaces = {}
+    dup_space_ids = []   # 같은 id 를 가진 Space — 참조가 어느 쪽인지 결정 불가
     zones_list = []
     surfaces_list = []
     
@@ -499,6 +515,8 @@ def parse_gbxml_to_json(filepath: str):
             except (ValueError, TypeError):
                 sp_area = 0.0
 
+        if sp_id in spaces:
+            dup_space_ids.append(sp_id)
         spaces[sp_id] = {
             "id": sp_id,
             "name": sp_name,
@@ -512,6 +530,14 @@ def parse_gbxml_to_json(filepath: str):
     # =====================================================
     zone_z_coords = {}  # space_id -> [z1, z2, z3, ...]  (모든 꼭짓점의 Z좌표)
     self_adjacent_surfaces = []  # AdjacentSpaceId가 같은 Space로 중복된 면 (익스포터 결함)
+    # ── P0 무결성 수집기 ──────────────────────────────────────────────
+    # 참조가 모호하거나 기하가 성립하지 않으면 이후 계산 전체를 신뢰할 수 없다.
+    dup_surface_ids = []      # 같은 id 를 가진 Surface
+    dangling_primary_refs = []   # space_1 이 없는 Space → 면 전체가 제외됨 (치명)
+    dangling_adjacent_refs = []  # space_2 만 없음 → 인접관계만 소실
+    degenerate_surfaces = []  # 3점 미만·비유한 좌표·영면적 폴리곤
+    opening_overflow = []     # opening 합계가 호스트 면적을 초과
+    _seen_surface_ids = set()
 
     all_surfaces = root.findall('.//surface')
     for surf in all_surfaces:
@@ -529,6 +555,18 @@ def parse_gbxml_to_json(filepath: str):
         # 인접관계만 지우면 ep_simulator의 내부면 경로에서 Adiabatic으로 처리된다.
         # (지면 경계로의 승격은 지하층·필로티·외기노출 바닥을 오분류할 수 있어
         #  여기서 자동으로 하지 않는다.)
+        if surf_id:
+            if surf_id in _seen_surface_ids:
+                dup_surface_ids.append(surf_id)
+            _seen_surface_ids.add(surf_id)
+        # 첫 번째 참조(space_1)가 끊기면 zone 이 Unknown 이 되어 시뮬레이터가 그 면을
+        # 통째로 제외한다 — 외피가 사라지므로 차단해야 한다.
+        # 두 번째(space_2)만 끊기면 인접관계만 사라진다(내부면은 Adiabatic 폴백).
+        if space_1 and space_1 not in spaces:
+            dangling_primary_refs.append((surf_id, space_1))
+        if space_2 and space_2 not in spaces:
+            dangling_adjacent_refs.append((surf_id, space_2))
+
         is_self_adjacent = bool(space_2 and space_1 == space_2)
         if is_self_adjacent:
             self_adjacent_surfaces.append(surf_id)
@@ -555,6 +593,8 @@ def parse_gbxml_to_json(filepath: str):
                         pass
 
         if len(vertices) < 3:
+            # continue 이후에는 수집할 수 없다 — 여기서 기록해야 도달 가능하다.
+            degenerate_surfaces.append((surf_id, "too_few_vertices"))
             continue
 
         # Zone별 Z좌표 수집 (높이 역산 및 층수 클러스터링용)
@@ -643,6 +683,10 @@ def parse_gbxml_to_json(filepath: str):
 
         surf_area = calculate_surface_area(vertices)
         surface_data["area"] = round(surf_area, 2)
+        if not math.isfinite(surf_area):
+            degenerate_surfaces.append((surf_id, "non_finite"))
+        elif surf_area <= 1e-6:
+            degenerate_surfaces.append((surf_id, "zero_area"))
         total_op_area = 0.0
 
         # 5. 창문/문(Opening) 파싱
@@ -687,6 +731,13 @@ def parse_gbxml_to_json(filepath: str):
         # WWR 계산 반영
         if surf_area > 0 and total_op_area > 0:
             calc_wwr = int((total_op_area / surf_area) * 100)
+            # 개구부 합계가 호스트 면을 넘는 것은 기하가 성립하지 않는다는 뜻이다.
+            # 지금까지는 90%로 조용히 잘라내 오류를 감췄다 — 감지해서 알린다.
+            # 상대오차만 쓰면 작은 벽에서 좌표 반올림에 오탐하고, 큰 벽에서는
+            # 과도한 절대 초과를 놓친다. 둘 중 큰 값을 허용오차로 삼는다.
+            _tol = max(surf_area * 0.005, 0.01)
+            if total_op_area > surf_area + _tol:
+                opening_overflow.append((surf_id, round(surf_area, 2), round(total_op_area, 2)))
             surface_data["wwr"] = min(calc_wwr, 90)
 
         # 대표 창호 U/SHGC(면적가중) — 비용/에너지에서 glazingId 미지정 시 실측값으로 사용.
@@ -875,6 +926,83 @@ def parse_gbxml_to_json(filepath: str):
     print(f"   U-value: gbXML 원본 {u_from_gbxml}개 / 기본값 {u_from_default}개")
     print(f"   방향(Direction) 매핑: {dir_count}개")
     print(f"   층 수: {len(floor_levels)}개 층")
+    # ── P0 무결성 경고 ────────────────────────────────────────────────
+    # 참조가 모호하거나 기하가 성립하지 않으면 이후 계산 전체가 무의미하므로 차단한다.
+    if global_dup_ids:
+        _n = len(global_dup_ids)
+        _ex = ', '.join(f"{i}({t1}/{t2})" for i, t1, t2 in global_dup_ids[:3])
+        print(f"   ⛔ 중복 ID {_n}건: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "duplicate_id", "severity": "block",
+            "count": _n, "countUnit": "건",
+            "action": "해석 불가 — 어느 요소를 가리키는지 결정할 수 없습니다",
+            "message": (
+                f"같은 id 를 가진 요소가 {_n}건 있습니다 ({_ex}). gbXML 에서 id 는 문서 전체에서 "
+                f"고유해야 합니다. 중복되면 재료·구조체·창호·면 참조가 어느 쪽을 뜻하는지 알 수 없어 "
+                f"U-value·공사비·창 성능이 뒤바뀔 수 있습니다."
+            ),
+        })
+
+    if opening_overflow:
+        _n = len(opening_overflow)
+        _ex = ', '.join(f"{i}(벽 {a}㎡ < 창 {o}㎡)" for i, a, o in opening_overflow[:3])
+        print(f"   ⛔ 개구부가 벽면적을 초과한 면 {_n}개: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "opening_exceeds_host", "severity": "block",
+            "count": _n, "countUnit": "개 면",
+            "action": "해석 불가 — 창면적비를 산정할 수 없습니다",
+            "message": (
+                f"창·문 면적의 합이 벽 면적보다 큰 면이 {_n}개 있습니다 ({_ex}). "
+                f"기하가 성립하지 않아 창면적비와 일사 취득을 신뢰할 수 없습니다."
+            ),
+        })
+
+    if dangling_primary_refs:
+        _n = len(dangling_primary_refs)
+        _ex = ', '.join(f"{sid}→{sp}" for sid, sp in dangling_primary_refs[:3])
+        print(f"   ⛔ 소속 공간이 없는 면 {_n}개: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "dangling_primary_space_reference", "severity": "block",
+            "count": _n, "countUnit": "개 면",
+            "action": "해당 면이 모델에서 통째로 제외됩니다 — 외피가 사라집니다",
+            "message": (
+                f"존재하지 않는 공간에 속한 것으로 기록된 면이 {_n}개 있습니다 ({_ex}). "
+                f"이 면들은 시뮬레이션에서 제외되어 외피 면적과 열손실이 실제보다 작아집니다."
+            ),
+        })
+
+    if dangling_adjacent_refs:
+        _n = len(dangling_adjacent_refs)
+        _ex = ', '.join(f"{sid}→{sp}" for sid, sp in dangling_adjacent_refs[:3])
+        print(f"   ⚠️ 존재하지 않는 인접 공간을 가리키는 면 {_n}개: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "dangling_adjacent_space_reference", "severity": "warn",
+            "count": _n, "countUnit": "개 면",
+            "action": "인접관계를 무시하고 단열 경계로 처리합니다",
+            "message": (
+                f"존재하지 않는 공간을 인접 공간으로 가리키는 면이 {_n}개 있습니다 ({_ex}). "
+                f"실제로 두 공간이 맞닿아 있다면 그 사이 열 이동이 반영되지 않습니다."
+            ),
+        })
+
+    if degenerate_surfaces:
+        _n = len(degenerate_surfaces)
+        _few = [i for i, why in degenerate_surfaces if why == "too_few_vertices"]
+        _ex = ', '.join(f"{i}({why})" for i, why in degenerate_surfaces[:3])
+        print(f"   ⚠️ 기하가 성립하지 않는 면 {_n}개: {_ex}")
+        # 꼭짓점이 부족한 면은 면적을 계산조차 못 한 것이라 실제 의도 면적이 클 수 있다.
+        # 영면적(미소면)보다 위험이 커서 사유를 나눠 알린다.
+        gap_warnings.append({
+            "zone": None, "issue": "degenerate_polygon", "severity": "warn",
+            "count": _n, "countUnit": "개 면",
+            "action": ("면적 0으로 처리합니다 — 외피·공사비에서 제외됩니다"
+                       + (f" (그중 {len(_few)}개는 꼭짓점 부족으로 실제 면적을 알 수 없음)" if _few else "")),
+            "message": (
+                f"꼭짓점이 부족하거나 면적이 0인 면이 {_n}개 있습니다 ({_ex}). "
+                f"해당 면은 외피 면적과 공사비 산정에서 빠집니다."
+            ),
+        })
+
     if unknown_area_unit:
         print(f"   ⚠️ 알 수 없는 areaUnit '{unknown_area_unit}' → lengthUnit² 로 해석했습니다")
         gap_warnings.append({
@@ -882,7 +1010,7 @@ def parse_gbxml_to_json(filepath: str):
             "issue": "unknown_area_unit",
             "severity": "block",
             "count": 1,
-            "countUnit": "항목",
+            "countUnit": "개 항목",
             "action": "해석 불가 — 단위를 확인한 뒤 다시 올려주세요",
             "message": (
                 f"gbXML의 areaUnit 값 '{unknown_area_unit}' 을 인식하지 못해 길이 단위의 제곱으로 "
@@ -909,7 +1037,7 @@ def parse_gbxml_to_json(filepath: str):
             "issue": "building_space_area_mismatch",
             "severity": "warn",
             "count": 1,
-            "countUnit": "항목",
+            "countUnit": "개 항목",
             "action": "경고만 — 각 실의 선언 면적을 그대로 사용합니다",
             "message": (
                 f"gbXML의 건물 전체 면적({_b_area:,.2f}㎡)과 각 실 면적의 합({_sp_sum:,.2f}㎡)이 "
@@ -926,7 +1054,7 @@ def parse_gbxml_to_json(filepath: str):
             "issue": "tiny_declared_area",
             "severity": "info",
             "count": len(tiny_declared),
-            "countUnit": "실",
+            "countUnit": "개 실",
             "action": "선언 면적을 그대로 사용합니다 (값을 바꾸지 않음)",
             "message": (
                 f"면적이 0.5㎡ 미만으로 선언된 실이 {len(tiny_declared)}개 있습니다 ({_t}). "
@@ -943,7 +1071,7 @@ def parse_gbxml_to_json(filepath: str):
             "issue": "area_mismatch",
             "severity": "info",
             "count": _n,
-            "countUnit": "실",
+            "countUnit": "개 실",
             "action": "선언 면적을 사용합니다 (기하 면적은 층간 슬래브 귀속 문제로 신뢰도가 낮음)",
             "message": (
                 f"gbXML이 선언한 존 면적과 도형에서 계산한 면적이 10% 이상 다른 존이 {_n}개 있습니다 "
@@ -965,7 +1093,7 @@ def parse_gbxml_to_json(filepath: str):
             "issue": "self_adjacent_surface",
             "severity": "choice",
             "count": len(self_adjacent_surfaces),
-            "countUnit": "면",
+            "countUnit": "개 면",
             "action": "인접관계를 제거하고 단열 경계로 처리합니다 (지면 경계로 바꾸려면 설정에서 선택)",
             "surfaces": self_adjacent_surfaces[:20],
             "message": (

@@ -144,6 +144,9 @@ export default function App() {
     //   mode 'bill'=연간 요금(원), 'usage'=연간 사용량(kWh). 빈칸은 백엔드에서 무시.
     baselineActual: { mode: 'bill', elecBill: '', heatBill: '', elecKwh: '', heatKwh: '' },
     geothermalApplied: false,
+    // 자기참조 최하층 바닥을 지면 경계로 볼지. 기본 off(단열 경계) —
+    // 지하층·필로티·외기 노출 바닥을 지면으로 오분류하면 결과가 크게 틀어진다.
+    promoteGroundFloors: false,
     hvacUpgradeActive: false,
     orientation: 0,
     targetBudget: 0,
@@ -402,6 +405,22 @@ export default function App() {
     }
     return area;
   };
+
+  // 지면 승격 대상 — 백엔드(ep_simulator)의 승격 조건과 **동일한 식**을 써야 한다.
+  //   selfAdjacent && 타입에 'floor' && 모든 꼭짓점 Z ≈ 0
+  // 조건이 어긋나면 "토글은 보이는데 켜도 0개가 바뀌는" 상황이 된다.
+  const groundEligible = React.useMemo(() => {
+    const targets = (surfaces || []).filter(
+      (s) => s.selfAdjacent
+        && (s.type || '').toLowerCase().includes('floor')
+        && Array.isArray(s.vertices) && s.vertices.length >= 3
+        && s.vertices.every((p) => Math.abs(p[2]) < 1e-6)
+    );
+    return {
+      count: targets.length,
+      area: targets.reduce((acc, s) => acc + calculateSurfaceArea(s.vertices), 0),
+    };
+  }, [surfaces]);
 
   const getZoneFloorArea = (zoneId) => {
     // 백엔드와 같은 기준을 써야 한다. 백엔드는 gbXML 선언 면적(declaredArea)을 우선하는데
@@ -1019,7 +1038,7 @@ export default function App() {
                           : w.severity === 'info' ? 'bg-slate-500/20 text-slate-400'
                           : 'bg-amber-500/20 text-amber-500'
                       }`}>
-                        {w.count != null ? `${w.count}개 ${w.countUnit || '항목'}` : '확인 필요'}
+                        {w.count != null ? `${w.count}${w.countUnit || '개'}` : '확인 필요'}
                       </span>
                       <div className="min-w-0">
                         <div className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{w.message}</div>
@@ -1392,6 +1411,38 @@ export default function App() {
                           존별 냉방기 설치 여부·용량은 3D 편집 단계에서 조정할 수 있어요.
                         </p>
                       </div>
+
+                      {/* 자기참조 최하층 바닥의 경계조건 선택.
+                          익스포터가 지면 접촉 바닥을 SlabOnGrade 대신 자기참조 InteriorFloor 로
+                          내보낸 경우가 있는데, 그것이 실제 지면 접촉인지 단열 경계인지는
+                          파일만으로 판정할 수 없다. 해당 면이 있을 때만 노출한다. */}
+                      {zones.length > 0 && groundEligible.count > 0 && (
+                        <div
+                          className={`mb-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.promoteGroundFloors ? 'border-sky-500 bg-sky-500/10' : 'border-slate-500/30 bg-black/5'}`}
+                          onClick={() => setProjectData((prev) => ({ ...prev, promoteGroundFloors: !prev.promoteGroundFloors }))}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${projectData.promoteGroundFloors ? 'bg-sky-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
+                              <Layers size={18} />
+                            </div>
+                            <div>
+                              <span className={`block font-black text-sm ${projectData.promoteGroundFloors ? 'text-sky-500' : theme.textSub}`}>
+                                최하층 바닥을 지면 접촉으로 처리
+                              </span>
+                              <span className="text-[10px] opacity-60">
+                                대상 {groundEligible.count}개 면 · {groundEligible.area.toFixed(1)}㎡ ·
+                                끄면 단열 경계(열 이동 없음). 켜면 지면 열손실을 반영합니다.
+                                지하층·필로티·외기 노출 바닥이면 켜지 마세요.
+                              </span>
+                            </div>
+                          </div>
+                          {projectData.promoteGroundFloors ? (
+                            <ToggleRight size={32} className="text-sky-500" />
+                          ) : (
+                            <ToggleLeft size={32} className="text-slate-500" />
+                          )}
+                        </div>
+                      )}
 
                       <div
                         className={`p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.geothermalApplied ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-500/30 bg-black/5'}`}
