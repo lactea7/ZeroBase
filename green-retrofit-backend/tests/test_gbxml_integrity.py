@@ -158,3 +158,48 @@ def test_real_file_passes_integrity():
     r = parse_gbxml_to_json(sample)
     blocking = [w for w in r.get("warnings", []) if w.get("severity") == "block"]
     assert blocking == [], f"차단 경고 발생: {[w['issue'] for w in blocking]}"
+
+
+# ── 면적 단위 오기재 군집 판정 ────────────────────────────────────────────────
+from src.gbxml_parser import detect_area_unit_inconsistency  # noqa: E402
+
+
+def test_unit_inconsistency_detects_real_unit_pair():
+    """ft² 를 m² 로 기재하면 기하/선언 비율이 10.764 로 뭉친다."""
+    pairs = [(f"z{i}", 100.0, 1076.39) for i in range(8)]
+    r = detect_area_unit_inconsistency(pairs)
+    assert r and abs(r["factor"] - 10.76391) < 0.01
+
+
+def test_unit_inconsistency_ignores_non_unit_ratio():
+    """단위와 무관한 체계적 편차를 단위 오류로 오판하면 안 된다.
+
+    용호동은 층간 슬래브 이중계산으로 아래층 존의 기하/선언 비율이 ~2.2 로
+    일정하게 뭉친다. 후보 배율을 실제 단위쌍으로 제한해야 이걸 걸러낸다.
+    """
+    pairs = [(f"z{i}", 11.22, 24.84) for i in range(10)]
+    assert detect_area_unit_inconsistency(pairs) is None
+
+
+def test_unit_inconsistency_needs_enough_zones():
+    """존이 적으면 판정하지 않는다 (우연한 일치 방지)."""
+    pairs = [(f"z{i}", 100.0, 1076.39) for i in range(3)]
+    assert detect_area_unit_inconsistency(pairs) is None
+
+
+def test_unit_inconsistency_needs_tight_cluster():
+    """비율이 흩어져 있으면 판정하지 않는다."""
+    pairs = [("a", 100, 1076), ("b", 100, 300), ("c", 100, 5000),
+             ("d", 100, 80), ("e", 100, 900), ("f", 100, 1200)]
+    assert detect_area_unit_inconsistency(pairs) is None
+
+
+def test_real_file_no_unit_false_positive():
+    """실제 업무 파일에서 단위 오류로 오판하면 안 된다."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sample = os.path.join(repo_root, "용호동 파일 2.xml")
+    if not os.path.exists(sample):
+        import pytest
+        pytest.skip("용호동 파일 2.xml 없음")
+    r = parse_gbxml_to_json(sample)
+    assert _issues(r, "area_unit_inconsistency") == []

@@ -195,6 +195,59 @@ def detect_zone_gaps(surfaces_list):
     return warnings
 
 
+# 면적 단위 오기재 후보 배율. **실제 단위쌍에서만** 유도한다.
+# 임의의 배율(2배, 0.5배 등)을 후보에 넣으면 안 된다 — 층간 슬래브 이중계산처럼
+# 단위와 무관한 체계적 편차가 단위 오류로 오판된다(용호동은 비율이 ~0.5로 뭉친다).
+_UNIT_SCALE_CANDIDATES = [
+    (10.763910, "SquareFeet 를 SquareMeters 로 잘못 기재"),
+    (1 / 10.763910, "SquareMeters 를 SquareFeet 로 잘못 기재"),
+    (10000.0, "SquareCentimeters 를 SquareMeters 로 잘못 기재"),
+    (1 / 10000.0, "SquareMeters 를 SquareCentimeters 로 잘못 기재"),
+    (1000000.0, "SquareMillimeters 를 SquareMeters 로 잘못 기재"),
+    (1 / 1000000.0, "SquareMeters 를 SquareMillimeters 로 잘못 기재"),
+]
+
+
+def detect_area_unit_inconsistency(zone_pairs, min_zones=5, min_area_share=0.8, tol=0.05):
+    """선언 면적과 기하 면적의 비율이 '단위 환산 배율'로 군집하는지 본다.
+
+    zone_pairs: [(zone_name, declared, geometric), ...]
+
+    단위 오기재는 개별 존 한둘이 아니라 **충분한 수와 면적 비중의 존에서 같은 배율로**
+    나타난다. 그래서 중앙값이 후보 배율에 가깝고 산포(MAD)가 작을 때만 판정한다.
+    확신이 서도 자동 환산하지 않고 구체적 수정 제안만 준다 — 잘못 고치면 조용히
+    전체 결과가 틀어진다.
+    """
+    valid = [(n, d, g) for n, d, g in zone_pairs
+             if d and g and math.isfinite(d) and math.isfinite(g) and d > 0 and g > 0]
+    if len(valid) < min_zones:
+        return None
+
+    total_declared = sum(d for _n, d, _g in zone_pairs if d and math.isfinite(d) and d > 0)
+    if total_declared <= 0:
+        return None
+    share = sum(d for _n, d, _g in valid) / total_declared
+    if share < min_area_share:
+        return None
+
+    ratios = sorted(g / d for _n, d, g in valid)   # 기하 ÷ 선언
+    mid = len(ratios) // 2
+    median = ratios[mid] if len(ratios) % 2 else (ratios[mid - 1] + ratios[mid]) / 2
+    mad_list = sorted(abs(r - median) for r in ratios)
+    mad = mad_list[len(mad_list) // 2]
+
+    for factor, label in _UNIT_SCALE_CANDIDATES:
+        if abs(median - factor) <= factor * tol and mad <= factor * tol:
+            return {
+                "factor": factor,
+                "label": label,
+                "median": median,
+                "zones": len(valid),
+                "share": share,
+            }
+    return None
+
+
 def parse_gbxml_to_json(filepath: str):
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -250,6 +303,31 @@ def parse_gbxml_to_json(filepath: str):
             global_dup_ids.append((_eid, _id_registry[_eid], _tag))
         else:
             _id_registry[_eid] = _tag
+
+    # ── *IdRef 존재·타입 검증 ────────────────────────────────────────
+    # 참조가 끊겨도 파서는 조용히 기본값으로 폴백한다(구조체→타입별 기본 U-value,
+    # 창호→U 2.5/SHGC 0.7, 재료층→누락). 실행은 성공하지만 에너지 결과가 달라지므로
+    # 실패보다 찾기 어렵다.
+    _REF_EXPECT = {
+        'constructionidref': 'construction',
+        'windowtypeidref': 'windowtype',
+        'layeridref': 'layer',
+        'materialidref': 'material',
+        'spaceidref': 'space',
+    }
+    missing_refs = []   # (참조속성, 값)
+    wrong_type_refs = []  # (참조속성, 값, 실제타입, 기대타입)
+    for _el in root.iter():
+        for _k, _v in _el.attrib.items():
+            _kl = re.sub(r'\{.*\}', '', _k).split(':')[-1].lower()
+            _expect = _REF_EXPECT.get(_kl)
+            if not _expect or not _v:
+                continue
+            _actual = _id_registry.get(_v)
+            if _actual is None:
+                missing_refs.append((_kl, _v))
+            elif _actual != _expect:
+                wrong_type_refs.append((_kl, _v, _actual, _expect))
 
     spaces = {}
     dup_space_ids = []   # 같은 id 를 가진 Space — 참조가 어느 쪽인지 결정 불가
@@ -537,6 +615,7 @@ def parse_gbxml_to_json(filepath: str):
     dangling_adjacent_refs = []  # space_2 만 없음 → 인접관계만 소실
     degenerate_surfaces = []  # 3점 미만·비유한 좌표·영면적 폴리곤
     opening_overflow = []     # opening 합계가 호스트 면적을 초과
+    degenerate_openings = []  # 3점 미만·비유한·영면적 개구부
     _seen_surface_ids = set()
 
     all_surfaces = root.findall('.//surface')
@@ -684,9 +763,15 @@ def parse_gbxml_to_json(filepath: str):
         surf_area = calculate_surface_area(vertices)
         surface_data["area"] = round(surf_area, 2)
         if not math.isfinite(surf_area):
+            # 비유한 좌표/면적은 IDF 생성까지 전파되면 EnergyPlus 가 오작동한다.
+            # 경고만 하고 통과시키면 안 된다 — 결과에서 완전히 제외한다.
             degenerate_surfaces.append((surf_id, "non_finite"))
-        elif surf_area <= 1e-6:
+            continue
+        if surf_area <= 1e-6:
+            # "면적 0으로 처리한다"는 경고문과 동작을 일치시킨다. 예전엔 경고만 하고
+            # surfaces_list 에 그대로 넣어, 설명과 실제가 달랐다.
             degenerate_surfaces.append((surf_id, "zero_area"))
+            continue
         total_op_area = 0.0
 
         # 5. 창문/문(Opening) 파싱
@@ -711,8 +796,15 @@ def parse_gbxml_to_json(filepath: str):
                         except:
                             pass
             
-            if len(op_verts) >= 3:
-                total_op_area += calculate_surface_area(op_verts)
+            _op_area = calculate_surface_area(op_verts) if len(op_verts) >= 3 else 0.0
+            if len(op_verts) < 3 or not math.isfinite(_op_area) or _op_area <= 1e-6:
+                # 개구부도 면과 같은 기준으로 본다. 조용히 버리면 창면적비가
+                # 실제보다 작게 잡혀 일사 취득이 과소평가된다.
+                degenerate_openings.append((op_id or surf_id,
+                                            "too_few_vertices" if len(op_verts) < 3
+                                            else ("non_finite" if not math.isfinite(_op_area) else "zero_area")))
+                continue
+            total_op_area += _op_area
 
             # 창호 U/SHGC: windowTypeIdRef로 실측값 조회, 없으면 일반 이중유리 기본값
             wt_ref = get_attr(opening, 'windowtypeidref')
@@ -878,6 +970,23 @@ def parse_gbxml_to_json(filepath: str):
     # 존별 실제 바닥면적: 해당 존의 floor/slab 면 면적 합.
     # 없으면 cost_analyzer가 균등분할로 폴백하지만, 균등분할은 '면적 비율'을
     # '존 개수 비율'로 왜곡해 비거주 면적 기반 산정(LED·설비 절감)을 부정확하게 만든다.
+    # 고신뢰 바닥면적: 수평이고(모든 꼭짓점 Z 동일) 공유되지 않은(adjacentZone 없음)
+    # 바닥면만 합산한다. 공유 층간면은 귀속이 한쪽에만 되므로 제외해야 비교 가능하다.
+    high_conf_floor_area = {}
+    for s in surfaces_list:
+        s_type = (s.get("type") or "").lower()
+        if not ("floor" in s_type or "slab" in s_type) or not s.get("zone"):
+            continue
+        if s.get("adjacentZone"):      # 공유면 — 귀속이 한쪽에만 되어 비교 불가
+            continue
+        v = s.get("vertices") or []
+        if len(v) < 3:
+            continue
+        zs = [p[2] for p in v]
+        if max(zs) - min(zs) > 1e-6:   # 수평이 아니면 바닥 후보로 보지 않는다
+            continue
+        high_conf_floor_area[s["zone"]] = high_conf_floor_area.get(s["zone"], 0.0) + s.get("area", 0.0)
+
     zone_floor_area = {}
     for s in surfaces_list:
         s_type = (s.get("type") or "").lower()
@@ -887,6 +996,7 @@ def parse_gbxml_to_json(filepath: str):
     # 6. 존(Zone) 리스트 완성
     area_mismatch = []   # (존, 선언, 기하) — 품질 경고용
     tiny_declared = []   # 0.5㎡ 미만 선언 존 — 버리지 않고 알리기만 한다
+    _unit_pairs = []     # (존, 선언, 기하) — 단위 오기재 군집 판정용
     for sp_id, sp_data in spaces.items():
         geom_area = round(zone_floor_area.get(sp_data["name"], 0.0), 2)
         declared = sp_data.get("declaredArea")
@@ -896,6 +1006,11 @@ def parse_gbxml_to_json(filepath: str):
             area_mismatch.append((sp_data["name"], round(declared, 2), geom_area))
         if declared and declared < 0.5:
             tiny_declared.append((sp_data["name"], round(declared, 4)))
+        # 단위 교차검증에는 **고신뢰 바닥면적만** 쓴다. zone_floor_area(geom_area)는
+        # 층간 슬래브가 space_1 존에만 귀속돼 아래층은 이중계산, 최상층은 0 이 되므로
+        # 독립적인 참값이 아니다. 그 비율에 군집 알고리즘을 얹으면 판정 근거가 무너진다.
+        _unit_pairs.append((sp_data["name"], declared or 0.0,
+                            high_conf_floor_area.get(sp_data["name"], 0.0)))
         _aid = activity_id_from_space_name(sp_data.get("name", ""))
         _loads = get_archetype_loads(archetype_key_for_activity(_aid))
         zones_list.append({
@@ -986,20 +1101,90 @@ def parse_gbxml_to_json(filepath: str):
         })
 
     if degenerate_surfaces:
-        _n = len(degenerate_surfaces)
+        _nonfin = [i for i, why in degenerate_surfaces if why == "non_finite"]
         _few = [i for i, why in degenerate_surfaces if why == "too_few_vertices"]
+        _zero = [i for i, why in degenerate_surfaces if why == "zero_area"]
         _ex = ', '.join(f"{i}({why})" for i, why in degenerate_surfaces[:3])
-        print(f"   ⚠️ 기하가 성립하지 않는 면 {_n}개: {_ex}")
-        # 꼭짓점이 부족한 면은 면적을 계산조차 못 한 것이라 실제 의도 면적이 클 수 있다.
-        # 영면적(미소면)보다 위험이 커서 사유를 나눠 알린다.
+        print(f"   ⚠️ 기하가 성립하지 않는 면 {len(degenerate_surfaces)}개: {_ex}")
+        if _nonfin:
+            # 좌표가 유한하지 않으면 그 파일의 기하 전체를 의심해야 한다.
+            gap_warnings.append({
+                "zone": None, "issue": "non_finite_geometry", "severity": "block",
+                "count": len(_nonfin), "countUnit": "개 면",
+                "action": "해당 면을 제외했습니다 — 좌표를 신뢰할 수 없습니다",
+                "message": (
+                    f"좌표나 면적이 숫자가 아닌 면이 {len(_nonfin)}개 있습니다 "
+                    f"({', '.join(_nonfin[:3])}). 기하 데이터가 손상됐을 수 있어 "
+                    f"이 상태로는 결과를 신뢰할 수 없습니다."
+                ),
+            })
+        if _few or _zero:
+            gap_warnings.append({
+                "zone": None, "issue": "degenerate_polygon", "severity": "warn",
+                "count": len(_few) + len(_zero), "countUnit": "개 면",
+                "action": ("해당 면을 제외했습니다 — 외피·공사비에서 빠집니다"
+                           + (f" (그중 {len(_few)}개는 꼭짓점 부족으로 실제 면적을 알 수 없음)" if _few else "")),
+                "message": (
+                    f"꼭짓점이 부족하거나 면적이 0인 면이 {len(_few) + len(_zero)}개 있습니다. "
+                    f"해당 면은 외피 면적과 공사비 산정에서 빠집니다."
+                ),
+            })
+
+    if degenerate_openings:
+        _n = len(degenerate_openings)
+        _ex = ', '.join(f"{i}({why})" for i, why in degenerate_openings[:3])
+        print(f"   ⚠️ 기하가 성립하지 않는 개구부 {_n}개: {_ex}")
         gap_warnings.append({
-            "zone": None, "issue": "degenerate_polygon", "severity": "warn",
-            "count": _n, "countUnit": "개 면",
-            "action": ("면적 0으로 처리합니다 — 외피·공사비에서 제외됩니다"
-                       + (f" (그중 {len(_few)}개는 꼭짓점 부족으로 실제 면적을 알 수 없음)" if _few else "")),
+            "zone": None, "issue": "degenerate_opening", "severity": "warn",
+            "count": _n, "countUnit": "개 개구부",
+            "action": "해당 개구부를 제외했습니다 — 창면적비가 실제보다 작아집니다",
             "message": (
-                f"꼭짓점이 부족하거나 면적이 0인 면이 {_n}개 있습니다 ({_ex}). "
-                f"해당 면은 외피 면적과 공사비 산정에서 빠집니다."
+                f"꼭짓점이 부족하거나 면적이 0인 창·문이 {_n}개 있습니다 ({_ex}). "
+                f"창면적비와 일사 취득이 실제보다 작게 산정됩니다."
+            ),
+        })
+
+    if missing_refs:
+        _n = len(missing_refs)
+        _ex = ', '.join(f"{k}={v}" for k, v in missing_refs[:3])
+        print(f"   ⛔ 존재하지 않는 대상을 가리키는 참조 {_n}건: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "missing_reference", "severity": "block",
+            "count": _n, "countUnit": "건",
+            "action": "해석 불가 — 기본값으로 조용히 대체되면 에너지 결과가 달라집니다",
+            "message": (
+                f"존재하지 않는 재료·구조체·창호를 가리키는 참조가 {_n}건 있습니다 ({_ex}). "
+                f"이 경우 파서가 임의의 기본값(창호 U 2.5 등)으로 대체하므로 "
+                f"단열 성능과 에너지 결과가 실제 설계와 달라집니다."
+            ),
+        })
+
+    if wrong_type_refs:
+        _n = len(wrong_type_refs)
+        _ex = ', '.join(f"{k}={v}({a}≠{e})" for k, v, a, e in wrong_type_refs[:3])
+        print(f"   ⛔ 기대 타입과 다른 대상을 가리키는 참조 {_n}건: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "wrong_reference_type", "severity": "block",
+            "count": _n, "countUnit": "건",
+            "action": "해석 불가 — 참조 대상의 종류가 다릅니다",
+            "message": (
+                f"참조가 다른 종류의 요소를 가리키는 경우가 {_n}건 있습니다 ({_ex}). "
+                f"예를 들어 재료를 가리켜야 할 참조가 구조체를 가리키면 물성이 뒤바뀝니다."
+            ),
+        })
+
+    _unit_issue = detect_area_unit_inconsistency(_unit_pairs)
+    if _unit_issue:
+        print(f"   ⛔ 면적 단위 불일치 의심: 기하/선언 비율 중앙값 {_unit_issue['median']:.4f} → {_unit_issue['label']}")
+        gap_warnings.append({
+            "zone": None, "issue": "area_unit_inconsistency", "severity": "block",
+            "count": _unit_issue["zones"], "countUnit": "개 실",
+            "action": "자동 환산하지 않습니다 — 파일의 areaUnit 을 확인해 주세요",
+            "message": (
+                f"선언 면적과 도형 면적의 비율이 {_unit_issue['zones']}개 실에서 "
+                f"{_unit_issue['median']:.4f} 배로 일정하게 나타납니다. "
+                f"{_unit_issue['label']}된 것으로 보입니다. "
+                f"단위를 바로잡아 다시 올려주세요."
             ),
         })
 

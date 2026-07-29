@@ -16,6 +16,7 @@ from slowapi.errors import RateLimitExceeded
 from src.gbxml_parser import parse_gbxml_to_json
 from src.ep_simulator import generate_idf_and_simulate
 from src.task_store import TaskStore
+from src.model_validation import validate_simulation_payload
 
 # Rate Limiter 설정
 limiter = Limiter(key_func=get_remote_address)
@@ -155,6 +156,14 @@ def _run_simulation_task(task_id: str, payload_dict: Dict[str, Any], session_dir
 @limiter.limit("50/minute")
 async def run_simulation(request: Request, background_tasks: BackgroundTasks, payload: SimulationPayload):
     print("🚀 시뮬레이션 비동기 요청 수신됨")
+
+    # 업로드 화면의 차단은 클라이언트 UX 일 뿐이다. 다른 클라이언트나 변조된 요청은
+    # 그 화면을 거치지 않으므로 여기서도 같은 기준으로 막는다.
+    blocking, _warns = validate_simulation_payload(payload.zones, payload.surfaces)
+    if blocking:
+        detail = " / ".join(b["message"] for b in blocking)
+        print(f"⛔ 무결성 검증 실패 — 시뮬레이션 거절: {detail}")
+        raise HTTPException(status_code=422, detail=f"모델을 해석할 수 없습니다. {detail}")
 
     # 오래된 task 정리 후, 대기열이 꽉 찼으면 즉시 거절 (OOM 방지)
     task_store.prune(TASK_TTL_SECONDS, MAX_TASKS)
