@@ -191,3 +191,32 @@ def test_zone_exposes_both_areas():
     assert z["declaredArea"] == 11.22
     assert z["geometricArea"] > z["declaredArea"], "이중 계산된 기하 면적이 더 커야 한다"
     assert z["area"] == z["declaredArea"], "사용 면적은 선언값이어야 한다"
+
+
+def test_warnings_carry_severity_and_unit():
+    """모든 경고에 severity/countUnit/action 이 있어야 프런트가 바르게 표시한다.
+
+    예전에는 UI 가 count 를 무조건 '개 면'으로 찍어, 존 단위 경고(area_mismatch 10개 실)를
+    '10개 면'으로 잘못 보여줬다.
+    """
+    r = _parse_inline(area="11.22")
+    warns = r.get("warnings", [])
+    assert warns
+    for w in warns:
+        assert w.get("severity") in ("info", "warn", "choice", "block"), w
+        assert w.get("countUnit"), f"countUnit 없음: {w}"
+        assert w.get("action"), f"action 없음: {w}"
+
+
+def test_unknown_area_unit_is_blocking():
+    """인식 못 한 areaUnit 은 추측으로 진행하면 안 된다 — 차단 등급이어야 한다."""
+    r = _parse_inline(area="11.22", au="SquareCubits")
+    w = next(x for x in r["warnings"] if x["issue"] == "unknown_area_unit")
+    assert w["severity"] == "block"
+
+
+def test_declared_area_wins_regardless_of_mismatch_flag():
+    """선언 면적 채택은 10% 검사와 무관하다 — 불일치 경고는 진단일 뿐이다."""
+    # 기하 20㎡ vs 선언 19.5㎡ → 10% 미만이라 경고는 없지만 선언값을 쓴다
+    z = _parse_inline(area="19.5")["zones"][0]
+    assert z["area"] == 19.5

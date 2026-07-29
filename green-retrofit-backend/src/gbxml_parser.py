@@ -181,6 +181,13 @@ def detect_zone_gaps(surfaces_list):
             warnings.append({
                 "zone": zone,
                 "issue": "not_enclosed",
+                "severity": "warn",
+                "count": 1,
+                "countUnit": "존",
+                # ⚠️ 이 검사는 면 법선벡터 합의 잔차만 본다. 실제 watertight(모서리
+                # 연결) 검사가 아니므로, 떨어진 면이나 상쇄되는 구멍은 통과할 수 있고
+                # 법선이 뒤집힌 면은 닫혀 있어도 걸린다. 판정을 과신하면 안 된다.
+                "action": "경고만 — 모델을 변경하지 않습니다",
                 "deviation": round(deviation * 100, 1),  # 퍼센트
                 "message": f"Zone \"{zone}\"의 면이 완전히 닫혀있지 않습니다 (오차: {round(deviation * 100, 1)}%)"
             })
@@ -873,7 +880,10 @@ def parse_gbxml_to_json(filepath: str):
         gap_warnings.append({
             "zone": None,
             "issue": "unknown_area_unit",
+            "severity": "block",
             "count": 1,
+            "countUnit": "항목",
+            "action": "해석 불가 — 단위를 확인한 뒤 다시 올려주세요",
             "message": (
                 f"gbXML의 areaUnit 값 '{unknown_area_unit}' 을 인식하지 못해 길이 단위의 제곱으로 "
                 f"해석했습니다. 선언 면적이 실제와 다를 수 있으니 결과 면적을 확인하세요."
@@ -897,7 +907,10 @@ def parse_gbxml_to_json(filepath: str):
         gap_warnings.append({
             "zone": None,
             "issue": "building_space_area_mismatch",
+            "severity": "warn",
             "count": 1,
+            "countUnit": "항목",
+            "action": "경고만 — 각 실의 선언 면적을 그대로 사용합니다",
             "message": (
                 f"gbXML의 건물 전체 면적({_b_area:,.2f}㎡)과 각 실 면적의 합({_sp_sum:,.2f}㎡)이 "
                 f"{abs(_b_area - _sp_sum) / _b_area * 100:.1f}% 다릅니다. 일부 실의 면적이 누락됐거나 "
@@ -911,7 +924,10 @@ def parse_gbxml_to_json(filepath: str):
         gap_warnings.append({
             "zone": None,
             "issue": "tiny_declared_area",
+            "severity": "info",
             "count": len(tiny_declared),
+            "countUnit": "실",
+            "action": "선언 면적을 그대로 사용합니다 (값을 바꾸지 않음)",
             "message": (
                 f"면적이 0.5㎡ 미만으로 선언된 실이 {len(tiny_declared)}개 있습니다 ({_t}). "
                 f"샤프트·덕트라면 정상이지만 단위 오기재일 수도 있습니다. 선언값을 그대로 사용합니다."
@@ -925,7 +941,10 @@ def parse_gbxml_to_json(filepath: str):
         gap_warnings.append({
             "zone": None,
             "issue": "area_mismatch",
+            "severity": "info",
             "count": _n,
+            "countUnit": "실",
+            "action": "선언 면적을 사용합니다 (기하 면적은 층간 슬래브 귀속 문제로 신뢰도가 낮음)",
             "message": (
                 f"gbXML이 선언한 존 면적과 도형에서 계산한 면적이 10% 이상 다른 존이 {_n}개 있습니다 "
                 f"({_ex}). 층간 슬래브가 한 면으로만 기록되어 아래층 존에서 바닥과 천장이 함께 "
@@ -944,7 +963,10 @@ def parse_gbxml_to_json(filepath: str):
         gap_warnings.append({
             "zone": None,
             "issue": "self_adjacent_surface",
+            "severity": "choice",
             "count": len(self_adjacent_surfaces),
+            "countUnit": "면",
+            "action": "인접관계를 제거하고 단열 경계로 처리합니다 (지면 경계로 바꾸려면 설정에서 선택)",
             "surfaces": self_adjacent_surfaces[:20],
             "message": (
                 f"자기 자신을 인접 공간으로 지정한 면이 {len(self_adjacent_surfaces)}개 있습니다 "

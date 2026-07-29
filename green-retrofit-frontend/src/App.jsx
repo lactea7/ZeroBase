@@ -1011,18 +1011,38 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="flex items-start gap-2">
-                      <span className="text-xs font-bold px-2 py-1 rounded-full shrink-0 bg-amber-500/20 text-amber-500">
-                        {w.count != null ? `${w.count}개 면` : '확인 필요'}
+                      {/* count 의 의미는 경고마다 다르다(실/면/존/항목). 백엔드가 준
+                          countUnit 을 그대로 쓴다 — 예전엔 전부 '개 면'으로 찍혀 틀렸다. */}
+                      <span className={`text-xs font-bold px-2 py-1 rounded-full shrink-0 ${
+                        w.severity === 'block' ? 'bg-red-500/20 text-red-400'
+                          : w.severity === 'choice' ? 'bg-sky-500/20 text-sky-500'
+                          : w.severity === 'info' ? 'bg-slate-500/20 text-slate-400'
+                          : 'bg-amber-500/20 text-amber-500'
+                      }`}>
+                        {w.count != null ? `${w.count}개 ${w.countUnit || '항목'}` : '확인 필요'}
                       </span>
-                      <span className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{w.message}</span>
+                      <div className="min-w-0">
+                        <div className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{w.message}</div>
+                        {w.action && (
+                          <div className={`text-[11px] mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                            → {w.action}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            <p className={`text-xs mb-6 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-              이 상태로 시뮬레이션을 진행할 수 있지만, 해당 Zone의 냉난방 부하 결과 정확도가 떨어질 수 있습니다.
+            <p className={`text-xs mb-6 ${
+              gapWarnings.some((w) => w.severity === 'block')
+                ? 'text-red-500 font-bold'
+                : (isDarkMode ? 'text-slate-500' : 'text-slate-400')
+            }`}>
+              {gapWarnings.some((w) => w.severity === 'block')
+                ? '해석할 수 없는 입력이 있어 이대로는 시뮬레이션을 진행할 수 없습니다. 위 항목을 수정한 뒤 다시 올려주세요.'
+                : '이 상태로 시뮬레이션을 진행할 수 있지만, 해당 Zone의 냉난방 부하 결과 정확도가 떨어질 수 있습니다.'}
             </p>
 
             <div className="flex gap-3">
@@ -1042,9 +1062,16 @@ export default function App() {
               >
                 수정하고 재업로드
               </button>
+              {/* severity=block 은 해석 자체가 불가능한 입력이다 —
+                  '그대로 진행'을 허용하면 신뢰할 수 없는 결과를 만들게 된다. */}
               <button
                 onClick={() => setGapWarnings([])}
-                className="flex-1 py-3 rounded-2xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-black transition-all shadow-lg shadow-amber-500/25"
+                disabled={gapWarnings.some((w) => w.severity === 'block')}
+                className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all ${
+                  gapWarnings.some((w) => w.severity === 'block')
+                    ? 'bg-slate-400/30 text-slate-500 cursor-not-allowed'
+                    : 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/25'
+                }`}
               >
                 그대로 진행
               </button>
