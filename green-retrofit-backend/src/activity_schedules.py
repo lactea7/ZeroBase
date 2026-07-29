@@ -328,6 +328,28 @@ COOLING_SEASON_END = (10, 31)    # 냉방기간 끝 (10/31)
 COOLING_OFF_TEMP = 35.0          # 기간 밖 냉방 설정온도 — 실내가 도달할 수 없는 값
 
 
+def monthly_ground_temperatures(heat_setpoint: float = 20.0,
+                                cool_setpoint: float = 26.0,
+                                offset_k: float = 2.0) -> list:
+    """슬래브 하부 월별 지중온도(℃) 12개.
+
+    EnergyPlus 매뉴얼 지침에 따라 '실내온도보다 약 2K 낮은 값'을 쓴다.
+    난방기에는 난방 설정온도, 냉방기에는 냉방 설정온도를 기준으로 삼고,
+    냉방기간(COOLING_SEASON_START~END)은 스케줄 쪽 정의를 그대로 따른다.
+
+    EPW 헤더의 비교란 토양온도를 쓰지 않는 이유는 idf_builder
+    .add_ground_temperatures() 주석 참조.
+    """
+    start_m = COOLING_SEASON_START[0]
+    end_m = COOLING_SEASON_END[0]
+    out = []
+    for m in range(1, 13):
+        in_cooling = start_m <= m <= end_m
+        base = cool_setpoint if in_cooling else heat_setpoint
+        out.append(round(base - offset_k, 2))
+    return out
+
+
 def _cooling_season_segments(segments):
     """(학사)세그먼트에 냉방기간 마스크를 일 단위로 교차해 [(through, state)]로 재압축.
 

@@ -18,7 +18,7 @@ except ImportError:
 from src.cost_analyzer import LCCAnalyzer, is_non_habitable
 from src.activity_schedules import (
     load_activity_names, classify_activity, build_schedules, get_archetype_loads,
-    daily_op_hours, cooling_compact_with_season,
+    daily_op_hours, cooling_compact_with_season, monthly_ground_temperatures,
 )
 
 # ---------------------------------------------------------
@@ -82,6 +82,19 @@ def calculate_surface_area(vertices):
         nz += (v1[0] - v2[0]) * (v1[1] + v2[1])
         
     return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
+
+def _weather_rank(path):
+    """EPW 선택 우선순위. 값이 클수록 우선한다.
+
+    같은 도시에 여러 관측 파일이 있을 때 알파벳 순으로 고르면 더 오래된 기간이나
+    공항 관측소가 뽑힌다(대전 2007-2021, 수원·청주·여수 AP 등). 기준을 명시한다.
+    """
+    b = os.path.basename(path)
+    m = re.search(r"TMYx\.(\d{4})-(\d{4})", b)
+    end_year = int(m.group(2)) if m else 0
+    is_ws = 1 if ".WS." in b else 0     # 관측소 > 공항
+    return (end_year, is_ws)
+
 
 def compute_zone_floor_areas(zones, surfaces):
     """존별 바닥면적을 한 번만 계산해 돌려준다. {zone_id: area}
@@ -748,7 +761,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     
     pv_capacity_kw = project_data.get("pvCapacity", 0)
     is_geothermal = project_data.get("geothermalApplied", False)
-    location_key = project_data.get("location", "KOR_SQ_Seoul")
+    location_key = project_data.get("location", "KOR_SO_Seoul")
     
     # 존별 바닥면적 — 내부발열 주입 기준이자 면적당 지표의 분모. 반드시 같은 값을 써야 한다.
     zone_floor_areas = compute_zone_floor_areas(zones, surfaces)
@@ -862,6 +875,10 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                     matched.append(f)
                     
         if matched:
+            # 여러 파일이 걸리면 알파벳 순이 아니라 명시적 기준으로 고른다.
+            #   1) 최신 TMYx 기간 (대전은 2007-2021 과 2009-2023 이 함께 있다)
+            #   2) 공항(AP)보다 관측소(WS) — 도시 대표 기상에 가깝다
+            matched.sort(key=_weather_rank, reverse=True)
             weather_file_abs = os.path.abspath(matched[0])
         else:
             weather_file_abs = os.path.abspath(epw_files[0])
@@ -880,6 +897,18 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     # 건물 기본 정보
     idf.add_building(project_data.get('name', 'BEM_Project'), project_data.get('orientation', 0))
     idf.add_run_period()
+
+    # 지중온도 — 없으면 EnergyPlus 가 연중 18℃ 를 가정한다. Ground 경계면의 열손실이
+    # 여기에 전적으로 좌우되므로 가정을 코드에 명시한다. 존별 설정온도가 제각각일 수
+    # 있으므로 대표값(최빈 설정온도)으로 계산한다.
+    _heat_sp = [z.get("heatingSetpoint") for z in zones if z.get("heatingSetpoint")]
+    _cool_sp = [z.get("coolingSetpoint") for z in zones if z.get("coolingSetpoint")]
+    _gt = monthly_ground_temperatures(
+        heat_setpoint=max(set(_heat_sp), key=_heat_sp.count) if _heat_sp else 20.0,
+        cool_setpoint=max(set(_cool_sp), key=_cool_sp.count) if _cool_sp else 26.0,
+    )
+    idf.add_ground_temperatures(_gt)
+    print(f"🌡️ 지중온도(슬래브 하부 가정, 실내−2K): {_gt[0]}~{max(_gt)}℃")
     
     # 기본 재료
     idf.add_material("Concrete_Heavy", "MediumRough", 0.2, 1.95, 2240, 900)
@@ -1210,6 +1239,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     skipped_count = 0
     zone_to_zone_count = 0
     air_boundary_count = 0
+    ground_promoted = 0
+    # 자기참조로 걷어낸 최하층 바닥을 지면 경계로 되살릴지. 기본 off.
+    promote_ground_floors = bool(project_data.get("promoteGroundFloors"))
     # 개방 경계(Air 표면)용 공유 AirBoundary construction (콘크리트 벽 대신 공기혼합)
     idf.add_air_boundary_construction("AirBoundary_Const")
 
@@ -1268,6 +1300,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             zone_to_zone_count += 1
 
         else:
+            # 지면 접촉 승격(옵션): 자기참조로 걷어낸 최하층 바닥을 Ground 로 둔다.
+            # 익스포터가 SlabOnGrade 대신 자기참조 InteriorFloor 로 내보낸 경우를
+            # 되살리는 용도이며, 기본값은 꺼져 있다 — 지하층·필로티·외기노출 바닥을
+            # 오분류할 수 있어 사용자가 명시적으로 켜야 한다.
+            if promote_ground_floors and s.get("selfAdjacent") and "floor" in t \
+                    and s.get("vertices") and all(abs(p[2]) < 1e-6 for p in s["vertices"]):
+                idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
+                                "Ground", "NoSun", "NoWind", verts)
+                ground_promoted += 1
+                continue
+
             # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직
             # selfAdjacent: 파서가 자기참조 인접을 걷어낸 면. 타입에 'interior'가 없는
             # Air 같은 면이 여기서 외기 노출(일사·풍압)로 빠지면 없던 외피가 생긴다.
@@ -1305,6 +1348,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         print(f"⏭️ Zone 미소속 Surface {skipped_count}개 제외 (차양/지형면)")
     if zone_to_zone_count > 0:
         print(f"🔗 Zone-to-Zone 경계 Surface {zone_to_zone_count}개 양방향 쌍 생성 완료")
+    if ground_promoted > 0:
+        print(f"🌍 최하층 자기참조 바닥 {ground_promoted}개를 Ground 경계로 승격")
 
     # 실기기 HVAC 누적분 일괄 emit (PTHP 존별 EquipmentConnections/List 등)
     idf.finalize_hvac()

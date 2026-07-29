@@ -287,7 +287,7 @@ export const KOREA_REGIONS = [
   {
     group: '특별시 및 광역시',
     options: [
-      { id: 'KOR_SQ_Seoul', name: '서울특별시 (Seoul)' },
+      { id: 'KOR_SO_Seoul', name: '서울특별시 (Seoul)' },
       { id: 'KOR_PU_Busan', name: '부산광역시 (Busan)' },
       { id: 'KOR_TG_Daegu', name: '대구광역시 (Daegu)' },
       { id: 'KOR_IN_Incheon', name: '인천광역시 (Incheon)' },

@@ -111,7 +111,7 @@ def _run_task(task_id: str, payload: dict, workdir: str):
 @mcp.tool()
 def start_simulation(
     gbxml_path: str,
-    location: str = "KOR_SQ_Seoul",
+    location: str = "KOR_SO_Seoul",
     heat_source: int = 11,
     pv_capacity_kw: float = 0,
     geothermal: bool = False,

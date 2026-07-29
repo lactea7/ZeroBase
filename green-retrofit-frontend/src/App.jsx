@@ -137,7 +137,7 @@ export default function App() {
   const [projectData, setProjectData] = useState({
     name: '신규 프로젝트',
     activityId: 1105,
-    location: 'KOR_SQ_Seoul',
+    location: 'KOR_SO_Seoul',
     pvCapacity: 0,
     heatSource: 11, // 난방 열원: 2전기 11지역난방
     // 기존 건물 실측 운영비(선택). 비우면 1.6배 추정으로 계산됨을 결과에 명시 고지.

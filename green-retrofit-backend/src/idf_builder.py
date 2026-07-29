@@ -171,6 +171,23 @@ class IdfBuilder:
             "Sunday", "Yes", "Yes", "No", "Yes", "Yes"
         ])
 
+    def add_ground_temperatures(self, monthly: list):
+        """Site:GroundTemperature:BuildingSurface (1~12월, ℃).
+
+        이 객체가 없으면 EnergyPlus 는 연중 18℃ 를 가정하고 경고만 남긴다.
+        Ground 경계면의 열손실이 통째로 이 값에 좌우되므로 반드시 명시한다.
+
+        ⚠️ EPW 헤더의 GROUND TEMPERATURES 를 그대로 넣으면 안 된다. 그 값은
+        건물이 없는 '비교란' 토양온도라 겨울에 매우 낮다(서울 2m 깊이 2월 3.4℃).
+        EnergyPlus 매뉴얼은 이 필드에 '슬래브 하부' 온도를 넣도록 하며, 난방 건물
+        하부는 실내온도에 가깝게 damping 된다. 비교란 값을 쓰면 바닥 열손실이
+        비현실적으로 커진다.
+        """
+        if not monthly or len(monthly) != 12:
+            raise ValueError("월별 지중온도 12개가 필요합니다")
+        return self.add("Site:GroundTemperature:BuildingSurface",
+                        [round(float(t), 2) for t in monthly])
+
     def add_material(self, name: str, roughness: str, thickness: float,
                      conductivity: float, density: float, specific_heat: float,
                      absorptance_t: float = 0.9, absorptance_s: float = 0.7,

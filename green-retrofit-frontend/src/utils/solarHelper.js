@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 export const REGION_LATITUDES = {
   // 특별시 및 광역시
-  KOR_SQ_Seoul: 37.56,
+  KOR_SO_Seoul: 37.56,
   KOR_PU_Busan: 35.18,
   KOR_TG_Daegu: 35.87,
   KOR_IN_Incheon: 37.45,
