@@ -18,7 +18,10 @@ CODEX_DONE="<<<CDX_DONE_$NONCE>>>"
 OLLAMA_BEGIN="<<<OLM_BEGIN_$NONCE>>>"
 OLLAMA_DONE="<<<OLM_DONE_$NONCE>>>"
 
-LIMIT_RE='usage limit|rate limit|quota exceeded|out of credits|insufficient credit|한도|사용량 초과|limit reached|try again (later|in [0-9])|429'
+# 한도/레이트 리밋 신호. 맨 숫자 '429' 를 그대로 넣으면 안 된다 —
+# 커밋 해시(ef429e3), 파일 크기, 줄 번호 등 어디에나 나타나 오탐한다.
+# 실제로 커밋 해시 때문에 정상 검토가 중단됐다. HTTP 문맥이 있을 때만 인정한다.
+LIMIT_RE='usage limit|rate limit|quota exceeded|out of credits|insufficient credit|사용 한도|사용량 초과|limit reached|too many requests|http[^0-9]{0,12}429|status[^0-9]{0,12}429|try again (later|in [0-9])'
 
 # --- 패널 자동 탐지 -----------------------------------------------------------
 # 화면 내용으로 codex/ollama 패널을 식별한다. 세션마다 surface 번호가 바뀌므로

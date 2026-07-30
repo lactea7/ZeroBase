@@ -86,3 +86,41 @@ def test_empty_ids_block():
     blocking, _ = validate_simulation_payload(
         [_zone()], [{"id": "", "zone": "Z1", "vertices": WALL, "openings": []}])
     assert any(b["issue"] == "empty_surface_id" for b in blocking)
+
+
+def test_invalid_declared_and_geometric_area_block():
+    """area 뿐 아니라 declaredArea·geometricArea 도 검사해야 한다.
+
+    시뮬레이터가 declaredArea → geometricArea 순으로 신뢰하므로
+    이 값이 오염되면 그대로 부하·분모에 쓰인다.
+    """
+    for field in ("declaredArea", "geometricArea"):
+        blocking, _ = validate_simulation_payload(
+            [{"id": "Z1", "area": 20.0, field: -5.0}], [_surf()])
+        assert any(b["issue"] == "invalid_zone_area" for b in blocking), field
+
+        blocking, _ = validate_simulation_payload(
+            [{"id": "Z1", "area": 20.0, field: float("inf")}], [_surf()])
+        assert any(b["issue"] == "invalid_zone_area" for b in blocking), field
+
+
+def test_geometric_area_drift_blocks():
+    """클라이언트가 보낸 도형 면적을 그대로 믿지 않는다.
+
+    서버가 surfaces 로 재계산해 크게 어긋나면 막는다 (변조·버전 불일치 방어).
+    """
+    # 실제 바닥 4×5=20㎡ 인데 200㎡ 라고 주장
+    floor = {"id": "F1", "zone": "Z1", "type": "InteriorFloor", "openings": [],
+             "vertices": [[0, 0, 0], [4, 0, 0], [4, 5, 0], [0, 5, 0]]}
+    blocking, _ = validate_simulation_payload(
+        [{"id": "Z1", "geometricArea": 200.0}], [floor])
+    assert any(b["issue"] == "geometric_area_drift" for b in blocking)
+
+
+def test_geometric_area_within_tolerance_passes():
+    """허용오차 안이면 통과한다 (반올림·버전차 오탐 방지)."""
+    floor = {"id": "F1", "zone": "Z1", "type": "InteriorFloor", "openings": [],
+             "vertices": [[0, 0, 0], [4, 0, 0], [4, 5, 0], [0, 5, 0]]}
+    blocking, _ = validate_simulation_payload(
+        [{"id": "Z1", "geometricArea": 20.3}], [floor])
+    assert not any(b["issue"] == "geometric_area_drift" for b in blocking)

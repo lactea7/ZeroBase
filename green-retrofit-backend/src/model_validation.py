@@ -109,16 +109,59 @@ def validate_simulation_payload(zones, surfaces):
                        f"({', '.join(str(x) for x in overflow[:3])}).",
         })
 
-    # 면적이 비정상인 존 — 면적당 지표의 분모가 무너진다.
-    bad_area = [z.get("id") for z in (zones or [])
-                if z.get("area") is not None
-                and (not math.isfinite(z.get("area") or 0) or (z.get("area") or 0) < 0)]
+    # 면적 필드가 비정상인 존 — 면적당 지표의 분모가 무너진다.
+    # area 뿐 아니라 declaredArea·geometricArea 도 봐야 한다. 시뮬레이터가
+    # declaredArea → geometricArea 순으로 신뢰하므로, 이 값이 오염되면 그대로 쓰인다.
+    bad_area = []
+    for z in (zones or []):
+        for field in ("area", "declaredArea", "geometricArea"):
+            v = z.get(field)
+            if v is None:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                bad_area.append(f"{z.get('id')}.{field}")
+                continue
+            if not math.isfinite(fv) or fv < 0:
+                bad_area.append(f"{z.get('id')}.{field}")
     if bad_area:
         blocking.append({
             "issue": "invalid_zone_area",
             "count": len(bad_area),
-            "message": f"면적이 음수이거나 유한하지 않은 존이 {len(bad_area)}개 있습니다 "
-                       f"({', '.join(str(x) for x in bad_area[:3])}).",
+            "message": f"면적이 음수이거나 숫자가 아닌 항목이 {len(bad_area)}개 있습니다 "
+                       f"({', '.join(bad_area[:3])}).",
+        })
+
+    # 클라이언트가 보낸 geometricArea 를 그대로 믿지 않는다. 서버가 surfaces 로
+    # 다시 계산해 크게 어긋나면 조용히 쓰지 않고 막는다 (변조·버전 불일치 방어).
+    try:
+        from src.gbxml_parser import compute_zone_floor_geometry
+        recomputed = compute_zone_floor_geometry(surfaces or [])
+    except Exception:
+        recomputed = {}
+    drifted = []
+    for z in (zones or []):
+        claimed = z.get("geometricArea")
+        if claimed is None:
+            continue
+        try:
+            claimed = float(claimed)
+        except (TypeError, ValueError):
+            continue
+        if claimed <= 0:
+            continue
+        server = (recomputed.get(z.get("id")) or (0.0, 0.0, ""))[0]
+        if server <= 0:
+            continue
+        if abs(claimed - server) > max(server * 0.05, 0.5):
+            drifted.append(f"{z.get('id')}({claimed:.1f}≠{server:.1f}㎡)")
+    if drifted:
+        blocking.append({
+            "issue": "geometric_area_drift",
+            "count": len(drifted),
+            "message": f"전달된 도형 면적이 서버 재계산값과 다른 존이 {len(drifted)}개 있습니다 "
+                       f"({', '.join(drifted[:3])}). 파일을 다시 올려 주세요.",
         })
 
     return blocking, warnings

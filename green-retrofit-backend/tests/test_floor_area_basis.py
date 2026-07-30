@@ -198,18 +198,20 @@ def test_real_file_geometry_not_double_counted():
     assert abs(z["geometricArea"] - 12.42) < 0.1
 
 
-def test_implied_wall_thickness_explains_centerline_export():
-    """중심선 편차는 둘레 × 벽 반두께로 설명된다.
+def test_implied_boundary_offset_explains_centerline_export():
+    """중심선 편차는 둘레 × 경계 offset 으로 설명된다.
 
     이 관계가 성립하지 않으면 임계값의 근거가 무너진다.
+    함수명이 implied_wall_thickness 였으나 실제 벽 두께가 아니라
+    '모든 경계를 같은 거리만큼 평행이동한 유효 offset' 이므로 이름을 바꿨다.
     """
-    from src.gbxml_parser import implied_wall_thickness
-    # 선언 11.22㎡ / 도형 12.42㎡ / 둘레 17.0m → 벽 14cm
-    t = implied_wall_thickness(11.22, 12.42, 17.0)
+    from src.gbxml_parser import implied_boundary_offset
+    # 선언 11.22㎡ / 도형 12.42㎡ / 둘레 17.0m → offset 14cm
+    t = implied_boundary_offset(11.22, 12.42, 17.0)
     assert 0.10 < t < 0.20
 
-    # 설명 불가한 차이(2배)는 비현실적 두께로 나온다
-    t_bad = implied_wall_thickness(11.22, 24.84, 17.0)
+    # 설명 불가한 차이(2배)는 비현실적 offset 으로 나온다
+    t_bad = implied_boundary_offset(11.22, 24.84, 17.0)
     assert t_bad > 1.0
 
 

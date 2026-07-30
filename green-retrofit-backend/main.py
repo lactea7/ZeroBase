@@ -160,6 +160,13 @@ async def run_simulation(request: Request, background_tasks: BackgroundTasks, pa
     # 업로드 화면의 차단은 클라이언트 UX 일 뿐이다. 다른 클라이언트나 변조된 요청은
     # 그 화면을 거치지 않으므로 여기서도 같은 기준으로 막는다.
     blocking, _warns = validate_simulation_payload(payload.zones, payload.surfaces)
+    # baselineModel 도 같은 기준으로 본다 — 전/후 비교 시뮬레이션의 기준선이 되므로
+    # 여기가 오염되면 절감량이 통째로 틀린다.
+    _bm = payload.baselineModel or {}
+    if _bm.get("zones") or _bm.get("surfaces"):
+        _bb, _ = validate_simulation_payload(_bm.get("zones") or [], _bm.get("surfaces") or [])
+        blocking += [dict(b, issue=f"baseline_{b['issue']}",
+                          message="[개선 전 모델] " + b["message"]) for b in _bb]
     if blocking:
         detail = " / ".join(b["message"] for b in blocking)
         print(f"⛔ 무결성 검증 실패 — 시뮬레이션 거절: {detail}")

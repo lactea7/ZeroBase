@@ -208,18 +208,44 @@ _UNIT_SCALE_CANDIDATES = [
 ]
 
 
-# footprint(평면 윤곽) 후보로 인정하는 수평 경계 타입.
-# 열적 바닥(Floor/Slab)만 보면 개방 계단실을 놓친다 — 층간에 슬래브가 없고
-# 수평 Air 경계로 표현되기 때문이다(용호동 su-x-103-203-i-o-34, Air, 16.2㎡).
-_FOOTPRINT_TYPES = ("floor", "slab", "ceiling", "air")
-_THERMAL_FLOOR_TYPES = ("floor", "slab")
+# footprint(평면 윤곽) 후보로 인정하는 수평 경계 타입 — 정확 일치로 판정한다.
+# 부분문자열 검사는 'RaisedFloor' 처럼 의도치 않은 타입까지 잡을 수 있다.
+_FOOTPRINT_TYPES = {"interiorfloor", "exteriorfloor", "slabongrade", "undergroundslab",
+                    "rasiedfloor", "raisedfloor", "ceiling", "undergroundceiling", "air"}
+_THERMAL_FLOOR_TYPES = {"interiorfloor", "exteriorfloor", "slabongrade", "undergroundslab",
+                        "raisedfloor", "rasiedfloor"}
+# provenance 신뢰도: Floor/Slab 로 구한 값이 가장 믿을 만하다.
+_HIGH_CONF_TYPES = _THERMAL_FLOOR_TYPES
+
+
+def _cancel_internal_edges(edges, tol=1e-3):
+    """같은 레벨의 폴리곤들이 맞닿은 내부 edge 를 상쇄해 외곽 둘레만 남긴다.
+
+    바닥이 여러 패치로 나뉘면 맞닿은 edge 가 둘레에 두 번 더해져 둘레가 과대해지고,
+    함축 offset(2ΔA/P)이 실제보다 작아져 경고 민감도가 떨어진다.
+    무방향 edge 를 좌표 양자화해 두 번 나타나면 내부 edge 로 보고 제거한다.
+    한계: T-junction·부분 중첩·hole 은 처리하지 못한다(정식 2D union 필요).
+    """
+    from collections import Counter
+    q = lambda v: (round(v[0] / tol), round(v[1] / tol))
+    cnt = Counter()
+    lengths = {}
+    for a, b in edges:
+        key = tuple(sorted((q(a), q(b))))
+        cnt[key] += 1
+        lengths[key] = math.dist(a, b)
+    return sum(l for k, l in lengths.items() if cnt[k] % 2 == 1)
 
 
 def compute_zone_floor_geometry(surfaces_list, footprint=True):
-    """존별 (면적, 둘레) — 존의 '최저 Z 수평 경계'를 평면 윤곽으로 본다.
+    """존별 {zone: (면적, 둘레, provenance)} — 존의 '최저 Z 수평 경계'를 평면 윤곽으로.
 
-    footprint=True  : Floor/Slab/Ceiling/Air 수평면 (평면 윤곽 검증·부하 기준 면적용)
+    footprint=True  : Floor/Slab/Ceiling/Air (평면 윤곽 검증·저신뢰 면적 폴백)
     footprint=False : Floor/Slab 만 (열적 바닥면)
+
+    provenance: "floor" | "air_or_ceiling" | "multi_patch" | "floor+multi_patch" 등.
+    Air/Ceiling 으로만 구한 값은 실제 사용 바닥면적이 아닐 수 있다 — 개방 계단실의
+    Air 면적은 계단참·계단판·void 구성에 따라 부하 적용 면적과 다르다.
 
     층간 슬래브는 하나의 Surface 로 `zone`(=space_1)에만 귀속되므로 단순 합산하면
     아래층은 바닥+천장 이중계산, 위층은 0 이 된다. 그래서 `zone`/`adjacentZone`
@@ -228,8 +254,6 @@ def compute_zone_floor_geometry(surfaces_list, footprint=True):
     ⚠️ 한계 — 다음 형상에서는 이 정의가 성립하지 않는다:
       메자닌·복층 존(상부 사용 바닥 누락), split-level(가장 낮은 면만 남음),
       경사 바닥·램프(수평 필터에서 제외), 피트(작은 피트가 최저 Z 를 결정).
-      또 바닥 패치가 여러 개면 내부 공유 edge 가 둘레에 이중 계산되어 함축 두께가
-      실제보다 작게 나온다(2D union 미구현).
     """
     types = _FOOTPRINT_TYPES if footprint else _THERMAL_FLOOR_TYPES
     zone_min_z = {}
@@ -242,10 +266,10 @@ def compute_zone_floor_geometry(surfaces_list, footprint=True):
             if key:
                 zone_min_z[key] = min(zone_min_z.get(key, float("inf")), lo)
 
-    out = {}
+    acc = {}   # zone -> {"area":, "edges":[], "types":set(), "patches":int}
     for s in surfaces_list:
-        s_type = (s.get("type") or "").lower()
-        if not any(t in s_type for t in types):
+        s_type = (s.get("type") or "").lower().replace(" ", "")
+        if s_type not in types:
             continue
         v = s.get("vertices") or []
         if len(v) < 3:
@@ -253,17 +277,30 @@ def compute_zone_floor_geometry(surfaces_list, footprint=True):
         if max(p[2] for p in v) - min(p[2] for p in v) > 1e-6:
             continue          # 수평이 아니면 후보가 아니다
         z0 = min(p[2] for p in v)
-        per = sum(math.dist(v[i], v[(i + 1) % len(v)]) for i in range(len(v)))
         for key in (s.get("zone"), s.get("adjacentZone")):
             if key and abs(z0 - zone_min_z.get(key, -float("inf"))) < 0.01:
-                a, p = out.get(key, (0.0, 0.0))
-                out[key] = (a + calculate_surface_area(v), p + per)
+                d = acc.setdefault(key, {"area": 0.0, "edges": [], "types": set(), "patches": 0})
+                d["area"] += calculate_surface_area(v)
+                d["edges"] += [((v[i][0], v[i][1]), (v[(i + 1) % len(v)][0], v[(i + 1) % len(v)][1]))
+                               for i in range(len(v))]
+                d["types"].add(s_type)
+                d["patches"] += 1
+
+    out = {}
+    for key, d in acc.items():
+        per = _cancel_internal_edges(d["edges"]) if d["patches"] > 1 else \
+              sum(math.dist(a, b) for a, b in d["edges"])
+        prov = []
+        if d["types"] & _HIGH_CONF_TYPES:
+            prov.append("floor")
+        else:
+            prov.append("air_or_ceiling")
+        if d["patches"] > 1:
+            prov.append("multi_patch")
+        out[key] = (d["area"], per, "+".join(prov))
     return out
 
 
-# 중심선 기준 export 로 설명 가능한 벽 두께 범위(m). 이 범위를 벗어나는 면적 차이만
-# 실제 문제로 본다. 단순 백분율 임계값은 작은 실(둘레/면적 비가 큰 화장실·계단실)을
-# 부당하게 걸러낸다 — 실측에서 함축 벽두께 0.03~0.19m 인 정상 파일이 10% 초과로 걸렸다.
 # 함축 offset 구간별 등급. 단일 상한 하나로 판정하면
 #  - 상한이 넓으면 존 경계 누락(면적 40% 오차)도 통과하고
 #  - 상한이 좁으면 코어벽·옹벽이 있는 정상 건물을 오탐한다.
@@ -275,8 +312,8 @@ OFFSET_BANDS_M = (
 OFFSET_HARD_LIMIT_M = 0.60    # 이상은 경계 누락·병합 의심
 
 
-def implied_wall_thickness(declared_area, geom_area, perimeter):
-    """선언 면적과 도형 면적의 차이를 벽 두께로 환산한다.
+def implied_boundary_offset(declared_area, geom_area, perimeter):
+    """선언 면적과 도형 면적의 차이를 '경계 평행이동 offset' 으로 환산한다.
 
     도형(중심선) 면적 ≈ 선언(순)면적 + 둘레 × 두께/2 이므로 두께 ≈ 2·ΔA/P.
     """
@@ -1055,6 +1092,7 @@ def parse_gbxml_to_json(filepath: str):
     area_mismatch = []   # (존, 선언, 기하) — 품질 경고용
     tiny_declared = []   # 0.5㎡ 미만 선언 존 — 버리지 않고 알리기만 한다
     geometry_unavailable = []  # 평면 윤곽을 계산할 수 없는 존 (독립 검증 불가)
+    geometry_low_conf = []     # 윤곽은 있으나 Air/Ceiling·다중패치 기반으로 신뢰도 낮음
     _unit_pairs = []     # (존, 선언, 기하) — 단위 오기재 군집 판정용
     for sp_id, sp_data in spaces.items():
         geom_area = round(zone_floor_area.get(sp_data["name"], 0.0), 2)
@@ -1064,9 +1102,13 @@ def parse_gbxml_to_json(filepath: str):
         # 단순 백분율이 아니라 '중심선 기준으로 설명되는가'로 판정한다.
         # 중심선 export 는 정상 관행이고, 작은 실은 둘레/면적 비가 커서 정상 편차가
         # 10%를 쉽게 넘는다(화장실 11%). 함축 벽두께가 현실 범위를 벗어날 때만 알린다.
-        _per = zone_geom.get(sp_data["name"], (0.0, 0.0))[1]
+        _g = zone_geom.get(sp_data["name"], (0.0, 0.0, ""))
+        _per, _prov = _g[1], _g[2]
+        # Air/Ceiling 으로만 구했거나 여러 패치로 구성된 값은 저신뢰다.
+        if geom_area > 0 and ("air_or_ceiling" in _prov or "multi_patch" in _prov):
+            geometry_low_conf.append((sp_data["name"], _prov))
         if declared and geom_area > 0 and _per > 0:
-            _t = implied_wall_thickness(declared, geom_area, _per)
+            _t = implied_boundary_offset(declared, geom_area, _per)
             if _t is not None:
                 _sev = None
                 if _t > OFFSET_HARD_LIMIT_M or _t < -0.05:
@@ -1076,9 +1118,14 @@ def parse_gbxml_to_json(filepath: str):
                         if _lo <= _t <= _hi:
                             _sev = _band
                             break
+                # offset 이 작아도 상대 면적차가 크면 경계 누락·병합을 의심해야 한다.
+                # 둘레가 긴 복잡한 존에서는 큰 면적 오류도 작은 offset 으로 나온다.
+                _rel = abs(geom_area - declared) / declared
+                if _rel > 0.30:
+                    _sev = "warn"
                 if _sev:
                     area_mismatch.append((sp_data["name"], round(declared, 2),
-                                          geom_area, round(_t, 3)))
+                                          geom_area, round(_t, 3), round(_rel * 100, 1)))
         if declared and declared < 0.5:
             tiny_declared.append((sp_data["name"], round(declared, 4)))
         # 단위 교차검증에는 **고신뢰 바닥면적만** 쓴다. zone_floor_area(geom_area)는
@@ -1337,9 +1384,24 @@ def parse_gbxml_to_json(filepath: str):
             ),
         })
 
+    if geometry_low_conf:
+        _n = len(geometry_low_conf)
+        _ex = ', '.join(f"{n}({p})" for n, p in geometry_low_conf[:3])
+        print(f"   ℹ️ 평면 윤곽 신뢰도가 낮은 존 {_n}개: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "geometry_area_low_confidence", "severity": "info",
+            "count": _n, "countUnit": "개 실",
+            "action": "면적 교차검증의 신뢰도가 낮습니다 (선언 면적은 그대로 사용)",
+            "message": (
+                f"평면 윤곽을 바닥 슬래브가 아닌 경계(개방부·천장)로 추정했거나 여러 조각으로 "
+                f"나뉜 실이 {_n}개 있습니다 ({_ex}). 예를 들어 개방 계단실의 개방부 면적은 "
+                f"실제 사용 바닥면적과 다를 수 있어, 이 실들의 면적 검증 결과는 참고용입니다."
+            ),
+        })
+
     if area_mismatch:
         _n = len(area_mismatch)
-        _ex = ', '.join(f"{n}({d}→{g}㎡, 벽두께 환산 {t}m)" for n, d, g, t in area_mismatch[:3])
+        _ex = ', '.join(f"{n}({d}→{g}㎡, offset {t}m, 상대차 {r}%)" for n, d, g, t, r in area_mismatch[:3])
         print(f"   ⚠️ 선언 면적과 도형 면적의 차이가 벽 두께로 설명되지 않는 존 {_n}개: {_ex}")
         gap_warnings.append({
             "zone": None,
