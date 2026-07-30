@@ -167,17 +167,50 @@ def test_real_file_matches_declared_total():
     assert abs(total - 864.37) < 1.0, f"선언 연면적 864.37㎡와 다름: {total:.2f}"
 
 
-def test_real_file_area_mismatch_warning():
-    """선언-기하 괴리가 큰 존이 있으면 사용자에게 경고가 나가야 한다."""
+def test_real_file_has_no_area_mismatch_warning():
+    """중심선 기준으로 정상 export 한 파일에는 면적 경고가 뜨지 않아야 한다.
+
+    용호동 파일은 BIM에서 존 단위·중심선 기준으로 뽑은 정상 파일이다.
+    함축 벽두께가 0.031~0.190m 로 전부 현실적 범위이므로 경고 대상이 아니다.
+    예전에는 (1) 층간 슬래브 이중계산으로 도형 면적이 2배가 되고
+    (2) 판정이 단순 10% 임계값이라 작은 실의 정상 편차(11%)까지 걸려
+    10개 존이 오탐으로 걸렸다.
+    """
     if not os.path.exists(SAMPLE):
         import pytest
         pytest.skip("용호동 파일 2.xml 없음")
 
     result = parse_gbxml_to_json(SAMPLE)
     warns = [w for w in result.get("warnings", []) if w.get("issue") == "area_mismatch"]
-    assert len(warns) == 1
-    assert warns[0]["count"] > 0
-    assert warns[0]["message"]
+    assert warns == [], f"정상 파일에 면적 경고 오탐: {warns}"
+
+
+def test_real_file_geometry_not_double_counted():
+    """층간 슬래브 이중계산이 없어야 한다 — 1층 존의 도형 면적이 선언의 2배면 버그다."""
+    if not os.path.exists(SAMPLE):
+        import pytest
+        pytest.skip("용호동 파일 2.xml 없음")
+
+    result = parse_gbxml_to_json(SAMPLE)
+    z = next(x for x in result["zones"] if x["id"] == "101 남자화장실")
+    ratio = z["geometricArea"] / z["declaredArea"]
+    assert ratio < 1.5, f"도형/선언 비율 {ratio:.2f} — 바닥과 천장을 함께 세고 있다"
+    assert abs(z["geometricArea"] - 12.42) < 0.1
+
+
+def test_implied_wall_thickness_explains_centerline_export():
+    """중심선 편차는 둘레 × 벽 반두께로 설명된다.
+
+    이 관계가 성립하지 않으면 임계값의 근거가 무너진다.
+    """
+    from src.gbxml_parser import implied_wall_thickness
+    # 선언 11.22㎡ / 도형 12.42㎡ / 둘레 17.0m → 벽 14cm
+    t = implied_wall_thickness(11.22, 12.42, 17.0)
+    assert 0.10 < t < 0.20
+
+    # 설명 불가한 차이(2배)는 비현실적 두께로 나온다
+    t_bad = implied_wall_thickness(11.22, 24.84, 17.0)
+    assert t_bad > 1.0
 
 
 def test_zone_exposes_both_areas():

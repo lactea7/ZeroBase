@@ -208,6 +208,62 @@ _UNIT_SCALE_CANDIDATES = [
 ]
 
 
+def compute_zone_floor_geometry(surfaces_list):
+    """존별 (바닥면적, 바닥둘레) — 존의 '최저 Z 수평면'을 바닥으로 본다.
+
+    층간 슬래브는 하나의 Surface 로 표현되고 `zone`(=space_1)에만 귀속되므로,
+    귀속된 면을 단순 합산하면 아래층 존은 바닥과 천장을 **이중 계산**하고
+    (101 화장실 24.84 vs 선언 11.22) 위층 존은 바닥을 **아예 못 받는다**(0).
+    그래서 `zone` 과 `adjacentZone` 양쪽에서 찾고, 그 존의 최저 Z 에 있는
+    수평면만 바닥으로 인정한다.
+
+    둘레도 함께 돌려준다 — 선언 면적과의 차이가 벽 두께로 설명되는지 판정하는 데 쓴다.
+    """
+    zone_min_z = {}
+    for s in surfaces_list:
+        v = s.get("vertices") or []
+        if len(v) < 3:
+            continue
+        lo = min(p[2] for p in v)
+        for key in (s.get("zone"), s.get("adjacentZone")):
+            if key:
+                zone_min_z[key] = min(zone_min_z.get(key, float("inf")), lo)
+
+    out = {}
+    for s in surfaces_list:
+        s_type = (s.get("type") or "").lower()
+        if not ("floor" in s_type or "slab" in s_type):
+            continue
+        v = s.get("vertices") or []
+        if len(v) < 3:
+            continue
+        if max(p[2] for p in v) - min(p[2] for p in v) > 1e-6:
+            continue          # 수평이 아니면 바닥 후보가 아니다
+        z0 = min(p[2] for p in v)
+        per = sum(math.dist(v[i], v[(i + 1) % len(v)]) for i in range(len(v)))
+        for key in (s.get("zone"), s.get("adjacentZone")):
+            if key and abs(z0 - zone_min_z.get(key, -float("inf"))) < 0.01:
+                a, p = out.get(key, (0.0, 0.0))
+                out[key] = (a + calculate_surface_area(v), p + per)
+    return out
+
+
+# 중심선 기준 export 로 설명 가능한 벽 두께 범위(m). 이 범위를 벗어나는 면적 차이만
+# 실제 문제로 본다. 단순 백분율 임계값은 작은 실(둘레/면적 비가 큰 화장실·계단실)을
+# 부당하게 걸러낸다 — 실측에서 함축 벽두께 0.03~0.19m 인 정상 파일이 10% 초과로 걸렸다.
+PLAUSIBLE_WALL_THICKNESS_M = (-0.05, 0.60)
+
+
+def implied_wall_thickness(declared_area, geom_area, perimeter):
+    """선언 면적과 도형 면적의 차이를 벽 두께로 환산한다.
+
+    도형(중심선) 면적 ≈ 선언(순)면적 + 둘레 × 두께/2 이므로 두께 ≈ 2·ΔA/P.
+    """
+    if not perimeter or perimeter <= 0:
+        return None
+    return 2.0 * (geom_area - declared_area) / perimeter
+
+
 def detect_area_unit_inconsistency(zone_pairs, min_zones=5, min_area_share=0.8, tol=0.05):
     """선언 면적과 기하 면적의 비율이 '단위 환산 배율'로 군집하는지 본다.
 
@@ -970,28 +1026,9 @@ def parse_gbxml_to_json(filepath: str):
     # 존별 실제 바닥면적: 해당 존의 floor/slab 면 면적 합.
     # 없으면 cost_analyzer가 균등분할로 폴백하지만, 균등분할은 '면적 비율'을
     # '존 개수 비율'로 왜곡해 비거주 면적 기반 산정(LED·설비 절감)을 부정확하게 만든다.
-    # 고신뢰 바닥면적: 수평이고(모든 꼭짓점 Z 동일) 공유되지 않은(adjacentZone 없음)
-    # 바닥면만 합산한다. 공유 층간면은 귀속이 한쪽에만 되므로 제외해야 비교 가능하다.
-    high_conf_floor_area = {}
-    for s in surfaces_list:
-        s_type = (s.get("type") or "").lower()
-        if not ("floor" in s_type or "slab" in s_type) or not s.get("zone"):
-            continue
-        if s.get("adjacentZone"):      # 공유면 — 귀속이 한쪽에만 되어 비교 불가
-            continue
-        v = s.get("vertices") or []
-        if len(v) < 3:
-            continue
-        zs = [p[2] for p in v]
-        if max(zs) - min(zs) > 1e-6:   # 수평이 아니면 바닥 후보로 보지 않는다
-            continue
-        high_conf_floor_area[s["zone"]] = high_conf_floor_area.get(s["zone"], 0.0) + s.get("area", 0.0)
-
-    zone_floor_area = {}
-    for s in surfaces_list:
-        s_type = (s.get("type") or "").lower()
-        if ("floor" in s_type or "slab" in s_type) and s.get("zone"):
-            zone_floor_area[s["zone"]] = zone_floor_area.get(s["zone"], 0.0) + s.get("area", 0.0)
+    # 존별 바닥면적·둘레 — 층간 슬래브 귀속 문제를 보정한 계산 하나만 쓴다.
+    zone_geom = compute_zone_floor_geometry(surfaces_list)
+    zone_floor_area = {k: v[0] for k, v in zone_geom.items()}
 
     # 6. 존(Zone) 리스트 완성
     area_mismatch = []   # (존, 선언, 기하) — 품질 경고용
@@ -1002,15 +1039,21 @@ def parse_gbxml_to_json(filepath: str):
         declared = sp_data.get("declaredArea")
         # 선언값 우선. 기하 합산은 층간면 귀속 문제로 신뢰할 수 없다.
         z_area = round(declared, 2) if declared else geom_area
-        if declared and geom_area > 0 and abs(geom_area - declared) / declared > 0.10:
-            area_mismatch.append((sp_data["name"], round(declared, 2), geom_area))
+        # 단순 백분율이 아니라 '중심선 기준으로 설명되는가'로 판정한다.
+        # 중심선 export 는 정상 관행이고, 작은 실은 둘레/면적 비가 커서 정상 편차가
+        # 10%를 쉽게 넘는다(화장실 11%). 함축 벽두께가 현실 범위를 벗어날 때만 알린다.
+        _per = zone_geom.get(sp_data["name"], (0.0, 0.0))[1]
+        if declared and geom_area > 0 and _per > 0:
+            _t = implied_wall_thickness(declared, geom_area, _per)
+            _lo, _hi = PLAUSIBLE_WALL_THICKNESS_M
+            if _t is not None and not (_lo <= _t <= _hi):
+                area_mismatch.append((sp_data["name"], round(declared, 2), geom_area, round(_t, 3)))
         if declared and declared < 0.5:
             tiny_declared.append((sp_data["name"], round(declared, 4)))
         # 단위 교차검증에는 **고신뢰 바닥면적만** 쓴다. zone_floor_area(geom_area)는
         # 층간 슬래브가 space_1 존에만 귀속돼 아래층은 이중계산, 최상층은 0 이 되므로
         # 독립적인 참값이 아니다. 그 비율에 군집 알고리즘을 얹으면 판정 근거가 무너진다.
-        _unit_pairs.append((sp_data["name"], declared or 0.0,
-                            high_conf_floor_area.get(sp_data["name"], 0.0)))
+        _unit_pairs.append((sp_data["name"], declared or 0.0, geom_area))
         _aid = activity_id_from_space_name(sp_data.get("name", ""))
         _loads = get_archetype_loads(archetype_key_for_activity(_aid))
         zones_list.append({
@@ -1249,19 +1292,19 @@ def parse_gbxml_to_json(filepath: str):
 
     if area_mismatch:
         _n = len(area_mismatch)
-        _ex = ', '.join(f"{n}({d}→{g}㎡)" for n, d, g in area_mismatch[:3])
-        print(f"   ⚠️ 선언 면적과 기하 면적이 10% 이상 다른 존 {_n}개 → 선언 면적을 사용: {_ex}")
+        _ex = ', '.join(f"{n}({d}→{g}㎡, 벽두께 환산 {t}m)" for n, d, g, t in area_mismatch[:3])
+        print(f"   ⚠️ 선언 면적과 도형 면적의 차이가 벽 두께로 설명되지 않는 존 {_n}개: {_ex}")
         gap_warnings.append({
             "zone": None,
             "issue": "area_mismatch",
-            "severity": "info",
+            "severity": "warn",
             "count": _n,
             "countUnit": "개 실",
-            "action": "선언 면적을 사용합니다 (기하 면적은 층간 슬래브 귀속 문제로 신뢰도가 낮음)",
+            "action": "선언 면적을 사용합니다 (도형 면적은 참고용)",
             "message": (
-                f"gbXML이 선언한 존 면적과 도형에서 계산한 면적이 10% 이상 다른 존이 {_n}개 있습니다 "
-                f"({_ex}). 층간 슬래브가 한 면으로만 기록되어 아래층 존에서 바닥과 천장이 함께 "
-                f"계산되는 경우 등에서 발생합니다. 시뮬레이션은 선언 면적을 사용합니다."
+                f"선언된 실 면적과 도형에서 계산한 면적의 차이가 벽 두께로 설명되지 않는 실이 "
+                f"{_n}개 있습니다 ({_ex}). 벽 중심선 기준으로 내보낸 경우 정상적으로 5~15% 차이가 "
+                f"나지만, 이 실들은 그 범위를 벗어납니다. 실 경계나 층 구분을 확인해 주세요."
             ),
         })
 
