@@ -51,130 +51,137 @@ EPlusSimple 비교가 다시 필요하면:
 
 ---
 
-## 지금 상태 요약 (2026-07-26 기준)
+## 지금 상태 요약 (2026-07-30 기준)
 
-**다음에 바로 할 일** (codex 교차검증으로 우선순위 재조정함)
+커밋: `891694b` + 미커밋(WORKLOG 갱신, duplicate_zone_id 검증). 백엔드 테스트 **118개**,
+프런트 lint 0/0, 빌드 성공. 브랜치 `fix/self-adjacent-surfaces` (main 미병합, 원격 미푸시).
 
-0. 🔴 **바닥면적 기준이 세 가지로 갈린다 — 지표 신뢰도 문제.** (2026-07-28 실측 확인)
-   - `864.37㎡` gbXML 신고 연면적 (Building/Area)
-   - `964.47㎡` 전체 floor/slab 면적 합 → **면적당 지표의 분모**
-   - `1,050.42㎡` 존별 `z_area` 합 → **내부발열(조명·기기·인체) 주입 기준**
+**다음에 바로 할 일** (EPlusSimple 비교 + codex 검토로 우선순위 확정)
 
-   즉 **내부발열은 1,050㎡ 기준으로 넣고, kWh/㎡ 지표는 964㎡로 나눈다(9% 불일치).**
-   원인은 `ep_simulator.py:1046-1059` 의 폴백 — 바닥 폴리곤이 없는 존 5개
-   (203/303/403 계단실, 501 계단실, 502 사무공간)가 천장·지붕 면적으로 대체되는데,
-   그 면적은 분모(floor/slab 합)에는 포함되지 않는다. 차액 ≈ 86㎡가 그대로 불일치.
-   → 내부부하 기준면적과 지표 분모를 하나로 통일할 것. 이걸 먼저 잡지 않으면
-   절대량·면적당 지표 모두 신뢰할 수 없다.
-
-1. ✅ **자기참조 인접면 — 해결 완료.** 상세는 아래 「해결 완료」 참조.
-   다만 **Z=0 바닥 6면(177.99㎡)이 Adiabatic 이 되어 지면 열손실이 빠져 있다.**
-   19개 자기참조 면 중 지면 접촉 후보가 이 6면이다. Ground 승격 여부를 민감도
-   비교로 판단할 것 (자동 승격은 여전히 금물).
-2. 🟡 ASHRAE 140 Case 600 표준 벤치마크 — 표준 기준결과·허용범위까지 명시할 것.
-   (기존 50개 테스트가 "전부 비용·추천 로직"이라는 내 서술은 틀렸다.
-   `test_window_geometry`/`test_hvac_equipment`/`test_fuel_mode`/`test_failures` 는
-   형상·설비·연료·실패계약을 검증한다. 없는 건 **표준 대조 풀런 검증**이다.)
-3. 🟡 냉방 차단을 가용 스케줄로 이관 — **"작은 수정"이 아니다. 중간 우선순위.**
-   PTHP는 유닛·팬·냉방코일·난방코일·보조히터가 `op_schedule` 하나를 공유하므로
+1. 🔴 **모델 의미 검증 규칙 추가** — 지금까지는 기하·참조 오류만 잡는다.
+   "실행은 되지만 의미가 틀린 상태"를 잡아야 한다. EPlusSimple `debug.py` 참고:
+   존에 floor/ceiling/wall 최소 하나씩 존재 / 창·문과 투명·불투명 construction 호환성 /
+   비외기창 blind / 설비 참조 호환성 / 미사용 설비·구조체 / 냉난방·급탕 시스템 부재.
+   기하 검사 개수를 늘리는 것보다 이쪽이 우선순위가 높다.
+2. 🔴 **`/api/simulate` payload validator 완성** — 현재는 일부만 본다.
+   미반영: 전역 ID·XML 참조 타입·단위 불일치·not_enclosed·Surface 자체의 퇴화 좌표·
+   opening 퇴화·잘못된 adjacentZone·**baselineModel 무결성**.
+   (중복 zone id·빈 id 는 2026-07-30 에 추가함)
+3. 🟡 **ASHRAE 140/BESTEST 자동 pass/fail 벤치마크** — 양쪽 프로젝트 모두 없는 항목이다.
+   EPlusSimple 의 "모델×프로필×기상 일괄 실행" 구조는 참고하되 **승인 기준값 +
+   tolerance assertion** 을 반드시 붙일 것. 표 생성만 복제하면 의미가 없다.
+4. 🟡 **냉방 차단을 35℃ setpoint 대신 명시적 availability schedule 로 전환** —
+   PTHP 는 유닛·팬·냉방코일·난방코일·보조히터가 `op_schedule` 하나를 공유하므로
    계절 마스크를 그대로 얹으면 **겨울 난방까지 꺼진다.** 냉방코일에만 별도
-   `cooling_availability_schedule` 을 줘야 한다. WindowAC(냉방 전용)는 전체 적용 가능,
-   UnitHeater(난방 전용)는 기존 유지. 또 IdealLoads 폴백은 장비 가용 스케줄이 비어 있어
+   `cooling_availability_schedule` 이 필요하다. WindowAC(냉방 전용)는 전체 적용 가능,
+   UnitHeater(난방 전용)는 기존 유지. IdealLoads 폴백은 장비 가용 스케줄이 비어 있어
    35℃ 마스크를 먼저 제거하면 폴백 경로의 계절 차단이 사라진다.
-   → 장비별 스케줄 인터페이스 + IdealLoads 폴백까지 함께 설계해야 하고,
-   WindowAC 겨울냉방 0 / PTHP 겨울난방 유지 / 폴백 동작을 EnergyPlus 풀런으로 확인한 뒤
-   35℃ 마스크를 제거할 것.
-4. ⚪ `ARCHETYPE_LOADS` 의 `heat`/`cool` 필드 정리 — **실제로 안 쓰인다.**
-   `ep_simulator.py:1072-1073` 은 `z.get("heatingSetpoint", 20.0)` / `coolingSetpoint 26.0`
-   으로 폴백하고, `gbxml_parser.py:779-780`·`App.jsx:488-489` 도 전 존을 20/26℃로 초기화한다.
-   즉 운영 설정온도 기본값은 이미 20/26℃다. 미사용 필드가 오해를 부르므로 제거하거나
-   용도를 명시. 출처가 필요한 쪽은 실제 계산에 쓰이는 `ARCHETYPES` 의 **setback** 값이다
-   (healthcare 난방 setback 22℃ 등). setback 과 운영 설정온도를 혼동해 20/26 으로
-   일괄 통일하면 안 된다.
-5. ⚪ `ResultDashboard.jsx:2` ESLint — 오탐이지만 **종료코드 1이 실제로 난다.**
-   CI/배포 전 lint 게이트가 필요하면 대문자 별칭이나 JSX 사용 인식 설정을 추가할 것.
-6. 프론트엔드 실제 동작 확인 (창호 상향/하향 버튼, 공사비 부호). 서버는 8000/5173.
-7. 커밋 정리 — 수정 5건 + VRF 제거 + `scripts/`, `WORKLOG.md` 신규.
+   → WindowAC 겨울냉방 0 / PTHP 겨울난방 유지 / 폴백 동작을 풀런으로 확인한 뒤 제거.
+5. 🟡 **opening containment·overlap 검증** — 현재는 면적 합만 본다. 호스트 평면 이탈,
+   개구부 간 겹침, 다른 평면에 있는 개구부는 통과한다. 2D 투영 후 containment/clipping 필요.
+6. ⚪ **진짜 watertight 검사** — `detect_zone_gaps()` 는 법선벡터 합의 잔차만 본다.
+   떨어진 면·상쇄되는 구멍은 통과하고 법선이 뒤집힌 면은 닫혀 있어도 걸린다.
+   5% 를 "폐합 실패율"로 해석할 수 없다. edge incidence + signed volume 필요.
+7. ⚪ 프로필 DB 확장(11 → 24종), 프런트 번들 code splitting, TRM/검증 보고서,
+   Linux/CI 품질 게이트.
+8. ⚪ 커밋 정리 / main 병합 / 푸시. `용호동 파일 2.xml` 은 여전히 untracked
+   (실제 파일 검증 테스트 3건이 다른 환경에서 skip 됨).
 
-**해결 완료 — 자기참조 인접면 (2026-07-26, 3라운드 검증)**
+**미해명으로 남은 것 — 난방 과소산정**
 
-`용호동 파일 2.xml` 에 `AdjacentSpaceId` 가 같은 Space 로 두 번 들어간 면이 **19개**
-(`InteriorFloor` 9 / `InteriorWall` 7 / **`Air` 3**). 익스포터가 지면 접촉 바닥을
-`SlabOnGrade` 대신 자기참조로 내보낸 것. 파서가 이를 그대로 받아 `ep_simulator` 가
-**같은 Zone 안에 원본+미러 쌍**을 만들고 있었다.
+용호동 실행 결과 난방 6.6~7.0 vs 냉방 19.9~20.7 kWh/㎡·년. 서울 사무소로서 비상식적이다.
+지워진 후보: 면적 기준 불일치(수정했으나 비율 불변) / 지면 열손실 누락(Ground 승격 민감도
++0.4 kWh/㎡, 6.1% — 기각) / 내부발열 과다(용도별로 정정했으나 조명 19.4 + 기기 25.1 = 44.5 로
+여전히 큼) / 기상 파일 오선택(성남→서울 정정, 기후 차이 작음).
+다음 후보: **외피 성능**. 단열재가 광물면 R13(λ=0.062)·광물보드 R-10.4 두 종뿐이고
+창이 15개(WWR 매우 낮음)인데, 이 조합이 난방부하를 이렇게까지 낮출 수 있는지 검증 필요.
+3번 벤치마크를 먼저 도입해 엔진 신뢰구간을 잡는 편이 순서상 나을 수 있다.
 
-- `gbxml_parser.py` — `space_1 == space_2` 면 인접관계를 버리고 `selfAdjacent` 플래그를
-  세운다. 경고는 stdout 뿐 아니라 **API 응답 `warnings`** 로 나간다
-  (`issue='self_adjacent_surface'`, `count`, `surfaces`, `message`).
-- `App.jsx` — 경고 모달이 갭 경고 형태(`zone`/`deviation`)에 고정돼 있어 새 경고가
-  빈 칸으로 렌더됐다. `w.issue` 로 분기하도록 수정.
-- `ep_simulator.py` — Adiabatic 판정 두 곳(≈1036, ≈1240)에 `selfAdjacent` 를 추가.
-  **이게 핵심이다**: 판정식이 `"interior" in t` 라서 타입에 interior 가 없는 **`Air` 면
-  3개가 `Outdoors`/`SunExposed` 로 빠질 뻔했다** — 없던 외피와 일사 취득이 생기는,
-  원래 버그보다 나쁜 회귀였다.
-- 지면 경계 **자동 승격은 하지 않았다** (지하층·필로티·외기노출 바닥 오분류 위험).
-  경고로 사용자에게 알리고 판단을 맡긴다.
-- `tests/test_surface_adjacency.py` **10건 신규** — 파서 경계조건에 테스트가 아예 없었다.
-  수정을 일시 제거해 실제로 실패하는지 매 라운드 확인했다.
-- 백엔드 테스트 **60개 통과** (50 → 54 → 57 → 60).
+**정정된 과거 기록** (아래 옛 항목들과 충돌하면 이쪽이 맞다)
 
-교훈: 릴레이 3라운드가 각각 다른 층위의 결함을 잡았다 — ①경고가 사용자에게 안 감
-②경고 계약에 테스트 없음 ③내 수정이 만든 `Air` 면 회귀. 특히 ③은 내가 "안전하다"고
-판단하고 넘어간 지점이었다.
+- ESLint `motion` 오탐: "건드리지 말라"고 적어뒀던 것은 진단이 얕았다. 진짜 원인은
+  **`eslint-plugin-react` 미설치**였고, 설치 후 `react/jsx-uses-vars` 를 켜서 해결했다.
+  현재 lint 는 0 errors / 0 warnings 다.
+- 바닥면적 3중 불일치(864/964/1050): **해결됐다.** `<Space><Area>` 선언값 우선으로
+  864.38㎡ 단일 기준. `areaUnit` 을 `lengthUnit` 과 독립 환산.
+- `ARCHETYPE_LOADS` 의 `heat`/`cool` 미사용 필드 정리는 아직 안 했다(우선순위 낮음).
 
-**해결 완료 추가**: `idf_builder.py` 의 죽은 VRF 코드 **184줄 제거**(1016→832줄).
-`add_vrf_outdoor_unit`/`add_vrf_terminal` 은 정의만 있고 호출부가 없었다.
-EP25.2에서 불안정해 PTHP로 대체된 것(주석에 기록돼 있었음). 함께 죽은 `_vrf_sources`
-상태와 `finalize_hvac` 의 빈 루프도 제거. 테스트 50개 통과.
+## 2026-07-30 — EPlusSimple(SNU) 대비 장단점 (codex 판정 + gemma 정리)
 
-**해결 완료 (2026-07-26)**
+`891694b` 기준. codex가 두 저장소를 읽고 판정, gemma가 정리. **아래는 내가 코드로
+재확인한 것만 확정 사실로 적는다.** 미확인 항목은 그렇게 표시했다.
 
-- ✅ `ep_simulator.py:631` — `baseline_same` 조건에 `hvacUpgradeActive` 추가.
-  설비 교체만 켠 시나리오에서 절감량이 0으로 보고되던 버그. 640행 제거 목록과 일치시킴.
-- ✅ `recommendationActions.js` `window_upgrade` — `changed` 집계를 `setSurfaces`
-  업데이터 밖으로 이동 (`surfaces` 직접 필터링). React 18 지연 실행 + StrictMode 이중 집계 대응.
-- ✅ `recommendationActions.js` `window`(하향) — 위와 동일한 버그가 남아 있던 것을 같은 방식으로 수정.
-  (내 불완전한 수정을 릴레이 round 2가 잡아냈다.)
-- ✅ `ResultDashboard.jsx:651` / `pdfReport.js:408` — 상향안 공사비에 `+`를 무조건
-  붙여 `capital_delta`가 음수일 때 `+-30만원`으로 표시되던 것. 같은 파일의 622·403행은
-  이미 조건부 부호를 쓰고 있었다 — 두 군데만 누락. 화면과 PDF 양쪽 모두 수정.
-- 백엔드 테스트 **50개 전부 통과** (4분 40초).
+### 먼저 바로잡은 내 오해 3건
 
-**EPlusSimple(SNU) 대비 비교 — 교차검증 완료 (2026-07-26)**
+1. **"EPlusSimple에 ASHRAE 140 표준 벤치마크 대조가 있다"는 틀렸다.**
+   `scripts/dev/regressiontest.py` 는 `ASHRAE 140 modified.grm` 을 프로필·기상별로
+   반복 실행해 결과 표를 LaTeX에 삽입할 뿐이다. **기준 범위·기준 프로그램 결과와의
+   허용오차 비교도, 실패 assertion도 코드에 없다.** 표준 적합성 시험이 아니다.
+   → 정확한 대비: 저쪽은 "시스템 수준 smoke/report 도구", 우리는 "자동 판정 테스트 116개".
+   **양쪽 모두 공인 기준값 대조는 없다.**
+2. **저쪽 입력 검증은 Excel 전용이다.** `debug.py` 의 `JSON_INSPECTORS` 는
+   `JSON_INSPECTORS = []` 로 **비어 있다**(직접 확인). GRM/JSON 검증은 미구현이다.
+   또 3단계는 항목별 등급이 아니라 "Exception 있으면 SEVERE, Warning만 있으면 WARNING"
+   으로 병합하는 **결과 등급**이다. 우리 info/warn/choice/block(행동 정책 포함)과 동급 비교가 아니다.
+3. **"우리 서버 신뢰 경계가 완성됐다"는 이르다.** `model_validation.py` 는 일부만 본다.
+   특히 `zone_ids` 를 바로 set 으로 만들어 **중복 zone id 를 잃고 있었다**(확인 후 수정).
 
-SNU 건물시스템연구실 EPlusSimple V0-6-3 과 비교 후 codex 교차검증으로 오류 3건을 바로잡았다.
-확정된 사실만 남긴다.
+### 판정 요약
 
-- 설정온도: EPlusSimple 24개 프로필 전부 20/26℃. 우리는 11종 중 9종이 20/26℃로 일치하나
-  `healthcare` 22/25℃, `auxiliary` 18/28℃ 는 다르다. "전부 동일"은 과장이었다.
-- HVAC 제어: **우리도 가용 스케줄을 쓴다.** `ep_simulator.py:1103-1131` 이 `op_sch` 를
-  PTHP·UnitHeater·WindowAC 에 `op_schedule=` 로 전달한다. `COOLING_OFF_TEMP=35` 는
-  그 위에 얹은 계절 마스크이지 가용 스케줄의 대체재가 아니다.
-- 기본 HVAC 모델: **IdealLoads 가 기본이 아니다.** 기본 열원은 지역난방(`App.jsx:157`
-  heatSource=11) → UnitHeater + WindowAC 조합이고, IdealLoads 는 매핑 실패 시 폴백이다.
-- **`idf_builder.py` 의 VRF 생성 함수(`add_vrf` 계열)는 호출하는 코드가 없다 — 죽은 코드다.**
-  정리하거나 연결할지 판단 필요.
-- EPlusSimple에 계절(냉난방기간) 개념이 없는 것은 사실 확인됨 — 가용 스케줄이 일간 시간대와
-  방학만 반영한다. 다만 저쪽 회귀검증은 "ASHRAE 140-modified 사례분석"이지 표준 적합성
-  검증은 아니므로 "ASHRAE 140 검증 완료"로 인용하면 안 된다.
-- 교훈: gemma는 주장 6건 중 5건을 "판단보류"하고 유일하게 동의한 1건이 **틀린 주장**이었다.
-  로컬 소형 모델은 사실 검증자로 쓰지 말 것 — 분류·포맷 용도로 한정. ([[cmux-relay-pipeline]])
+| 항목 | 판정 | 근거 |
+|---|---|---|
+| 입력 접근성(BIM 연계·웹) | **우리 장점** | gbXML 업로드 후 웹 3D 편집. 저쪽은 Excel/GRM 준비 + Windows launcher |
+| 입력의 명시성·통제성 | 저쪽 장점 | 구조화 Excel은 관계를 명시. gbXML은 자기참조·면 귀속·이름 기반 용도추론 등 모호성이 구조적 |
+| 기하·단위 검증 | **우리 장점** | 전역 ID·XML 참조·면적 단위·퇴화 기하·opening 초과·자기참조·선언/기하 불일치 |
+| **의미 계층 검증** | **저쪽 장점** | 존에 floor/ceiling/wall 부재, 잘못된 인접존, 설비 참조·호환성, 투명/불투명 construction, 비외기창 blind, 미사용 설비, 냉난방·급탕 부재 |
+| 경고 UX·승인 정책 | **우리 장점** | choice/block이 실제 행동(진행 차단, Ground/Adiabatic 선택)으로 연결 |
+| HVAC 모델 상세도 | **우리 단점** | 저쪽은 Chiller/AbsorptionChiller/Boiler/AHU/FCU/Radiator/RadiantFloor + PlantLoop. 우리는 존 단위 PTHP·UnitHeater+WindowAC·IdealLoads |
+| 프로필 DB | **우리 단점** | 저쪽 24종(환기량·급탕·요일·방학 포함) vs 우리 11종 |
+| 설정온도 | 무승부 | 양쪽 20/26℃ 기본, 양쪽 override 가능 |
+| 계절 제어 | 제한적 우리 장점 | 우리만 냉방기간 마스크. 단 35℃는 절대 차단이 아니고 고정 기간이 이상고온에 부적절할 수 있음 |
+| 면적·내부발열 일관성 | **우리 장점** | 선언면적 우선 + 용도별 부하 전달이 코드상 일관 |
+| 1차에너지·CO2 계약 | **우리 장점** | 백엔드 단일 출처 + 회귀 테스트로 고정 |
+| 단위 테스트 | **우리 장점** | pytest 116개(현재 118). 저쪽 저장소에 pytest/unittest suite 없음 |
+| **물리적 결과 검증** | **무승부이자 양쪽 약점** | 양쪽 모두 공인 기준값 assertion 없음 |
+| 시스템 수준 시나리오 실행 | 저쪽 장점 | 프로필 24 × 지역 18 조합을 실제로 돌려 관찰 |
+| 문서 | **우리 단점** | 저쪽 TRM/RN/RTR LaTeX 본문 + 도식·참고문헌. 우리는 WORKLOG·README 수준 (방법론 문서는 저장소 밖 아티팩트) |
+| 비용·리모델링 의사결정 | **우리 장점** | 공사비 DB·LCC·요금·CO2·PV·baseline 비교·추천 UI 결합 |
 
-**알아둘 것**: `ResultDashboard.jsx:2` 의 `'motion' is defined but never used` ESLint
-에러는 **기존부터 있던 오탐**이다. `motion` 은 HEAD와 현재 모두 17회 등장해 실제로
-쓰이며, ESLint 설정이 `<motion.div>` 같은 JSX 멤버 표현식을 인식하지 못할 뿐이다. 건드리지 말 것.
+### 당장 가져올 것 3가지 (우선순위)
 
-**보류 — P0 아님으로 판단**
+1. **모델 의미 검증 규칙** — 저쪽의 `InsufficientSurfaceForZone`,
+   `InvalidFenestrationConstruction`, `BlindForNonOutdoorWindow`,
+   `InvalidSourceSystemName`, `NoHVACSystemApplied` 에 해당하는 검사.
+   **"실행은 되지만 의미가 틀린 상태"를 잡는다.** 기하 검사 개수를 늘리는 것보다 우선순위가 높다.
+2. **pass/fail 있는 벤치마크 harness** — 저쪽의 모델×프로필×기상 실행 구조는 가져오되
+   LaTeX 표 생성만 복제하지 말고 **승인 기준값 + tolerance assertion**을 붙인다.
+3. **한국형 프로필 확장** — 24종의 환기량·급탕·요일·방학 필드 참고. 단순 복사 금지,
+   출처·단위·적용범위를 검증하고 CSV/JSON 으로 코드 밖에 분리.
 
-`activity_schedules.py:304` `COOLING_OFF_TEMP = 35.0`. codex는 "35℃가 냉방을 원천
-차단하지 못한다"고 P0로 지적했다. **기존 시뮬 결과(`temp_workspace/mcp_5840730dab28/
-eplusout.csv`)로 실측한 결과 지적 자체는 사실이나 영향이 미미하다** —
-겨울(12/1/2월) 냉방 6.4 kWh / 연간 냉방 57,756 kWh = **0.011%**.
-즉 35℃ 차단은 사실상 작동 중이고, 완전 차단을 원하면 설정온도가 아니라 HVAC
-가용 스케줄로 막아야 한다. 우선순위 낮음.
+상세 PlantLoop 이식은 가치는 크지만 "당장"이 아니다 — 데이터 모델·UI·비용집계·결과 미터를 함께 바꿔야 한다.
 
-**커밋 안 된 변경**: 11개 파일 + 신규 `scripts/`, `WORKLOG.md`.
-PDF 리포트 전문가 리뷰 반영 작업 (절감률 라벨, 예산 초과 경고, NPV 민감도) 진행 중.
+### 우리 단점 분류
+
+**구조적으로 어려운 것**
+- gbXML 익스포터별 의미 손실(자기참조 바닥, 공유면 한쪽 귀속, 이름 기반 용도추론) —
+  원본 BIM 정보 없이 완전 자동 복구 불가
+- 상세 HVAC/PlantLoop 확장 — 백엔드·UI·IDF 생성·결과 집계 전면 재설계 필요
+- 실제 건물 calibration — 계측·운전·제어 데이터 없이는 코드로 해결 불가
+- 웹 서비스의 EnergyPlus 계산 자원(큐·격리·메모리·보안)
+
+**작업하면 되는 것**
+- ASHRAE 140/BESTEST 자동 pass/fail 벤치마크
+- 의미 검증 규칙 추가
+- `/api/simulate` payload validator 완성 (전역 ID·참조 타입·단위·not_enclosed 미반영)
+- 프로필 DB 확장 + 출처 문서화
+- TRM/RN/검증 보고서
+- **냉방 차단을 35℃ setpoint 대신 명시적 availability schedule 로 전환**
+- opening containment·overlap 검증
+- 프런트 번들 code splitting
+- Linux/CI 품질 게이트(pytest+lint+build+benchmark)
+
+**최종 평가**: 우리는 BIM 업로드·오류 진단·웹 편집·비용 의사결정·회귀 테스트에서 우세.
+저쪽은 설비 모델 폭·한국형 프로필·의미 계층 검증·기술문서·시스템 시나리오 실행에서 우세.
 
 ---
 

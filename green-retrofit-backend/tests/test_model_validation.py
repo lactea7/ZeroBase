@@ -66,3 +66,23 @@ def test_orphan_surface_warns_not_blocks():
         [_zone("Z1")], [_surf("S1", zone="Z없음")])
     assert blocking == []
     assert any(w["issue"] == "orphan_surface" for w in warns)
+
+
+def test_duplicate_zone_id_blocks():
+    """파서가 Space.Name 을 zone id 로 쓰므로 Name 이 겹치면 payload 에서 충돌한다.
+
+    XML 의 Space id 가 고유해도 잡히지 않는다 — 이 검사는 payload 단계에만 있을 수 있다.
+    zone_ids 를 바로 set 으로 만들면 중복을 잃어 이 케이스를 놓친다.
+    """
+    blocking, _ = validate_simulation_payload(
+        [_zone("같은이름"), _zone("같은이름")], [_surf(zone="같은이름")])
+    assert any(b["issue"] == "duplicate_zone_id" for b in blocking)
+
+
+def test_empty_ids_block():
+    blocking, _ = validate_simulation_payload([{"id": "", "area": 20.0}], [_surf()])
+    assert any(b["issue"] == "empty_zone_id" for b in blocking)
+
+    blocking, _ = validate_simulation_payload(
+        [_zone()], [{"id": "", "zone": "Z1", "vertices": WALL, "openings": []}])
+    assert any(b["issue"] == "empty_surface_id" for b in blocking)

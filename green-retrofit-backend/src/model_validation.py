@@ -31,7 +31,33 @@ def validate_simulation_payload(zones, surfaces):
     blocking = []
     warnings = []
 
-    zone_ids = {z.get("id") for z in (zones or []) if z.get("id")}
+    # set 으로 바로 만들면 중복을 잃는다. 파서가 Space.Name 을 zone id 로 쓰기 때문에
+    # XML 의 Space id 가 고유해도 Name 이 겹치면 여기서 zone id 가 충돌한다 —
+    # 이 검사는 payload 단계에만 존재할 수 있다.
+    _zid_list = [z.get("id") for z in (zones or []) if z.get("id")]
+    zone_ids = set(_zid_list)
+    _dup_zone = sorted({z for z in _zid_list if _zid_list.count(z) > 1})
+    if _dup_zone:
+        blocking.append({
+            "issue": "duplicate_zone_id",
+            "count": len(_dup_zone),
+            "message": f"같은 이름을 가진 존이 {len(_dup_zone)}건 있습니다 "
+                       f"({', '.join(_dup_zone[:3])}). 존이 하나로 합쳐져 면적·부하가 "
+                       f"뒤섞이므로 이름을 구분해 주세요.",
+        })
+
+    # 빈 id 를 가진 존·면은 EnergyPlus 객체명을 만들 수 없다.
+    if any(not z.get("id") for z in (zones or [])):
+        blocking.append({
+            "issue": "empty_zone_id",
+            "message": "이름이 없는 존이 있습니다.",
+        })
+    if any(not s.get("id") for s in (surfaces or [])):
+        blocking.append({
+            "issue": "empty_surface_id",
+            "message": "id 가 없는 면이 있습니다.",
+        })
+
     if not zone_ids:
         blocking.append({
             "issue": "no_zones",

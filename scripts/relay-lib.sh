@@ -102,13 +102,12 @@ unwrap_prose() {
 send_and_wait() {
   local surface=$1 begin=$2 marker=$3 text=$4
   local unwrap=${UNWRAP_FN:-unwrap_findings}
-  local before after waited=0 extracted
+  local after waited=0 extracted
 
-  # 보내기 직전 화면 길이를 기록해 이후 새로 생긴 부분만 본다.
-  # macOS 의 wc 는 공백으로 패딩된 숫자를 내놓는다. 그대로 tail -n +N 에 넣으면
-  # 'illegal offset' 으로 매번 실패해 마커를 영영 못 본다.
-  before=$("$CMUX" read-screen --surface "$surface" --scrollback 2>/dev/null | wc -l | tr -d '[:space:]')
-  before=$((before + 1))
+  # 절대 행 오프셋은 쓰지 않는다. read-screen --scrollback 은 버퍼 상한에 걸리면
+  # 오래된 줄을 버리므로, 전송 전에 센 행 번호가 그 뒤로 밀려 응답 구간을 통째로
+  # 건너뛴다(긴 답변에서 실제로 발생했다). 마커에 실행별 논스가 붙어 있어
+  # 이전 라운드와 충돌하지 않으므로 전체 스크롤백을 그대로 검색하면 된다.
 
   # cmux send 는 한 번에 보낼 수 있는 양에 한계가 있다. 실측으로 2800자는 통과하고
   # 3082자는 15초 뒤 "Command timed out" 으로 실패했다(길이보다 공백·줄바꿈 렌더링
@@ -129,7 +128,7 @@ send_and_wait() {
     sleep 3
     waited=$((waited + 3))
 
-    after=$("$CMUX" read-screen --surface "$surface" --scrollback 2>/dev/null | tail -n +"$before")
+    after=$("$CMUX" read-screen --surface "$surface" --scrollback 2>/dev/null)
 
     # 사용 한도에 걸리면 즉시 멈춘다. 계속 폴링하거나 재시도하면 과금으로 이어진다.
     if grep -qiE "$LIMIT_RE" <<<"$after"; then
