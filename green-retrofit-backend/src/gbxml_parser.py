@@ -208,17 +208,30 @@ _UNIT_SCALE_CANDIDATES = [
 ]
 
 
-def compute_zone_floor_geometry(surfaces_list):
-    """존별 (바닥면적, 바닥둘레) — 존의 '최저 Z 수평면'을 바닥으로 본다.
+# footprint(평면 윤곽) 후보로 인정하는 수평 경계 타입.
+# 열적 바닥(Floor/Slab)만 보면 개방 계단실을 놓친다 — 층간에 슬래브가 없고
+# 수평 Air 경계로 표현되기 때문이다(용호동 su-x-103-203-i-o-34, Air, 16.2㎡).
+_FOOTPRINT_TYPES = ("floor", "slab", "ceiling", "air")
+_THERMAL_FLOOR_TYPES = ("floor", "slab")
 
-    층간 슬래브는 하나의 Surface 로 표현되고 `zone`(=space_1)에만 귀속되므로,
-    귀속된 면을 단순 합산하면 아래층 존은 바닥과 천장을 **이중 계산**하고
-    (101 화장실 24.84 vs 선언 11.22) 위층 존은 바닥을 **아예 못 받는다**(0).
-    그래서 `zone` 과 `adjacentZone` 양쪽에서 찾고, 그 존의 최저 Z 에 있는
-    수평면만 바닥으로 인정한다.
 
-    둘레도 함께 돌려준다 — 선언 면적과의 차이가 벽 두께로 설명되는지 판정하는 데 쓴다.
+def compute_zone_floor_geometry(surfaces_list, footprint=True):
+    """존별 (면적, 둘레) — 존의 '최저 Z 수평 경계'를 평면 윤곽으로 본다.
+
+    footprint=True  : Floor/Slab/Ceiling/Air 수평면 (평면 윤곽 검증·부하 기준 면적용)
+    footprint=False : Floor/Slab 만 (열적 바닥면)
+
+    층간 슬래브는 하나의 Surface 로 `zone`(=space_1)에만 귀속되므로 단순 합산하면
+    아래층은 바닥+천장 이중계산, 위층은 0 이 된다. 그래서 `zone`/`adjacentZone`
+    양쪽에서 찾고 그 존의 최저 Z 수평면만 인정한다.
+
+    ⚠️ 한계 — 다음 형상에서는 이 정의가 성립하지 않는다:
+      메자닌·복층 존(상부 사용 바닥 누락), split-level(가장 낮은 면만 남음),
+      경사 바닥·램프(수평 필터에서 제외), 피트(작은 피트가 최저 Z 를 결정).
+      또 바닥 패치가 여러 개면 내부 공유 edge 가 둘레에 이중 계산되어 함축 두께가
+      실제보다 작게 나온다(2D union 미구현).
     """
+    types = _FOOTPRINT_TYPES if footprint else _THERMAL_FLOOR_TYPES
     zone_min_z = {}
     for s in surfaces_list:
         v = s.get("vertices") or []
@@ -232,13 +245,13 @@ def compute_zone_floor_geometry(surfaces_list):
     out = {}
     for s in surfaces_list:
         s_type = (s.get("type") or "").lower()
-        if not ("floor" in s_type or "slab" in s_type):
+        if not any(t in s_type for t in types):
             continue
         v = s.get("vertices") or []
         if len(v) < 3:
             continue
         if max(p[2] for p in v) - min(p[2] for p in v) > 1e-6:
-            continue          # 수평이 아니면 바닥 후보가 아니다
+            continue          # 수평이 아니면 후보가 아니다
         z0 = min(p[2] for p in v)
         per = sum(math.dist(v[i], v[(i + 1) % len(v)]) for i in range(len(v)))
         for key in (s.get("zone"), s.get("adjacentZone")):
@@ -251,7 +264,15 @@ def compute_zone_floor_geometry(surfaces_list):
 # 중심선 기준 export 로 설명 가능한 벽 두께 범위(m). 이 범위를 벗어나는 면적 차이만
 # 실제 문제로 본다. 단순 백분율 임계값은 작은 실(둘레/면적 비가 큰 화장실·계단실)을
 # 부당하게 걸러낸다 — 실측에서 함축 벽두께 0.03~0.19m 인 정상 파일이 10% 초과로 걸렸다.
-PLAUSIBLE_WALL_THICKNESS_M = (-0.05, 0.60)
+# 함축 offset 구간별 등급. 단일 상한 하나로 판정하면
+#  - 상한이 넓으면 존 경계 누락(면적 40% 오차)도 통과하고
+#  - 상한이 좁으면 코어벽·옹벽이 있는 정상 건물을 오탐한다.
+# 또 이 값은 물리 벽두께가 아니라 '모든 경계를 같은 거리만큼 평행이동한 유효 offset'이다.
+OFFSET_BANDS_M = (
+    (-0.05, 0.30, None),      # 일반 실내벽 중심선 편차 — 경고 없음
+    (0.30, 0.60, "warn"),     # 두꺼운 벽이거나 경계 정의 차이 — 확인 권장
+)
+OFFSET_HARD_LIMIT_M = 0.60    # 이상은 경계 누락·병합 의심
 
 
 def implied_wall_thickness(declared_area, geom_area, perimeter):
@@ -1033,6 +1054,7 @@ def parse_gbxml_to_json(filepath: str):
     # 6. 존(Zone) 리스트 완성
     area_mismatch = []   # (존, 선언, 기하) — 품질 경고용
     tiny_declared = []   # 0.5㎡ 미만 선언 존 — 버리지 않고 알리기만 한다
+    geometry_unavailable = []  # 평면 윤곽을 계산할 수 없는 존 (독립 검증 불가)
     _unit_pairs = []     # (존, 선언, 기하) — 단위 오기재 군집 판정용
     for sp_id, sp_data in spaces.items():
         geom_area = round(zone_floor_area.get(sp_data["name"], 0.0), 2)
@@ -1045,14 +1067,25 @@ def parse_gbxml_to_json(filepath: str):
         _per = zone_geom.get(sp_data["name"], (0.0, 0.0))[1]
         if declared and geom_area > 0 and _per > 0:
             _t = implied_wall_thickness(declared, geom_area, _per)
-            _lo, _hi = PLAUSIBLE_WALL_THICKNESS_M
-            if _t is not None and not (_lo <= _t <= _hi):
-                area_mismatch.append((sp_data["name"], round(declared, 2), geom_area, round(_t, 3)))
+            if _t is not None:
+                _sev = None
+                if _t > OFFSET_HARD_LIMIT_M or _t < -0.05:
+                    _sev = "warn"
+                else:
+                    for _lo, _hi, _band in OFFSET_BANDS_M:
+                        if _lo <= _t <= _hi:
+                            _sev = _band
+                            break
+                if _sev:
+                    area_mismatch.append((sp_data["name"], round(declared, 2),
+                                          geom_area, round(_t, 3)))
         if declared and declared < 0.5:
             tiny_declared.append((sp_data["name"], round(declared, 4)))
         # 단위 교차검증에는 **고신뢰 바닥면적만** 쓴다. zone_floor_area(geom_area)는
         # 층간 슬래브가 space_1 존에만 귀속돼 아래층은 이중계산, 최상층은 0 이 되므로
         # 독립적인 참값이 아니다. 그 비율에 군집 알고리즘을 얹으면 판정 근거가 무너진다.
+        if geom_area <= 0:
+            geometry_unavailable.append(sp_data["name"])
         _unit_pairs.append((sp_data["name"], declared or 0.0, geom_area))
         _aid = activity_id_from_space_name(sp_data.get("name", ""))
         _loads = get_archetype_loads(archetype_key_for_activity(_aid))
@@ -1290,6 +1323,20 @@ def parse_gbxml_to_json(filepath: str):
             ),
         })
 
+    if geometry_unavailable:
+        _n = len(geometry_unavailable)
+        _ex = ', '.join(geometry_unavailable[:3])
+        print(f"   ⚠️ 평면 윤곽을 계산할 수 없는 존 {_n}개: {_ex}")
+        gap_warnings.append({
+            "zone": None, "issue": "geometry_area_unavailable", "severity": "warn",
+            "count": _n, "countUnit": "개 실",
+            "action": "선언 면적을 그대로 사용합니다 — 도형으로 교차검증하지 못했습니다",
+            "message": (
+                f"수평 경계면이 없어 평면 윤곽을 계산하지 못한 실이 {_n}개 있습니다 ({_ex}). "
+                f"이 실들은 선언 면적이 도형과 맞는지 독립적으로 확인하지 못했습니다."
+            ),
+        })
+
     if area_mismatch:
         _n = len(area_mismatch)
         _ex = ', '.join(f"{n}({d}→{g}㎡, 벽두께 환산 {t}m)" for n, d, g, t in area_mismatch[:3])
@@ -1303,8 +1350,9 @@ def parse_gbxml_to_json(filepath: str):
             "action": "선언 면적을 사용합니다 (도형 면적은 참고용)",
             "message": (
                 f"선언된 실 면적과 도형에서 계산한 면적의 차이가 벽 두께로 설명되지 않는 실이 "
-                f"{_n}개 있습니다 ({_ex}). 벽 중심선 기준으로 내보낸 경우 정상적으로 5~15% 차이가 "
-                f"나지만, 이 실들은 그 범위를 벗어납니다. 실 경계나 층 구분을 확인해 주세요."
+                f"{_n}개 있습니다 ({_ex}). 괄호의 값은 '모든 경계를 같은 거리만큼 평행이동했다고 "
+                f"가정한 유효 offset' 이며 실제 벽 두께와 다를 수 있습니다. 정상 편차 폭은 벽 두께와 "
+                f"실의 둘레/면적 비에 따라 달라집니다. 실 경계나 층 구분을 확인해 주세요."
             ),
         })
 

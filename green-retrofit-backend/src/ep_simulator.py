@@ -115,6 +115,13 @@ def compute_zone_floor_areas(zones, surfaces):
         if declared > 0:
             areas[zid] = declared
             continue
+        # 선언 면적이 없으면 **파서가 계산한 값**을 쓴다. 여기서 다시 계산하면
+        # 파서는 층간면 귀속을 보정한 값(101 화장실 12.42)을 쓰는데 시뮬레이터는
+        # 귀속된 면을 단순 합산해(24.84) 두 값이 갈린다.
+        parsed = z.get("geometricArea") or z.get("area") or 0.0
+        if parsed > 0:
+            areas[zid] = parsed
+            continue
         z_area = sum(
             calculate_surface_area(s.get("vertices", []))
             for s in surfaces

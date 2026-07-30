@@ -253,3 +253,56 @@ def test_declared_area_wins_regardless_of_mismatch_flag():
     # 기하 20㎡ vs 선언 19.5㎡ → 10% 미만이라 경고는 없지만 선언값을 쓴다
     z = _parse_inline(area="19.5")["zones"][0]
     assert z["area"] == 19.5
+
+
+def test_open_stairwell_footprint_from_air_boundary():
+    """개방 계단실은 층간에 슬래브가 없고 수평 Air 경계로 표현된다.
+
+    Floor/Slab 만 보면 이런 존의 평면 윤곽이 0㎡ 가 되어 교차검증에서 조용히 빠진다.
+    용호동의 203/303/403/501 계단실이 실제로 그랬다.
+    """
+    from src.gbxml_parser import compute_zone_floor_geometry
+    surfaces = [{
+        "id": "air-boundary", "type": "Air",
+        "zone": "아래층계단실", "adjacentZone": "위층계단실",
+        "area": 16.2,
+        "vertices": [[0, 0, 3.7], [4, 0, 3.7], [4, 4.05, 3.7], [0, 4.05, 3.7]],
+    }]
+    g = compute_zone_floor_geometry(surfaces, footprint=True)
+    assert g["위층계단실"][0] > 0, "Air 경계가 윤곽 후보로 인정되지 않았다"
+
+    # 열적 바닥면(Floor/Slab)으로는 여전히 잡히지 않아야 한다 — 실제로 슬래브가 없다
+    g_thermal = compute_zone_floor_geometry(surfaces, footprint=False)
+    assert "위층계단실" not in g_thermal or g_thermal["위층계단실"][0] == 0
+
+
+def test_real_file_all_zones_have_footprint():
+    """20개 존 전부 평면 윤곽이 계산돼야 한다.
+
+    이전에는 개방 계단실 4개가 0㎡ 로 빠져 교차검증 대상이 16개뿐이었다.
+    """
+    if not os.path.exists(SAMPLE):
+        import pytest
+        pytest.skip("용호동 파일 2.xml 없음")
+
+    from src.gbxml_parser import compute_zone_floor_geometry
+    result = parse_gbxml_to_json(SAMPLE)
+    g = compute_zone_floor_geometry(result["surfaces"])
+    missing = [z["id"] for z in result["zones"] if g.get(z["id"], (0, 0))[0] <= 0]
+    assert missing == [], f"윤곽 미계산 존: {missing}"
+
+
+def test_simulator_reuses_parser_geometry():
+    """선언 면적이 없으면 시뮬레이터가 파서 계산값을 써야 한다.
+
+    각자 계산하면 파서는 보정값(12.42), 시뮬레이터는 이중계산(24.84)을 쓰게 된다.
+    """
+    zones = [{"id": "Z1", "geometricArea": 12.42}]
+    surfaces = [
+        {"zone": "Z1", "type": "InteriorFloor",
+         "vertices": [[0, 0, 0], [4, 0, 0], [4, 3.1, 0], [0, 3.1, 0]]},
+        {"zone": "Z1", "type": "InteriorFloor",   # 천장 역할 — 이중계산 유발원
+         "vertices": [[0, 0, 3], [4, 0, 3], [4, 3.1, 3], [0, 3.1, 3]]},
+    ]
+    areas = compute_zone_floor_areas(zones, surfaces)
+    assert areas["Z1"] == 12.42, f"파서 값을 쓰지 않고 재계산했다: {areas['Z1']}"
