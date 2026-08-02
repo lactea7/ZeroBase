@@ -61,9 +61,53 @@ EPlusSimple 비교가 다시 필요하면:
 
 ---
 
+### ASHRAE 140 벤치마크 — Tier A 도입 완료 (2026-08-02, 커밋 `a992944`)
+
+`green-retrofit-backend/tests/ashrae140/` — **자세한 내용은 그 안의 `README.md` 가 정본이다.**
+
+**왜 붙였나**: 결과가 이상할 때마다 후보를 손으로 지워온 상태를 끝내려고.
+(면적 기준 → 지면 열손실 → 내부발열 → 기상 파일을 다 지웠는데 난방 문제가 남았다)
+
+**Tier A** = 표준 케이스 IDF → 우리 EnergyPlus 25.2 직접 실행. **우리 코드를 타지 않는다.**
+나중에 **Tier B**(케이스를 우리 payload 로 → `generate_idf_and_simulate()`)가 실패했을 때
+결함이 우리 번역 계층에 있다는 걸 확정할 **대조군**이다.
+
+| 항목 | 우리 | 공표 범위(6종) | NREL 25.2.0 |
+|---|---|---|---|
+| 600 난방 | 4.2201 MWh | 3.993~4.504 ✅ | 4.325 (−2.4%) |
+| 600 냉방 | 6.2592 MWh | 5.432~6.162 ❌ | 6.042 (+3.6%) |
+
+케이스 하나 실행 **약 1초**. 전체 스위트 128 passed + 1 xfailed.
+`pytest -m "not slow"` 로 제외 가능.
+
+**냉방 초과는 허용오차를 늘리지 않고 `xfail` 로 남겼다** — 통과하게 맞춘 벤치마크는
+가치가 없다. 케이스 사양(200W/0.5ACH/20-27℃/12㎡창/FullInteriorAndExterior)은 전부
+일치하고 타임스텝 1~60 을 다 돌려도 설명되지 않는다. 엔진이 같으므로(둘 다 25.2.0)
+차이는 **모델**에 있다 — 우리 stock IDF 는 9.3 세대 버전 전이본, NREL 값은
+OpenStudio 3.11 measure 생성본. 해소하려면 OpenStudio CLI(약 1GB) 도입이 필요하다.
+
+⚠️ **BESTEST EPW 를 `_data/weather/` 에 넣지 말 것.** `ep_simulator.py:853~` 자동
+탐색이 한국 프로젝트에 Denver 를 물릴 수 있다. 테스트 디렉터리 안에 격리해뒀다.
+
+**Tier B 를 막는 것 5개** (README 에 상세):
+🔴 `idf_builder.py:317` IdealLoads 가 외기를 항상 물음(140 은 기계환기 0) + 습도제어 기본 적용
+🔴 `ep_simulator.py:188` WWR 중앙 스케일 창 → 3m×2m 두 짝 표현 불가
+🔴 `idf_builder.py:94,164` `SolarDistribution`=`FullExterior` 고정(600 은 `FullInteriorAndExterior`)
+🟡 `ep_simulator.py:1242` `add_infiltration()` 인자 없이 호출
+🟡 `ep_simulator.py:853~` 기상 강제 지정 경로 없음
+
+**다음**: ① stock IDF 출처 정리(OpenStudio CLI 판단) ② 케이스 확장(기준값 92행은 이미 있음,
+IDF 만 확보하면 됨) ③ **케이스 간 델타 검사**(600→900 열용량 / 600→610 차양 / 600→620 창방위 —
+델타는 기상·단위·절대 스케일에 둔감하고 물리 번역만 때리므로 절대값보다 예민하다) ④ Tier B.
+
+codex 검토 진행 중: `.relay/ashrae140-tier-a-review.md`
+
+---
+
 ### 다음에 바로 할 일
 
 작은 것부터 적었다. 1~3은 이번 검토에서 확정된 것이고, 4 이하는 이전부터 밀린 것이다.
+(6번 ASHRAE 140 은 Tier A 완료 — 위 절 참조)
 
 **1. 🟢 저신뢰 면적 폴백을 결과에 기록** — 가장 작다, 즉시 가능
    선언 면적이 없으면 Air/Ceiling 기반 윤곽을 부하 기준 면적으로 쓰는데,
