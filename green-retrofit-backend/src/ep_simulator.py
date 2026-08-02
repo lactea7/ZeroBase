@@ -1438,6 +1438,50 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             sim_base_same=baseline_same
         )
 
+        # 계산에 쓴 가정을 결과에 남긴다. 특히 면적은 지표의 분모이자 내부발열의
+        # 기준이라, 어떤 출처의 값을 썼는지 모르면 결과를 해석할 수 없다.
+        # 개방 계단실의 Air 경계 면적처럼 '실제 사용 바닥면적이 아닐 수 있는' 값을
+        # 폴백으로 쓰는 경우가 있어 반드시 드러내야 한다.
+        _area_sources = {"declared": 0, "parser_geometry": 0, "recomputed": 0}
+        _low_conf_zones = []
+        for _z in zones:
+            if (_z.get("declaredArea") or 0) > 0:
+                _area_sources["declared"] += 1
+            elif (_z.get("geometricArea") or _z.get("area") or 0) > 0:
+                _area_sources["parser_geometry"] += 1
+                _low_conf_zones.append(_z.get("id"))
+            else:
+                _area_sources["recomputed"] += 1
+                _low_conf_zones.append(_z.get("id"))
+
+        assumptions = [{
+            "key": "floor_area_basis",
+            "label": "바닥면적 기준",
+            "value": f"선언 {_area_sources['declared']}개 실 / 도형 추정 "
+                     f"{_area_sources['parser_geometry'] + _area_sources['recomputed']}개 실",
+            "note": ("gbXML 이 선언한 실 면적을 우선 사용합니다."
+                     + (f" 선언값이 없는 {len(_low_conf_zones)}개 실은 도형에서 추정했으며, "
+                        f"개방 계단실처럼 바닥 슬래브가 없는 실은 개방부 경계로 추정하므로 "
+                        f"실제 사용 바닥면적과 다를 수 있습니다: "
+                        f"{', '.join(str(z) for z in _low_conf_zones[:5])}"
+                        if _low_conf_zones else "")),
+            "confidence": "low" if _low_conf_zones else "high",
+        }, {
+            "key": "ground_temperature",
+            "label": "지중온도",
+            "value": f"{min(_gt)}~{max(_gt)}℃ (월별)",
+            "note": "EnergyPlus 지침에 따라 실내 설정온도보다 2K 낮은 슬래브 하부 온도를 "
+                    "가정합니다. 기상데이터의 비교란 토양온도가 아닙니다.",
+            "confidence": "medium",
+        }, {
+            "key": "ground_contact",
+            "label": "최하층 바닥 경계",
+            "value": ("지면 접촉" if promote_ground_floors else "단열 경계"),
+            "note": ("자기참조로 기록된 최하층 바닥의 경계조건입니다. "
+                     "지면 접촉으로 바꾸면 지면 열손실이 반영됩니다."),
+            "confidence": "medium",
+        }]
+
         # 적용된 설비 내역 동봉 (입력/자동 배지 표시용)
         hvac_equipment_block = {
             "building": {
@@ -1451,6 +1495,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         }
         result_data["hvacEquipment"] = hvac_equipment_block
         result_data["result"]["hvacEquipment"] = hvac_equipment_block
+        result_data["assumptions"] = assumptions
+        result_data["result"]["assumptions"] = assumptions
 
         # 개선 전 시뮬 결과를 응답에 동봉 → UI가 전/후 에너지를 나란히 비교 가능
         if baseline_result:
