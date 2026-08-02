@@ -97,8 +97,14 @@ class IdfBuilder:
         idf.run(weather_file, output_dir)
     """
 
-    def __init__(self, version: str = "25.2"):
+    def __init__(self, version: str = "25.2", benchmark: dict | None = None):
         self.version = version
+        # ── 벤치마크(ASHRAE 140) 전용 강제 설정 ──
+        # **기본은 None 이고, None 이면 기존 사용자 경로와 100% 동일하게 동작한다.**
+        # 벤치마크는 전역 설정(타임스텝·태양복사 분배·대류 알고리즘 등)을 사양대로
+        # 못박아야 하는데, 그 값을 일반 사용자 기본값으로 바꾸면 안 되기 때문에
+        # 이렇게 opt-in 으로 분리한다. tests/ashrae140/README.md 「Tier B」 참조.
+        self.benchmark = benchmark or {}
         self.objects: list[IdfObject] = []
         # 실기기 HVAC 누적 상태 (idragon의 postprocessor 대체: 누적→finalize_hvac에서 일괄 emit)
         # zone_id -> [(obj_type, name, cool_seq, heat_seq), ...] — 존당 여러 기기 지원
@@ -108,13 +114,14 @@ class IdfBuilder:
         self._add_header()
 
     def _add_header(self):
-        """필수 헤더 객체 추가"""
+        """필수 헤더 객체 추가. 벤치마크 모드에서만 알고리즘·타임스텝을 덮어쓴다."""
+        b = self.benchmark
         self.add("Version", [self.version])
         self.add("SimulationControl", ["No", "No", "No", "No", "Yes"])
-        self.add("SurfaceConvectionAlgorithm:Inside", ["TARP"])
-        self.add("SurfaceConvectionAlgorithm:Outside", ["DOE-2"])
-        self.add("HeatBalanceAlgorithm", ["ConductionTransferFunction"])
-        self.add("Timestep", [4])
+        self.add("SurfaceConvectionAlgorithm:Inside", [b.get("insideConvection", "TARP")])
+        self.add("SurfaceConvectionAlgorithm:Outside", [b.get("outsideConvection", "DOE-2")])
+        self.add("HeatBalanceAlgorithm", [b.get("heatBalance", "ConductionTransferFunction")])
+        self.add("Timestep", [b.get("timestep", 4)])
         self.add("GlobalGeometryRules", ["UpperLeftCorner", "CounterClockwise", "World"])
 
     def add(self, obj_type: str, fields: list = None) -> "IdfBuilder":
@@ -159,9 +166,18 @@ class IdfBuilder:
     # -------------------------------------------------------
 
     def add_building(self, name: str, orientation: float = 0):
-        """Building 객체 추가"""
+        """Building 객체 추가.
+
+        태양복사 분배(SolarDistribution)와 지형(Terrain)은 벤치마크에서만 덮어쓴다.
+        ASHRAE 140 은 `FullInteriorAndExterior` / `Country` 를 쓰지만, 일반 프로젝트는
+        존이 많고 형상이 복잡해 `FullExterior` 가 훨씬 빠르고 안정적이라 기본을 바꾸지 않는다.
+        """
+        b = self.benchmark
         return self.add("Building", [
-            name, orientation, "Suburbs", 0.04, 0.4, "FullExterior", 25, 6
+            name, orientation,
+            b.get("terrain", "Suburbs"), 0.04, 0.4,
+            b.get("solarDistribution", "FullExterior"),
+            25, b.get("minWarmupDays", 6),
         ])
 
     def add_run_period(self, year: int = 2024):
@@ -302,7 +318,16 @@ class IdfBuilder:
         return self
 
     def add_ideal_hvac(self, zone_id: str, oa_schedule: str = "AlwaysOn"):
-        """IdealLoadsAirSystem + 연관 객체 일괄 추가"""
+        """IdealLoadsAirSystem + 연관 객체 일괄 추가.
+
+        ⚠️ 기본 경로는 항상 외기(DesignSpecification:OutdoorAir)를 물린다.
+        ASHRAE 140 은 **기계환기 0, 침기만**이고 잠열도 없으므로 벤치마크에서는
+        외기 객체를 아예 만들지 않고 습도제어를 `None` 으로 명시한다.
+        """
+        b = self.benchmark
+        no_oa = bool(b.get("idealNoOutdoorAir"))
+        no_humidity = bool(b.get("idealNoHumidityControl"))
+
         self.add("ZoneHVAC:EquipmentConnections", [
             zone_id, f"{zone_id}_Equip", f"{zone_id}_Inlet", "",
             f"{zone_id}_Node", f"{zone_id}_Return"
@@ -311,16 +336,34 @@ class IdfBuilder:
             f"{zone_id}_Equip", "SequentialLoad",
             "ZoneHVAC:IdealLoadsAirSystem", f"{zone_id}_Ideal", 1, 1
         ])
-        self.add("DesignSpecification:OutdoorAir", [
-            f"{zone_id}_OA", "Sum", 0.0025, 0.0008, "", "", oa_schedule
-        ])
+        if not no_oa:
+            self.add("DesignSpecification:OutdoorAir", [
+                f"{zone_id}_OA", "Sum", 0.0025, 0.0008, "", "", oa_schedule
+            ])
+        # 습도제어 필드를 비우면 EnergyPlus 가 ConstantSensibleHeatRatio 로 기본
+        # 적용한다 — 잠열이 없어야 하는 벤치마크에서는 명시적으로 None 을 넣는다.
+        dehumid = "None" if no_humidity else ""
+        humid = "None" if no_humidity else ""
         self.add("ZoneHVAC:IdealLoadsAirSystem", [
             f"{zone_id}_Ideal", "", f"{zone_id}_Inlet", "", "",
             50, 13, 0.015, 0.008,
             "NoLimit", "", "", "NoLimit", "", "",
-            "", "", "", "", "", f"{zone_id}_OA"
+            "", "", dehumid, "", humid, "" if no_oa else f"{zone_id}_OA"
         ])
         return self
+
+    def add_other_equipment(self, name: str, zone: str, schedule: str,
+                            design_level_w: float, fraction_latent: float = 0.0,
+                            fraction_radiant: float = 0.0, fraction_lost: float = 0.0):
+        """OtherEquipment — 연료 소비 없이 **순수 발열만** 넣는다.
+
+        ASHRAE 140 의 내부발열(고정 200 W, 잠열 0 / 복사 0.6)이 여기 해당한다.
+        ElectricEquipment 는 전력 소비로 잡혀 요금·1차에너지에 섞이므로 쓸 수 없다.
+        """
+        return self.add("OtherEquipment", [
+            name, "None", zone, schedule, "EquipmentLevel", design_level_w, "", "",
+            fraction_latent, fraction_radiant, fraction_lost,
+        ])
 
     # 실기기 HVAC: VRF(가변냉매유량)는 EnergyPlus 25.2에서 불안정해 제거하고
     # 아래 PTHP로 대체했다. 구현이 필요해지면 git 이력에서 add_vrf_outdoor_unit /

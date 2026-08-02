@@ -656,6 +656,16 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     zones = payload.get("zones", [])
     surfaces = payload.get("surfaces", [])
 
+    # ── 벤치마크(ASHRAE 140) 모드 ──
+    # payload["benchmark"] 가 없으면 bench 는 {} 이고, 아래 모든 분기가 기존 동작
+    # 그대로 흐른다. **일반 사용자 경로의 기본값을 절대 바꾸지 않는다** —
+    # 벤치마크는 사양대로 못박아야 하는 값이 많은데(외기 0, 자동부하 억제,
+    # 태양복사 분배 등) 그것을 기본값으로 만들면 실제 프로젝트가 망가진다.
+    # tests/ashrae140/README.md 「Tier B」 참조.
+    bench = payload.get("benchmark") or {}
+    if bench:
+        print(f"🧪 벤치마크 모드: {bench.get('label', '(무명)')} — 자동 추정을 끄고 사양값을 강제한다")
+
     def _stage(name):
         if on_stage:
             try:
@@ -850,6 +860,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         target_u = _DEFAULT_GLZ["u"]
         target_shgc = _DEFAULT_GLZ["shgc"]
     
+    # 💡 [날씨 파일 강제 지정] — 벤치마크는 지정된 EPW 를 반드시 써야 한다.
+    # 자동 탐색에 맡기면 `_data/weather` 의 한국 EPW 가 잡힌다. 반대로 벤치마크
+    # EPW 를 `_data/weather` 에 넣어 해결하려 하면, 이번엔 한국 프로젝트가
+    # Denver 를 집을 수 있다 — 그래서 탐색 대상 밖에 두고 여기서 직접 지정한다.
+    _bench_epw = bench.get("weatherFile")
+    if _bench_epw:
+        weather_file_abs = os.path.abspath(_bench_epw)
+        if not os.path.isfile(weather_file_abs):
+            raise FileNotFoundError(f"벤치마크 기상 파일이 없습니다: {weather_file_abs}")
+        print(f"🌤️ [벤치마크] 기상 강제 지정: {os.path.basename(weather_file_abs)}")
+
     # 💡 [날씨 파일 자동 탐색] — _data/weather 우선, 없으면 _data 전체.
     # (예전처럼 프로젝트 루트 전체를 걸으면 node_modules/.git까지 매 요청마다 순회하게 됨)
     weather_dir = os.path.join(db_dir, "weather")
@@ -862,7 +883,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                 epw_files.append(os.path.join(root_walk, f))
     epw_files.sort()  # 동일 조건 다중 매칭 시 선택이 순회 순서에 좌우되지 않도록 고정
 
-    if epw_files:
+    if _bench_epw:
+        pass          # 위에서 강제 지정했다 — 자동 선택이 덮어쓰지 않도록 건너뛴다
+    elif epw_files:
         target_key = location_key.lower()
         city_name = location_key.split('_')[-1].lower()
         
@@ -899,8 +922,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     # 💡 2단계: IDF 생성 (IdfBuilder 객체 패턴)
     # =========================================================
     idf_version = os.environ.get("EP_VERSION", "25.2")
-    idf = IdfBuilder(version=idf_version)
-    
+    idf = IdfBuilder(version=idf_version, benchmark=bench)
+
     # 건물 기본 정보
     idf.add_building(project_data.get('name', 'BEM_Project'), project_data.get('orientation', 0))
     idf.add_run_period()
@@ -1011,20 +1034,74 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             
             idf.add_construction(f"Const_{s['id']}", layer_names)
             
+        elif s.get("layers"):
+            # ── 명시 레이어 모드 ──
+            # 층 구성을 바깥→안 순서로 그대로 만든다. U-value 합성과 달리 **열용량이
+            # 보존된다** — ASHRAE 140 의 600(경량) vs 900(중량) 차이가 바로 이것이라
+            # 합성 구성체(Concrete_Heavy + 단열 + Concrete_Heavy)로는 표현할 수 없다.
+            # 현재 gbXML 파서는 이 키를 만들지 않으므로 기존 경로에는 영향이 없다.
+            layer_names = []
+            for li, layer in enumerate(s["layers"]):
+                mat_name = f"L{li}_{layer.get('name', 'mat')}_{s['id']}"
+                if layer.get("thermalResistance") is not None:
+                    # 질량 없는 저항층(공기층·표면저항 등)
+                    idf.add("Material:NoMass", [
+                        mat_name, layer.get("roughness", "Smooth"),
+                        float(layer["thermalResistance"]),
+                        layer.get("thermalAbsorptance", 0.9),
+                        layer.get("solarAbsorptance", 0.7),
+                        layer.get("visibleAbsorptance", 0.7),
+                    ])
+                else:
+                    idf.add("Material", [
+                        mat_name, layer.get("roughness", "Smooth"),
+                        float(layer["thickness"]), float(layer["conductivity"]),
+                        float(layer["density"]), float(layer["specificHeat"]),
+                        layer.get("thermalAbsorptance", 0.9),
+                        layer.get("solarAbsorptance", 0.7),
+                        layer.get("visibleAbsorptance", 0.7),
+                    ])
+                layer_names.append(mat_name)
+            idf.add_construction(f"Const_{s['id']}", layer_names)
+
         else:
             # 기본 모드 (단열재만 변경 또는 원본)
             r_insul = max(0.01, (1.0 / u_val) - 0.102)
             t_insul = r_insul * 0.04
-            
+
             idf.add_material(f"Insul_{s['id']}", "Smooth", t_insul, 0.04, 50, 800)
             idf.add_construction(f"Const_{s['id']}", ["Concrete_Heavy", f"Insul_{s['id']}", "Concrete_Heavy"])
-        
+
         wwr = s.get("wwr", 0)
         if wwr > 0:
-            # 창호 U/SHGC: glazingId(튜닝) → 실측 windowU → 기본. 에너지·비용을 동일 기준으로.
-            wu, wsh = _window_ushgc(s)
-            idf.add_glazing_simple(f"Glass_{s['id']}", wu, wsh)
-            idf.add_construction(f"WinConst_{s['id']}", [f"Glass_{s['id']}"])
+            if s.get("glazingLayers"):
+                # 상세 유리(WindowMaterial:Glazing/Gas). SimpleGlazingSystem 은 U/SHGC 만
+                # 맞출 뿐 입사각 의존성이 달라 일사 취득이 어긋난다 — 벤치마크엔 부족하다.
+                gl_names = []
+                for gi, g in enumerate(s["glazingLayers"]):
+                    gname = f"G{gi}_{s['id']}"
+                    if g.get("gasType"):
+                        idf.add("WindowMaterial:Gas", [gname, g["gasType"], float(g["thickness"])])
+                    else:
+                        idf.add("WindowMaterial:Glazing", [
+                            gname, "SpectralAverage", "", float(g["thickness"]),
+                            float(g["solarTransmittance"]), float(g["solarReflectance"]),
+                            float(g.get("solarReflectanceBack", g["solarReflectance"])),
+                            float(g.get("visibleTransmittance", g["solarTransmittance"])),
+                            float(g.get("visibleReflectance", g["solarReflectance"])),
+                            float(g.get("visibleReflectanceBack", g["solarReflectance"])),
+                            float(g.get("infraredTransmittance", 0.0)),
+                            float(g.get("emissivityFront", 0.84)),
+                            float(g.get("emissivityBack", 0.84)),
+                            float(g.get("conductivity", 1.0)),
+                        ])
+                    gl_names.append(gname)
+                idf.add_construction(f"WinConst_{s['id']}", gl_names)
+            else:
+                # 창호 U/SHGC: glazingId(튜닝) → 실측 windowU → 기본. 에너지·비용을 동일 기준으로.
+                wu, wsh = _window_ushgc(s)
+                idf.add_glazing_simple(f"Glass_{s['id']}", wu, wsh)
+                idf.add_construction(f"WinConst_{s['id']}", [f"Glass_{s['id']}"])
 
     # 스케줄
     idf.add_standard_schedules()
@@ -1048,6 +1125,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     use_pthp = bool(is_geothermal or _heat_src_id == 2)
     fuel_type, fuel_eff = FUEL_SYSTEMS.get(_heat_src_id, (None, None)) if not use_pthp else (None, None)
     use_fuel_system = fuel_type is not None
+    # ASHRAE 140 은 용량 무제한·효율 100% 의 이상부하를 요구한다. 실기기(PTHP/보일러)로는
+    # 사양을 표현할 수 없으므로 벤치마크에서는 열원 설정과 무관하게 이상부하를 강제한다.
+    if bench.get("forceIdealLoads"):
+        use_pthp = use_fuel_system = False
+        fuel_type = fuel_eff = None
     hvac_mode = "pthp" if use_pthp else ("fuel" if use_fuel_system else "ideal")
 
     # 사용자 입력 실기기(등급/연식) → COP·효율. 미입력이면 기존 기본값과 동일.
@@ -1092,7 +1174,21 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         idf.add_schedule_compact("CustomOpSch", "AnyNumber", custom_op_text)
     
     # AirflowNetwork 기본 설정 기동
-    idf.setup_airflow_network()
+    #
+    # ⚠️ **AFN 이 켜지면 ZoneInfiltration 은 아예 시뮬레이션되지 않는다.**
+    # EnergyPlus 가 명시적으로 경고한다:
+    #   "Specified AirflowNetwork Control = MultizoneWithoutDistribution and
+    #    ZoneInfiltration:* objects are present. ZoneInfiltration objects will
+    #    not be simulated."
+    # 즉 이중계산이 아니라 **대체**다. 아래 add_infiltration(ach=...) 호출은
+    # AFN 이 켜진 존에서는 사실상 무시되고, 실제 침기는 WallCrack 계수
+    # (setup_airflow_network 의 0.01 / 0.65)가 결정한다.
+    # ASHRAE 140 케이스 600 에서 실측하면 AFN 쪽 공기교환이 지정 0.5 ACH 보다
+    # 훨씬 커서 난방부하가 4.33 → 6.50 MWh (+50%) 로 부풀었다.
+    # 벤치마크는 지정 침기만 써야 하므로 끈다.
+    disable_afn = bool(bench.get("disableAirflowNetwork"))
+    if not disable_afn:
+        idf.setup_airflow_network()
 
     # Zone별 실제 Outdoors 표면 개수 사전 계산 (AFN 최소 표면 제약 조건 해결)
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
@@ -1114,7 +1210,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                 if z:
                     outdoor_counts[z] = outdoor_counts.get(z, 0) + 1
     
-    valid_afn_zones = set(z for z, count in outdoor_counts.items() if count >= 2)
+    valid_afn_zones = set() if disable_afn else set(
+        z for z, count in outdoor_counts.items() if count >= 2)
 
     # 존별 설정
     for z in zones:
@@ -1138,7 +1235,15 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         cool_set = z.get("coolingSetpoint", 26.0)
 
         # 용도별 운영 스케줄 결정
-        if use_custom:
+        if bench.get("constantSetpoints"):
+            # ASHRAE 140 은 **연중 상시 고정 설정온도**다(케이스 600 = 20/27℃).
+            # 아키타입 스케줄은 야간 16℃ setback 과 냉방기간(5~10월) 마스크를 걸어
+            # 난방을 늘리고 냉방을 크게 줄인다 — 사양과 전혀 다른 모델이 된다.
+            # 자동 추정을 끄고 지정값을 그대로 상시 적용한다.
+            op_sch = "AlwaysOn"
+            heat_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {heat_set}"
+            cool_sch_text = f"Through: 12/31, For: AllDays, Until: 24:00, {cool_set}"
+        elif use_custom:
             op_sch = "CustomOpSch"
             
             heat_wd = condense_daily_schedule("Weekdays", profiles.get("weekday", {}).get("heating", [15]*24))
@@ -1210,17 +1315,24 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             v = z.get(key)
             return fallback if v is None else v
 
-        ppl_dens = _load_or_default("peopleDensity", loads["people"])
-        light_p = _load_or_default("lightingPower", loads["lighting"])
-
-        base_equip_p = _load_or_default("equipmentPower", loads["equipment"])
-        outlet_p = calc_outlet_power_density(z, z_area)
-        load_type = z.get("outletLoadType", "sum")
-        if load_type == "max":
-            equip_p = max(base_equip_p, outlet_p)
+        # 벤치마크는 내부발열을 사양대로 못박는다(케이스 600 = 순수 현열 200 W).
+        # 용도별 자동 추정(인원·조명·기기·급탕·콘센트)이 섞이면 표현 자체가 불가능하다.
+        suppress_auto = bool(bench.get("suppressAutoLoads"))
+        if suppress_auto:
+            ppl_dens = light_p = equip_p = 0.0
+            outlet_p = 0.0
         else:
-            equip_p = base_equip_p + outlet_p
-            
+            ppl_dens = _load_or_default("peopleDensity", loads["people"])
+            light_p = _load_or_default("lightingPower", loads["lighting"])
+
+            base_equip_p = _load_or_default("equipmentPower", loads["equipment"])
+            outlet_p = calc_outlet_power_density(z, z_area)
+            load_type = z.get("outletLoadType", "sum")
+            if load_type == "max":
+                equip_p = max(base_equip_p, outlet_p)
+            else:
+                equip_p = base_equip_p + outlet_p
+
         if outlet_p > 0:
             print(f"   Zone \"{z['id']}\" 콘센트 부하 계산: 개수={z.get('outletCount')}, 면적={z_area:.1f}m², 부하량={outlet_p:.2f} W/m² (방식={load_type}) → 최종 기기부하={equip_p:.2f} W/m²")
         
@@ -1238,8 +1350,23 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
             idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, light_p)
         if equip_p > 0:
             idf.add_equipment(f"{z_id}_Eqp", z_id, op_sch, equip_p)
-        
-        idf.add_infiltration(f"{z_id}_Inf", z_id)
+
+        # 벤치마크 고정 발열: OtherEquipment(연료 None)로 넣어 전력 소비에 섞이지 않게 한다.
+        for i, oe in enumerate(bench.get("otherEquipment") or []):
+            idf.add_other_equipment(
+                f"{z_id}_BenchEq{i}", z_id, oe.get("schedule", "AlwaysOn"),
+                float(oe.get("designLevelW", 0.0)),
+                fraction_latent=float(oe.get("fractionLatent", 0.0)),
+                fraction_radiant=float(oe.get("fractionRadiant", 0.0)),
+                fraction_lost=float(oe.get("fractionLost", 0.0)),
+            )
+
+        # 침기: 기본 0.5 ACH 는 케이스 600·900 과 우연히 일치할 뿐이다. 명시할 수 있어야 한다.
+        _ach = bench.get("infiltrationAch")
+        if _ach is None:
+            idf.add_infiltration(f"{z_id}_Inf", z_id)
+        else:
+            idf.add_infiltration(f"{z_id}_Inf", z_id, ach=float(_ach))
 
     # 표면 지오메트리
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
@@ -1326,6 +1453,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
                 obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
             else:
                 obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
+
+            # 경계조건·노출 명시 지정. 예를 들어 ASHRAE 140 의 바닥은 Outdoors 이면서
+            # NoSun/NoWind 다(고단열 바닥으로 지면 결합을 무시하는 5.2절 관례).
+            # 자동 추정으로는 표현할 수 없어 표면별로 덮어쓸 수 있게 한다.
+            # gbXML 파서는 이 키들을 만들지 않으므로 기존 경로에는 영향이 없다.
+            if s.get("boundaryCondition"):
+                obc = s["boundaryCondition"]
+            if s.get("sunExposure"):
+                sun = s["sunExposure"]
+            if s.get("windExposure"):
+                wind = s["windExposure"]
 
             idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
                             obc, sun, wind, verts)
