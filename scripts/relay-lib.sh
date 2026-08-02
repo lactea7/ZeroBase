@@ -202,25 +202,89 @@ GEMINI_PROMPT='아래는 한 코드 수정을 놓고 두 검토자(Claude, codex
 _arbitrate_in_panel() {
   local surface=$1 history_file=$2 out_file=$3
   local rc_file="$out_file.rc" err_file="$out_file.err"
-  local prompt_file="$out_file.prompt"
+  local prompt_file="$out_file.prompt" run_file="$out_file.run.sh"
   rm -f "$rc_file" "$err_file" "$out_file"
   printf '%s' "$GEMINI_PROMPT" > "$prompt_file"
 
-  # 보내는 명령은 반드시 한 줄이어야 한다(TUI 는 줄바꿈이 곧 전송).
-  # 긴 프롬프트·이력은 파일 경로로만 참조해 명령을 짧게 유지한다.
-  local cmd="$GEMINI_BIN -p \"\$(cat '$prompt_file')\" --skip-trust < '$history_file' > '$out_file' 2> '$err_file'; echo \$? > '$rc_file'"
-  "$CMUX" send --surface "$surface" "$cmd" >/dev/null || {
+  # ⚠️ 예전엔 `> out 2> err` 로 전부 리다이렉트했다. 결과 회수는 됐지만
+  # **패널에는 아무것도 안 찍혀서** 사용자 눈에는 gemini 가 죽은 것처럼 보였다.
+  # 이제 러너 스크립트를 따로 만들어 진행률과 응답을 화면에 함께 출력한다.
+  # (보내는 명령은 한 줄이어야 하므로 — TUI 는 줄바꿈이 곧 전송 — 러너를 파일로 둔다)
+  cat > "$run_file" <<RUNNER
+#!/usr/bin/env bash
+GB=$(printf '%q' "$GEMINI_BIN")
+PROMPT_F=$(printf '%q' "$prompt_file")
+HIST_F=$(printf '%q' "$history_file")
+OUT_F=$(printf '%q' "$out_file")
+ERR_F=$(printf '%q' "$err_file")
+RC_F=$(printf '%q' "$rc_file")
+
+printf '\n\033[1;36m═══ gemini 중재 시작 %s ═══\033[0m\n' "\$(date '+%H:%M:%S')"
+printf '  이력 %s bytes / 프롬프트 %s bytes\n\n' \
+  "\$(wc -c < "\$HIST_F" | tr -d ' ')" "\$(wc -c < "\$PROMPT_F" | tr -d ' ')"
+
+"\$GB" -p "\$(cat "\$PROMPT_F")" --skip-trust < "\$HIST_F" > "\$OUT_F" 2> "\$ERR_F" &
+pid=\$!
+start=\$(date +%s)
+# 헤드리스 gemini 는 끝날 때까지 stdout 에 아무것도 안 뱉는다. 게다가 API 가 503/429 를
+# 주면 CLI 가 **조용히 백오프 재시도**하므로 겉보기엔 죽은 것과 구별되지 않는다.
+# → 경과·수신량과 함께 stderr 의 최신 상태(재시도/에러)를 같이 찍는다.
+last_note=''
+while kill -0 "\$pid" 2>/dev/null; do
+  note=\$(grep -oE 'Attempt [0-9]+ failed with status [0-9]+|status [0-9]{3}|RESOURCE_EXHAUSTED|UNAVAILABLE' \
+         "\$ERR_F" 2>/dev/null | tail -1)
+  if [ -n "\$note" ] && [ "\$note" != "\$last_note" ]; then
+    printf '\r\033[K  \033[31m⚠ %s\033[0m\n' "\$note"   # 상태가 바뀔 때만 줄을 남긴다
+    last_note=\$note
+  fi
+  printf '\r  \033[33m⏳ %4d초  수신 %6s bytes%s\033[0m\033[K' \
+    "\$(( \$(date +%s) - start ))" "\$(wc -c < "\$OUT_F" 2>/dev/null | tr -d ' ')" \
+    "\${last_note:+  — 재시도 중: \$last_note}"
+  sleep 2
+done
+wait "\$pid"; rc=\$?
+printf '\r\033[K'
+
+if [ "\$rc" = 0 ]; then
+  printf '\033[1;32m─── 응답 (%d초) ───\033[0m\n' "\$(( \$(date +%s) - start ))"
+  cat "\$OUT_F"
+else
+  printf '\033[1;31m─── 실패 rc=%s ───\033[0m\n' "\$rc"
+  tail -20 "\$ERR_F"
+fi
+printf '\n\033[1;36m═══ 종료 %s ═══\033[0m\n' "\$(date '+%H:%M:%S')"
+# rc 파일은 화면 출력이 끝난 뒤 마지막에 쓴다 — 호출자가 이걸 보고 회수한다
+echo "\$rc" > "\$RC_F"
+RUNNER
+  chmod +x "$run_file"
+
+  "$CMUX" send --surface "$surface" "bash $(printf '%q' "$run_file")" >/dev/null || {
     echo "ERROR: $surface 에 명령 전송 실패" >&2; return 1; }
   sleep 1
   "$CMUX" send-key --surface "$surface" Enter >/dev/null
 
-  echo "▸ gemini 실행 중 ($surface 패널에서 진행 상황을 볼 수 있습니다)" >&2
+  echo "▸ gemini 실행 중 ($surface 패널에 경과 초와 수신 바이트가 갱신됩니다)" >&2
   local waited=0
   while [ "$waited" -lt "$POLL_TIMEOUT" ]; do
     sleep 3; waited=$((waited + 3))
     [ -f "$rc_file" ] && break
+    # 호출한 쪽 터미널에도 살아있다는 신호를 남긴다(15초마다).
+    # stderr 의 재시도 상태를 함께 보여야 "멈춤"과 "503 백오프"를 구별할 수 있다.
+    if [ $((waited % 15)) -eq 0 ]; then
+      printf '  … %d초 경과 (수신 %s bytes)%s\n' \
+        "$waited" "$(wc -c < "$out_file" 2>/dev/null | tr -d ' ' || echo 0)" \
+        "$(grep -oE 'Attempt [0-9]+ failed with status [0-9]+' "$err_file" 2>/dev/null \
+           | tail -1 | sed 's/^/ — /')" >&2
+    fi
   done
-  [ -f "$rc_file" ] || { echo "TIMEOUT: ${POLL_TIMEOUT}초 안에 gemini 가 끝나지 않았습니다." >&2; return 1; }
+  if [ ! -f "$rc_file" ]; then
+    echo "TIMEOUT: ${POLL_TIMEOUT}초 안에 gemini 가 끝나지 않았습니다." >&2
+    # 원인을 삼키지 않는다 — 대부분 API 과부하(503) 백오프다
+    local why
+    why=$(grep -oE 'Attempt [0-9]+ failed with status [0-9]+|"status": *"[A-Z_]+"' "$err_file" 2>/dev/null | tail -3)
+    [ -n "$why" ] && printf '  원인(추정): %s\n' "$why" >&2
+    return 1
+  fi
 
   if grep -qiE "$LIMIT_RE" "$out_file" "$err_file" 2>/dev/null; then
     echo "🛑 STOP: gemini 에서 사용 한도 신호를 감지했습니다." >&2
