@@ -9,6 +9,13 @@ import pytest
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 
+
+def pytest_configure(config):
+    # ASHRAE 140 벤치마크는 EnergyPlus 실행이 필요해 평상시 스위트에서 뺄 수 있어야 한다.
+    #   전체:   pytest
+    #   빠르게: pytest -m "not slow"
+    config.addinivalue_line("markers", "slow: EnergyPlus 실행이 필요한 느린 시험")
+
 FIXTURE_DIR = os.path.join(BACKEND_DIR, "tests", "fixtures")
 CSV_PATH = os.path.join(FIXTURE_DIR, "eplusout_monthly.csv")
 BUILDING_PATH = os.path.join(FIXTURE_DIR, "ark_building.json")
