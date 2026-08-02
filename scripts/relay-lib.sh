@@ -21,7 +21,13 @@ OLLAMA_DONE="<<<OLM_DONE_$NONCE>>>"
 # 한도/레이트 리밋 신호. 맨 숫자 '429' 를 그대로 넣으면 안 된다 —
 # 커밋 해시(ef429e3), 파일 크기, 줄 번호 등 어디에나 나타나 오탐한다.
 # 실제로 커밋 해시 때문에 정상 검토가 중단됐다. HTTP 문맥이 있을 때만 인정한다.
-LIMIT_RE='usage limit|rate limit|quota exceeded|out of credits|insufficient credit|사용 한도|사용량 초과|limit reached|too many requests|http[^0-9]{0,12}429|status[^0-9]{0,12}429|try again (later|in [0-9])'
+# 여기 넣는 것은 '기다려도 안 풀리는 한도'만이어야 한다.
+# 넣지 말 것:
+#   - 맨 숫자 429 → 커밋 해시(ef429e3)·줄 번호·면적값에 걸린다 (실제로 겪음)
+#   - 'try again later' → 503/500 같은 **일시적** 과부하도 이렇게 말한다.
+#     게다가 CLI 가 자체 백오프 재시도 중인 로그를 보고 중단시켜, 성공할 호출을 죽였다.
+# 503·UNAVAILABLE·high demand 는 재시도하면 풀리므로 한도로 취급하지 않는다.
+LIMIT_RE='usage limit|rate limit|quota exceeded|out of credits|insufficient credit|사용 한도|사용량 초과|limit reached|too many requests|http[^0-9]{0,12}429|status[^0-9]{0,12}429|RESOURCE_EXHAUSTED'
 
 # --- 패널 자동 탐지 -----------------------------------------------------------
 # 화면 내용으로 codex/ollama 패널을 식별한다. 세션마다 surface 번호가 바뀌므로
@@ -162,6 +168,57 @@ send_and_wait() {
   done
   echo "TIMEOUT: $surface 에서 ${POLL_TIMEOUT}초 안에 마커를 못 받았습니다." >&2
   return 1
+}
+
+# --- Gemini 중재 (패널을 거치지 않는 직접 호출) --------------------------------
+# cmux 패널 방식은 마커·청크 분할·화면 파싱이 필요해 실패 지점이 많았다.
+# gemini 는 -p 로 헤드리스 실행되고 stdin 을 프롬프트에 덧붙이므로 그 전부가 불필요하다.
+#
+# 역할 분담 근거(실측):
+#   codex  — 저장소를 읽고 근거를 대는 코드 검토
+#   gemma  — 단일 문서 압축·분류 (20,662자까지 성공, 로컬이라 한도를 쓰지 않음)
+#   gemini — 문서 간 상태 대조(중재). gemma 는 13,433자 입력에서 두 번 실패했고,
+#            더 큰 20,662자 단일 문서 요약은 성공했다 → 크기가 아니라 과업 성격 문제다.
+GEMINI_BIN=${GEMINI_BIN:-gemini}
+
+arbitrate_with_gemini() {
+  local history_file=$1 out_file=$2
+  [ -s "$history_file" ] || { echo "ERROR: 이력 파일이 비어있습니다: $history_file" >&2; return 1; }
+
+  local prompt='아래는 한 코드 수정을 놓고 두 검토자(Claude, codex)가 시간순으로 주고받은 기록이다.
+[round N] 표시로 순서가 적혀 있다. 뒤 라운드가 앞 라운드를 덮어쓴다 — 앞 라운드에서 codex 가
+지적한 것을 뒤 라운드에서 Claude 가 "반영했다"고 적었으면 그것은 해결된 항목이므로 미해결
+쟁점에 넣지 마라. 원문에 없는 사실이나 수치를 지어내지 마라.
+
+다음 형식으로만 답하라.
+
+## 1. 이미 해결된 것
+- 항목 — (round N 지적 → round M 반영)
+
+## 2. 아직 갈리거나 미해결로 남은 것
+- 항목 — Claude 입장: … / codex 지적: …
+
+## 3. 판정하려면 확인해야 할 것
+- …'
+
+  # --skip-trust: 헤드리스 실행 시 신뢰 디렉터리 확인을 건너뛴다.
+  if ! "$GEMINI_BIN" -p "$prompt" --skip-trust < "$history_file" > "$out_file" 2>"$out_file.err"; then
+    echo "ERROR: gemini 호출 실패" >&2
+    tail -5 "$out_file.err" >&2
+    return 1
+  fi
+
+  # 한도 신호는 응답·에러 양쪽에서 본다.
+  if grep -qiE "$LIMIT_RE" "$out_file" "$out_file.err" 2>/dev/null; then
+    echo "🛑 STOP: gemini 에서 사용 한도/레이트 리밋 신호를 감지했습니다." >&2
+    grep -ihE "$LIMIT_RE" "$out_file" "$out_file.err" 2>/dev/null | head -3 >&2
+    return 99
+  fi
+
+  # 도구 폴백 경고 등 잡음 제거
+  sed -i '' '/^Ripgrep is not available/d' "$out_file" 2>/dev/null || true
+  [ -s "$out_file" ] || { echo "ERROR: gemini 응답이 비어있습니다." >&2; return 1; }
+  return 0
 }
 
 # 한도 감지(99)는 재시도 없이 그대로 종료시킨다. set -e 가 파이프라인 안에서는
