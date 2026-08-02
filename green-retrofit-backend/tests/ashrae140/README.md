@@ -55,11 +55,13 @@ criteria 와 테스트 그룹별 최소 통과 규칙을 따로 둔다** — 그
 
 | 시험 | 성격 | 개수 |
 |---|---|---|
-| `test_case_matches_reference` | NREL 값 대비 ±1.0% | 8 |
-| `test_case_delta_matches_reference` | **격리된 물리 효과** — 절대값보다 예민 | 6 |
-| `test_benchmark_config_is_opt_in` | 벤치마크 설정이 사용자 기본값으로 새지 않는지 | 1 |
+| `test_case_matches_reference` | NREL 값 대비 ±0.75% 또는 ±0.02 MWh | 8 |
+| `test_case_delta_matches_reference` | **격리된 물리 효과** — 부호 + ±0.02 MWh | 6 |
+| `test_benchmark_defaults_do_not_leak_into_builder` | `IdfBuilder` 전역 설정 격리 | 1 |
+| `test_benchmark_key_is_rejected_without_opt_in` | 🔒 임의 payload 의 `benchmark` 거부 | 1 |
+| `test_plain_payload_keeps_user_path_objects` | 조립된 IDF 로 사용자 경로 보존 확인 | 1 |
 
-전체 **약 34초**.
+전체 **약 44초**.
 
 ---
 
@@ -123,7 +125,7 @@ criteria 와 테스트 그룹별 최소 통과 규칙을 따로 둔다** — 그
 
 ```bash
 cd green-retrofit-backend
-../.venv/bin/python -m pytest tests/ashrae140/ -q      # 약 12초
+../.venv/bin/python -m pytest tests/ashrae140/ -q      # 약 44초
 ../.venv/bin/python -m pytest -m "not slow"            # 벤치마크 제외
 ```
 
@@ -209,14 +211,26 @@ IdealLoads 제어, 출력 집계, benchmark payload 변환 중 무엇이든 원�
    이중계산이 아니라 **대체**다. `add_infiltration(ach=...)` 은 AFN 이 켜진 존에서
    무시되고, 실제 침기는 `WallCrack` 계수(`setup_airflow_network` 의 0.01 / 0.65)가
    정한다. 케이스 600 에서 그 차이가 난방 4.33 → 6.50 MWh(**+50%**)였다.
-   AFN 은 외기 접촉면 2개 이상인 존에 켜지므로 **사실상 거의 모든 존**이 해당한다.
-   → **실제 프로젝트의 침기 가정이 코드 표기와 다르다. 별도 조사 항목.**
+   AFN 은 외기 접촉면 **2개 이상**인 존에만 켜진다. 즉 외곽 존은 AFN, 내부 존이나
+   외기면이 하나뿐인 존은 `ZoneInfiltration` — **한 프로젝트 안에서 서로 다른 침기
+   모델이 조용히 섞인다.** ("사실상 전 존"이라고 썼던 것은 과장이었다)
+
+   더 구조적인 문제: `WallCrack` 의 `0.01` 은 무차원 누기율이 아니라 **기준조건
+   질량유량계수(kg/s·Pa^n)** 이고, 모든 Outdoors 표면에 동일하게 factor 1.0 으로
+   붙는다. 면적·둘레·부재로 정규화돼 있지 않으므로 **총 누기가 외피 기밀성이 아니라
+   표면 개수에 좌우된다** — 같은 건물을 더 잘게 쪼개면 누기가 늘어난다.
+   → **실제 프로젝트의 침기 가정이 코드 표기와 다르고 물리적 근거도 없다. 최우선 조사 항목.**
 
 ### 벤치마크 설정 (`payload["benchmark"]`)
 
 **없으면 기존 사용자 경로와 100% 동일하게 동작한다.** 벤치마크는 실제 프로젝트에
-적용하면 안 되는 값을 강제하므로 기본값으로 새면 안 된다 —
-`test_benchmark_config_is_opt_in` 이 이 격리를 지킨다.
+적용하면 안 되는 값을 강제하므로 기본값으로 새면 안 된다.
+
+🔒 **기본값은 거부다.** `generate_idf_and_simulate(..., allow_benchmark=True)` 로
+명시한 내부 호출에서만 받아들인다. 이 키를 임의 API 요청에서 신뢰하면 외부 사용자가
+`weatherFile` 로 **임의 경로의 파일을 읽게** 만들 수 있고, AFN·자동부하·HVAC·
+내부발열을 조작해 자기 결과의 물리 조건을 통째로 바꿀 수 있다.
+`test_benchmark_key_is_rejected_without_opt_in` 이 이걸 지킨다.
 
 | 키 | 무엇을 강제하나 |
 |---|---|
@@ -233,7 +247,9 @@ IdealLoads 제어, 출력 집계, benchmark payload 변환 중 무엇이든 원�
 
 ### 파이프라인 표현력 확장
 
-기존 payload 에 없는 키라 사용자 경로에는 영향이 없다.
+기존 gbXML 파서가 이 키들을 만들지 않으므로 **지금까지의 payload 에는 영향이 없다.**
+다만 "사용자 경로 무영향"이 아니라 **일반 payload 에도 새로 허용된 기능**이라는 점에
+유의할 것 — 앞으로 파서가 이 키를 채우기 시작하면 동작이 달라진다.
 
 - **`surface["layers"]`** — 층 구성을 바깥→안 그대로 생성. U-value 합성과 달리
   **열용량이 보존된다.** `Material:NoMass`(`thermalResistance`)도 지원.

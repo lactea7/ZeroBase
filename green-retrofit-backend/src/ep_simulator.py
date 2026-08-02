@@ -651,7 +651,8 @@ def _evaluate_alternatives(payload: dict, result_data: dict, temp_dir: str, stag
               f"{'' if rec['advisable'] else ' → 비권장(장기 손해)'}")
 
 
-def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
+def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
+                              allow_benchmark: bool = False):
     project_data = payload.get("projectData", {})
     zones = payload.get("zones", [])
     surfaces = payload.get("surfaces", [])
@@ -661,8 +662,16 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
     # 그대로 흐른다. **일반 사용자 경로의 기본값을 절대 바꾸지 않는다** —
     # 벤치마크는 사양대로 못박아야 하는 값이 많은데(외기 0, 자동부하 억제,
     # 태양복사 분배 등) 그것을 기본값으로 만들면 실제 프로젝트가 망가진다.
+    #
+    # 🔒 **기본값이 거부다.** allow_benchmark=True 로 명시한 내부 호출(=벤치마크
+    # 테스트)에서만 받아들인다. 이 키를 임의 API 요청에서 신뢰하면 외부 사용자가
+    # `weatherFile` 로 **임의 경로의 파일을 읽게** 만들 수 있고, AFN·자동부하·
+    # HVAC·내부발열을 조작해 자기 결과의 물리 조건을 통째로 바꿀 수 있다.
     # tests/ashrae140/README.md 「Tier B」 참조.
     bench = payload.get("benchmark") or {}
+    if bench and not allow_benchmark:
+        print("⚠️ payload 에 benchmark 키가 있지만 허용되지 않은 호출이라 무시한다")
+        bench = {}
     if bench:
         print(f"🧪 벤치마크 모드: {bench.get('label', '(무명)')} — 자동 추정을 끄고 사양값을 강제한다")
 
