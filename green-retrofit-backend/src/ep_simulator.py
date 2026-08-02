@@ -1368,6 +1368,23 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None):
         else:
             idf.add_infiltration(f"{z_id}_Inf", z_id, ach=float(_ach))
 
+    # ── 외부 차양 형상 ──
+    # 차양은 창의 일사 취득을 직접 깎는다(케이스 610/630 이 이것만 다르다).
+    # gbXML 파서는 아직 Shade 요소를 읽지 않으므로 지금은 payload 로만 들어온다 —
+    # 기존 경로에는 이 키가 없어 영향이 없다.
+    _shades = payload.get("shadingSurfaces") or []
+    if _shades:
+        # 투과율 0(불투명) 상수 스케줄 — 차양마다 만들지 않고 하나만 공유한다
+        idf.add_schedule_compact("ShadeTransmittance", "Fraction",
+                                 "Through: 12/31, For: AllDays, Until: 24:00, 0.0")
+    for sh in _shades:
+        flat = [c for v in sh["vertices"] for c in v]
+        idf.add("Shading:Building:Detailed", [
+            sh["id"], "ShadeTransmittance", len(sh["vertices"]), *flat,
+        ])
+    if _shades:
+        print(f"🌤️ 외부 차양 {len(_shades)}개 적용")
+
     # 표면 지오메트리
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
     skipped_count = 0

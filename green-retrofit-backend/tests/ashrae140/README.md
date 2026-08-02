@@ -38,18 +38,28 @@ criteria 와 테스트 그룹별 최소 통과 규칙을 따로 둔다** — 그
 - `ep_simulator.py` 의 기상 파일 탐색 — **애플리케이션 기상 처리는 전혀 타지 않는다**
 - 한국 프로젝트의 기상 선택
 
-**존재 이유는 Tier B 의 대조군이다.** Tier A 가 정상인데 Tier B 가 실패하면
-원인을 우리 번역 계층 쪽으로 좁힐 수 있다. 지금은 Tier A 만 구현돼 있다.
+**Tier A 는 Tier B 의 대조군이다.** Tier A 가 정상인데 Tier B 가 실패하면
+원인을 우리 번역 계층 쪽으로 좁힐 수 있다.
 
-### 시험 구성 (`test_tier_a_engine.py`)
+### 시험 구성
+
+**Tier A** (`test_tier_a_engine.py`) — 케이스 19종 × 2지표
 
 | 시험 | 성격 | 개수 |
 |---|---|---|
 | `test_reproduces_nrel_reference_run` | **주 관문.** NREL 25.2.0 값 대비 ±0.5% | 38 |
 | `test_within_reference_program_range` | 비교 프로그램 6종 범위 (합격 판정 아님) | 38 |
-| `test_case_delta_within_program_range` | **케이스 간 델타** — 절대값보다 예민하다 | 22 |
+| `test_case_delta_within_program_range` | 케이스 간 델타 | 22 |
 
-케이스 19종 × 2지표. 전체 **약 12초**.
+**Tier B** (`test_tier_b_pipeline.py`) — 케이스 4종. 케이스 정의는 `cases/bestest.py`
+
+| 시험 | 성격 | 개수 |
+|---|---|---|
+| `test_case_matches_reference` | NREL 값 대비 ±1.0% | 8 |
+| `test_case_delta_matches_reference` | **격리된 물리 효과** — 절대값보다 예민 | 6 |
+| `test_benchmark_config_is_opt_in` | 벤치마크 설정이 사용자 기본값으로 새지 않는지 | 1 |
+
+전체 **약 34초**.
 
 ---
 
@@ -163,45 +173,89 @@ IdealLoads 제어, 출력 집계, benchmark payload 변환 중 무엇이든 원�
 
 ---
 
-## 다음 단계 — Tier B
+## Tier B 결과 (2026-08-02)
 
-케이스를 우리 payload 로 표현해야 한다. 막힌 곳을 순서대로 뚫는다.
+우리 payload → `generate_idf_and_simulate()` → EnergyPlus 전 경로.
 
-**① benchmark configuration 경로 신설** — 기상 파일, timestep, `SolarDistribution`,
-대류/열수지 알고리즘, RunPeriod, warmup 을 **강제할 수 있어야 한다.**
-지금은 어느 것도 외부에서 못 정한다. 나머지가 전부 여기에 얹힌다.
-⚠️ benchmark 용 예외가 **일반 사용자 경로의 기본값을 바꾸지 않도록** 분리할 것.
+| 케이스 | 난방 | 편차 | 냉방 | 편차 |
+|---|---|---|---|---|
+| 600 기준 | 4.3267 | +0.04% | 6.0424 | +0.01% |
+| 620 창 방위 | 4.4856 | +0.05% | 4.0665 | −0.07% |
+| 900 열용량 | 1.6681 | +0.42% | 2.5037 | +0.48% |
+| 610 차양 | 4.3773 | +0.05% | 4.3472 | +0.06% |
 
-**② HVAC/외기/습도제어 분리** — `idf_builder.py:305-322` 의 IdealLoads 가
-`DesignSpecification:OutdoorAir` 에 0 이 아닌 외기를 항상 넣는다.
-**ASHRAE 140 은 기계환기 0, 침기만이다.** 습도제어 필드도 공란이라
-`ConstantSensibleHeatRatio` 가 기본 적용된다(140 은 잠열 없음).
-"외기 없음"과 "잠열 없음"을 명시할 수 있어야 한다.
-(참고: 표준 모델은 IdealLoads 를 **지역난방/지역냉방 미터**로 받는다 —
-그래서 이 하네스도 `DistrictHeatingWater:Facility` / `DistrictCooling:Facility` 를 집계한다)
+**델타 (격리된 물리 효과)**
 
-**③ 내부발열·스케줄의 정확한 표현** — 현재 activity 기반 인원·조명·기기·DHW
-자동값으로는 BESTEST 의 **고정 200 W 와 복사 0.6 / 대류 0.4 / 잠열 0** 을 정확히
-표현하기 어렵다. 자동 DHW·활동 스케줄·설비 기본값을 **비활성화하는 방법**이 필요하다.
+| 델타 | 난방 (우리 / NREL) | 냉방 (우리 / NREL) |
+|---|---|---|
+| 900−600 열용량 | −2.6586 / −2.6639 | −3.5387 / −3.5500 |
+| 620−600 창 방위 | +0.1589 / +0.1583 | −1.9759 / −1.9723 |
+| 610−600 차양 | +0.0507 / +0.0500 | −1.6952 / −1.6973 |
 
-**④ 재료·구성·표면 경계조건** — BESTEST 의 열용량과 전도 특성을 payload 로 손실
-없이 전달해야 한다. **600→900 델타의 핵심이므로 창 형상보다 먼저** 확인할 것.
+**주어진 입력이 정확하면 우리 번역 계층의 물리는 맞다.**
+특히 900−600 이 맞는다는 것은 `layers` 가 열용량을 실제로 보존한다는 뜻이다 —
+기존 U-value 합성 경로로는 600 과 900 이 같은 값을 냈다.
 
-**⑤ 침기 ACH 와 계수 명시화** — `ep_simulator.py:1242` 가 `add_infiltration()` 을
-인자 없이 부른다. 기본 0.5 ACH 가 600·900 시리즈와 **우연히** 맞을 뿐이다.
+### 도달까지 세 번 틀렸다 — 그 과정이 결과보다 중요하다
 
-**⑥ 명시적 opening geometry** — `ep_simulator.py:188` 의 WWR 중앙 스케일로는
-3 m × 2 m 두 짝과 차양 케이스를 표현할 수 없다. gbXML opening 좌표를 보존하는
-경로와 WWR 생성 경로를 **구분**해야 한다.
+1. **난방 +9% / 냉방 −35%** — 설정온도가 사무소 아키타입 스케줄(야간 16℃ setback +
+   냉방기간 5~10월 마스크)로 만들어졌다. 존의 `heatingSetpoint`/`coolingSetpoint` 는
+   스케줄 생성의 입력일 뿐 상시 값이 아니다. → `constantSetpoints`
+2. **난방 +50%** — AirflowNetwork 때문.
+3. **⚠️ AFN 이 켜지면 `ZoneInfiltration` 은 아예 시뮬레이션되지 않는다.**
+   EnergyPlus 가 명시적으로 경고한다:
+   *"Specified AirflowNetwork Control = MultizoneWithoutDistribution and
+   ZoneInfiltration:* objects are present. ZoneInfiltration objects will not be simulated."*
+   이중계산이 아니라 **대체**다. `add_infiltration(ach=...)` 은 AFN 이 켜진 존에서
+   무시되고, 실제 침기는 `WallCrack` 계수(`setup_airflow_network` 의 0.01 / 0.65)가
+   정한다. 케이스 600 에서 그 차이가 난방 4.33 → 6.50 MWh(**+50%**)였다.
+   AFN 은 외기 접촉면 2개 이상인 존에 켜지므로 **사실상 거의 모든 존**이 해당한다.
+   → **실제 프로젝트의 침기 가정이 코드 표기와 다르다. 별도 조사 항목.**
 
-**그 밖에 확인 필요**: 대류/heat-balance 알고리즘, timestep·warmup·수렴 설정,
-표면 일사·바람 노출 플래그, 월별/연간 출력변수의 정확한 의미와 SQL 집계.
+### 벤치마크 설정 (`payload["benchmark"]`)
 
-⚠️ **BESTEST EPW 를 `_data/weather/` 에 두면 안 된다** — `ep_simulator.py:853~`
+**없으면 기존 사용자 경로와 100% 동일하게 동작한다.** 벤치마크는 실제 프로젝트에
+적용하면 안 되는 값을 강제하므로 기본값으로 새면 안 된다 —
+`test_benchmark_config_is_opt_in` 이 이 격리를 지킨다.
+
+| 키 | 무엇을 강제하나 |
+|---|---|
+| `weatherFile` | 기상 파일 (자동 탐색 우회) |
+| `timestep` · `minWarmupDays` | 시간 해상도·warmup |
+| `solarDistribution` · `terrain` | 태양복사 분배·지형 |
+| `insideConvection` · `outsideConvection` · `heatBalance` | 알고리즘 |
+| `infiltrationAch` | 침기 ACH |
+| `disableAirflowNetwork` | AFN off (위 3번) |
+| `suppressAutoLoads` | 용도별 자동 부하·급탕·콘센트 억제 |
+| `constantSetpoints` | 상시 고정 설정온도 |
+| `forceIdealLoads` · `idealNoOutdoorAir` · `idealNoHumidityControl` | HVAC |
+| `otherEquipment` | 고정 발열(`OtherEquipment`, 연료 None) |
+
+### 파이프라인 표현력 확장
+
+기존 payload 에 없는 키라 사용자 경로에는 영향이 없다.
+
+- **`surface["layers"]`** — 층 구성을 바깥→안 그대로 생성. U-value 합성과 달리
+  **열용량이 보존된다.** `Material:NoMass`(`thermalResistance`)도 지원.
+- **`surface["glazingLayers"]`** — 상세 유리(`WindowMaterial:Glazing`/`Gas`).
+  `SimpleGlazingSystem` 은 U/SHGC 만 맞추고 입사각 의존성이 달라 일사가 어긋난다.
+- **`surface["boundaryCondition"/"sunExposure"/"windExposure"]`** — 140 의 바닥은
+  `Outdoors` + `NoSun`/`NoWind` 인데 자동 추정으로는 나올 수 없는 조합이다.
+- **`payload["shadingSurfaces"]`** — `Shading:Building:Detailed`(투과율 0).
+  gbXML 파서는 아직 Shade 요소를 읽지 않는다.
+
+---
+
+## 남은 일
+
+1. **케이스 확장** — 기준값 CSV 에 92행(케이스 46종)이 이미 있다.
+   Tier A 는 `regenerate_stock_idf.sh` 와 `test_tier_a_engine.py` 의 `CASES` 에,
+   Tier B 는 `cases/bestest.py` 의 `CASE_SPECS` 에 추가하면 된다.
+   측면 케이스(195~320, 395~470, 960 sunspace, FF 자유부동)는 아직 없다.
+2. **AFN 침기 조사** — 위 3번. 실제 프로젝트의 침기가 `WallCrack` 계수로
+   결정되고 있다. 그 값이 타당한지, 사용자에게 어떻게 보여야 하는지 정해야 한다.
+3. **gbXML Shade 파싱** — 지금은 payload 로만 차양이 들어온다.
+4. **다중 존 케이스(960 sunspace)** — 존 간 경계 번역을 검증할 수 있다.
+
+⚠️ **BESTEST EPW 를 `_data/weather/` 에 두면 안 된다** — `ep_simulator.py` 의
 자동 탐색이 한국 프로젝트에 Denver 를 물릴 수 있다. 그래서 이 디렉터리 안에 두었다.
-
-### 케이스 추가
-
-기준값 CSV 에는 92행(케이스 46종)이 이미 들어있다. `regenerate_stock_idf.sh` 의
-`CASES` 와 `test_tier_a_engine.py` 의 `CASES` 에 추가하면 된다.
-측면 케이스(195~320, 395~470, 960 sunspace, FF 자유부동)는 아직 안 넣었다.
