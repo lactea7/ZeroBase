@@ -201,7 +201,7 @@ LifeCycleCost:UsePriceEscalation,
   1.0950;                                 !- Year Escalation 30
 
 Building,
-  BESTEST Case 600 - Base Case,           !- Name
+  BESTEST Case 670 - Glazing Single Pane, !- Name
   0,                                      !- North Axis {deg}
   Country,                                !- Terrain
   ,                                       !- Loads Convergence Tolerance Value {W}
@@ -320,7 +320,7 @@ BuildingSurface:Detailed,
 FenestrationSurface:Detailed,
   ZONE SUBSURFACE 1,                      !- Name
   Window,                                 !- Surface Type
-  Double Pane Window,                     !- Construction Name
+  Single Pane Assembly,                   !- Construction Name
   ZONE SURFACE SOUTH,                     !- Building Surface Name
   ,                                       !- Outside Boundary Condition Object
   0.5,                                    !- View Factor to Ground
@@ -335,7 +335,7 @@ FenestrationSurface:Detailed,
 FenestrationSurface:Detailed,
   ZONE SUBSURFACE 2,                      !- Name
   Window,                                 !- Surface Type
-  Double Pane Window,                     !- Construction Name
+  Single Pane Assembly,                   !- Construction Name
   ZONE SURFACE SOUTH,                     !- Building Surface Name
   ,                                       !- Outside Boundary Condition Object
   0.5,                                    !- View Factor to Ground
@@ -721,7 +721,7 @@ WindowMaterial:Gas,
   0.012;                                  !- Thickness {m}
 
 WindowMaterial:Glazing,
-  Glass Type 1,                           !- Name
+  Single Pane,                            !- Name
   SpectralAverage,                        !- Optical Data Type
   ,                                       !- Window Glass Spectral Data Set Name
   0.003048,                               !- Thickness {m}
@@ -739,12 +739,6 @@ WindowMaterial:Glazing,
 Construction,
   COMMON WALL,                            !- Name
   ZONE COMMON WALL;                       !- Layer 1
-
-Construction,
-  Double Pane Window,                     !- Name
-  Glass Type 1,                           !- Layer 1
-  Air Space Resistance,                   !- Layer 2
-  Glass Type 1;                           !- Layer 3
 
 Construction,
   HIGH CONDUCTANCE WALL,                  !- Name
@@ -768,6 +762,10 @@ Construction,
   WOOD SIDING-1,                          !- Layer 1
   FIBERGLASS QUILT-1,                     !- Layer 2
   PLASTERBOARD-1;                         !- Layer 3
+
+Construction,
+  Single Pane Assembly,                   !- Name
+  Single Pane;                            !- Layer 1
 
 Schedule:Constant,
   Always On Discrete,                     !- Name

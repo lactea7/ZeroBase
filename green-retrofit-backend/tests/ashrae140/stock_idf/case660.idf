@@ -201,7 +201,7 @@ LifeCycleCost:UsePriceEscalation,
   1.0950;                                 !- Year Escalation 30
 
 Building,
-  BESTEST Case 600 - Base Case,           !- Name
+  BESTEST Case 660 - Glazing Low E,       !- Name
   0,                                      !- North Axis {deg}
   Country,                                !- Terrain
   ,                                       !- Loads Convergence Tolerance Value {W}
@@ -320,7 +320,7 @@ BuildingSurface:Detailed,
 FenestrationSurface:Detailed,
   ZONE SUBSURFACE 1,                      !- Name
   Window,                                 !- Surface Type
-  Double Pane Window,                     !- Construction Name
+  Low E glazing assembly,                 !- Construction Name
   ZONE SURFACE SOUTH,                     !- Building Surface Name
   ,                                       !- Outside Boundary Condition Object
   0.5,                                    !- View Factor to Ground
@@ -335,7 +335,7 @@ FenestrationSurface:Detailed,
 FenestrationSurface:Detailed,
   ZONE SUBSURFACE 2,                      !- Name
   Window,                                 !- Surface Type
-  Double Pane Window,                     !- Construction Name
+  Low E glazing assembly,                 !- Construction Name
   ZONE SURFACE SOUTH,                     !- Building Surface Name
   ,                                       !- Outside Boundary Condition Object
   0.5,                                    !- View Factor to Ground
@@ -716,12 +716,12 @@ Material:NoMass,
   0.6;                                    !- Visible Absorptance
 
 WindowMaterial:Gas,
-  Air Space Resistance,                   !- Name
-  AIR,                                    !- Gas Type
+  Argon Space Resistance,                 !- Name
+  ARGON,                                  !- Gas Type
   0.012;                                  !- Thickness {m}
 
 WindowMaterial:Glazing,
-  Glass Type 1,                           !- Name
+  Inner Low E Glazing,                    !- Name
   SpectralAverage,                        !- Optical Data Type
   ,                                       !- Window Glass Spectral Data Set Name
   0.003048,                               !- Thickness {m}
@@ -736,21 +736,37 @@ WindowMaterial:Glazing,
   0.84,                                   !- Back Side Infrared Hemispherical Emissivity
   1;                                      !- Conductivity {W/m-K}
 
+WindowMaterial:Glazing,
+  Outer Low E Glazing,                    !- Name
+  SpectralAverage,                        !- Optical Data Type
+  ,                                       !- Window Glass Spectral Data Set Name
+  0.00318,                                !- Thickness {m}
+  0.452,                                  !- Solar Transmittance at Normal Incidence
+  0.359,                                  !- Front Side Solar Reflectance at Normal Incidence
+  0.397,                                  !- Back Side Solar Reflectance at Normal Incidence
+  0.91325,                                !- Visible Transmittance at Normal Incidence
+  0.082,                                  !- Front Side Visible Reflectance at Normal Incidence
+  0.082,                                  !- Back Side Visible Reflectance at Normal Incidence
+  0,                                      !- Infrared Transmittance at Normal Incidence
+  0.84,                                   !- Front Side Infrared Hemispherical Emissivity
+  0.047,                                  !- Back Side Infrared Hemispherical Emissivity
+  1;                                      !- Conductivity {W/m-K}
+
 Construction,
   COMMON WALL,                            !- Name
   ZONE COMMON WALL;                       !- Layer 1
-
-Construction,
-  Double Pane Window,                     !- Name
-  Glass Type 1,                           !- Layer 1
-  Air Space Resistance,                   !- Layer 2
-  Glass Type 1;                           !- Layer 3
 
 Construction,
   HIGH CONDUCTANCE WALL,                  !- Name
   HIGH CONDUCTANCE WALL-OUTSIDE,          !- Layer 1
   Air Space Resistance 1,                 !- Layer 2
   HIGH CONDUCTANCE WALL-INSIDE;           !- Layer 3
+
+Construction,
+  Low E glazing assembly,                 !- Name
+  Outer Low E Glazing,                    !- Layer 1
+  Argon Space Resistance,                 !- Layer 2
+  Inner Low E Glazing;                    !- Layer 3
 
 Construction,
   LTFLOOR,                                !- Name

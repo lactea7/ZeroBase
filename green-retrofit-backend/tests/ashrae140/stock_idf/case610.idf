@@ -201,7 +201,7 @@ LifeCycleCost:UsePriceEscalation,
   1.0950;                                 !- Year Escalation 30
 
 Building,
-  BESTEST Case 600 - Base Case,           !- Name
+  BESTEST Case 610 - South Shading,       !- Name
   0,                                      !- North Axis {deg}
   Country,                                !- Terrain
   ,                                       !- Loads Convergence Tolerance Value {W}
@@ -231,6 +231,16 @@ Space,
   ,                                       !- Ceiling Height {m}
   ,                                       !- Volume {m3}
   ;                                       !- Floor Area {m2}
+
+Shading:Zone:Detailed,
+  SOUTH WALL OVERHANG,                    !- Name
+  ZONE SURFACE SOUTH,                     !- Base Surface Name
+  Sch 2,                                  !- Transmittance Schedule Name
+  ,                                       !- Number of Vertices
+  8, 0, 2.7,                              !- X,Y,Z Vertex 1 {m}
+  8, -1, 2.7,                             !- X,Y,Z Vertex 2 {m}
+  0, -1, 2.7,                             !- X,Y,Z Vertex 3 {m}
+  0, 0, 2.7;                              !- X,Y,Z Vertex 4 {m}
 
 BuildingSurface:Detailed,
   ZONE SURFACE EAST,                      !- Name
@@ -792,6 +802,12 @@ ScheduleTypeLimits,
   availability;                           !- Unit Type
 
 ScheduleTypeLimits,
+  Fraction,                               !- Name
+  0,                                      !- Lower Limit Value {BasedOnField A3}
+  1,                                      !- Upper Limit Value {BasedOnField A3}
+  Continuous;                             !- Numeric Type
+
+ScheduleTypeLimits,
   Fractional 1,                           !- Name
   0,                                      !- Lower Limit Value {BasedOnField A3}
   1,                                      !- Upper Limit Value {BasedOnField A3}
@@ -817,6 +833,59 @@ ScheduleTypeLimits,
   ,                                       !- Upper Limit Value {BasedOnField A3}
   Continuous,                             !- Numeric Type
   temperature;                            !- Unit Type
+
+Schedule:Day:Interval,
+  Day Sch 2,                              !- Name
+  Fraction,                               !- Schedule Type Limits Name
+  No,                                     !- Interpolate to Timestep
+  01:00,                                  !- Time 1 {hh:mm}
+  0,                                      !- Value Until Time 1
+  02:00,                                  !- Time 2 {hh:mm}
+  0,                                      !- Value Until Time 2
+  03:00,                                  !- Time 3 {hh:mm}
+  0,                                      !- Value Until Time 3
+  04:00,                                  !- Time 4 {hh:mm}
+  0,                                      !- Value Until Time 4
+  05:00,                                  !- Time 5 {hh:mm}
+  0,                                      !- Value Until Time 5
+  06:00,                                  !- Time 6 {hh:mm}
+  0,                                      !- Value Until Time 6
+  07:00,                                  !- Time 7 {hh:mm}
+  0,                                      !- Value Until Time 7
+  08:00,                                  !- Time 8 {hh:mm}
+  0,                                      !- Value Until Time 8
+  09:00,                                  !- Time 9 {hh:mm}
+  0,                                      !- Value Until Time 9
+  10:00,                                  !- Time 10 {hh:mm}
+  0,                                      !- Value Until Time 10
+  11:00,                                  !- Time 11 {hh:mm}
+  0,                                      !- Value Until Time 11
+  12:00,                                  !- Time 12 {hh:mm}
+  0,                                      !- Value Until Time 12
+  13:00,                                  !- Time 13 {hh:mm}
+  0,                                      !- Value Until Time 13
+  14:00,                                  !- Time 14 {hh:mm}
+  0,                                      !- Value Until Time 14
+  15:00,                                  !- Time 15 {hh:mm}
+  0,                                      !- Value Until Time 15
+  16:00,                                  !- Time 16 {hh:mm}
+  0,                                      !- Value Until Time 16
+  17:00,                                  !- Time 17 {hh:mm}
+  0,                                      !- Value Until Time 17
+  18:00,                                  !- Time 18 {hh:mm}
+  0,                                      !- Value Until Time 18
+  19:00,                                  !- Time 19 {hh:mm}
+  0,                                      !- Value Until Time 19
+  20:00,                                  !- Time 20 {hh:mm}
+  0,                                      !- Value Until Time 20
+  21:00,                                  !- Time 21 {hh:mm}
+  0,                                      !- Value Until Time 21
+  22:00,                                  !- Time 22 {hh:mm}
+  0,                                      !- Value Until Time 22
+  23:00,                                  !- Time 23 {hh:mm}
+  0,                                      !- Value Until Time 23
+  24:00,                                  !- Time 24 {hh:mm}
+  0;                                      !- Value Until Time 24
 
 Schedule:Day:Interval,
   Schedule Day 7,                         !- Name
@@ -932,6 +1001,21 @@ Schedule:Day:Interval,
   20;                                     !- Value Until Time 24
 
 Schedule:Week:Daily,
+  Week Sch 2,                             !- Name
+  Day Sch 2,                              !- Sunday Schedule:Day Name
+  Day Sch 2,                              !- Monday Schedule:Day Name
+  Day Sch 2,                              !- Tuesday Schedule:Day Name
+  Day Sch 2,                              !- Wednesday Schedule:Day Name
+  Day Sch 2,                              !- Thursday Schedule:Day Name
+  Day Sch 2,                              !- Friday Schedule:Day Name
+  Day Sch 2,                              !- Saturday Schedule:Day Name
+  Day Sch 2,                              !- Holiday Schedule:Day Name
+  Day Sch 2,                              !- SummerDesignDay Schedule:Day Name
+  Day Sch 2,                              !- WinterDesignDay Schedule:Day Name
+  Day Sch 2,                              !- CustomDay1 Schedule:Day Name
+  Day Sch 2;                              !- CustomDay2 Schedule:Day Name
+
+Schedule:Week:Daily,
   Zone Cooling Setpoint All Weeks,        !- Name
   Zone Cooling Setpoint All Days,         !- Sunday Schedule:Day Name
   Zone Cooling Setpoint All Days,         !- Monday Schedule:Day Name
@@ -974,6 +1058,15 @@ Schedule:Year,
   Heating Setpoints,                      !- Name
   Temperature,                            !- Schedule Type Limits Name
   Zone Heating Setpoint All Weeks,        !- Schedule:Week Name 1
+  1,                                      !- Start Month 1
+  1,                                      !- Start Day 1
+  12,                                     !- End Month 1
+  31;                                     !- End Day 1
+
+Schedule:Year,
+  Sch 2,                                  !- Name
+  Fraction,                               !- Schedule Type Limits Name
+  Week Sch 2,                             !- Schedule:Week Name 1
   1,                                      !- Start Month 1
   1,                                      !- Start Day 1
   12,                                     !- End Month 1

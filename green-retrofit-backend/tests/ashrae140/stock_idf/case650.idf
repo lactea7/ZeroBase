@@ -201,7 +201,7 @@ LifeCycleCost:UsePriceEscalation,
   1.0950;                                 !- Year Escalation 30
 
 Building,
-  BESTEST Case 600 - Base Case,           !- Name
+  BESTEST Case 650 - Night Ventilation,   !- Name
   0,                                      !- North Axis {deg}
   Country,                                !- Terrain
   ,                                       !- Loads Convergence Tolerance Value {W}
@@ -419,12 +419,12 @@ Schedule:Year,
 ZoneInfiltration:DesignFlowRate,
   Space Infiltration Design Flow Rate 1,  !- Name
   ZONE ONE Space,                         !- Zone or ZoneList or Space or SpaceList Name
-  Always On Ruleset Fractional 1,         !- Schedule Name
-  AirChanges/Hour,                        !- Design Flow Rate Calculation Method
-  ,                                       !- Design Flow Rate {m3/s}
+  BESTEST Night Vent,                     !- Schedule Name
+  Flow/Zone,                              !- Design Flow Rate Calculation Method
+  0.4902,                                 !- Design Flow Rate {m3/s}
   ,                                       !- Flow Rate per Floor Area {m3/s-m2}
   ,                                       !- Flow Rate per Exterior Surface Area {m3/s-m2}
-  0.5,                                    !- Air Changes per Hour {1/hr}
+  ,                                       !- Air Changes per Hour {1/hr}
   ,                                       !- Constant Term Coefficient
   ,                                       !- Temperature Term Coefficient
   ,                                       !- Velocity Term Coefficient
@@ -461,18 +461,102 @@ ScheduleTypeLimits,
 
 ThermostatSetpoint:DualSetpoint,
   Thermostat Setpoint Dual Setpoint 1,    !- Name
-  20.0 C,                                 !- Heating Setpoint Temperature Schedule Name
-  27.0 C;                                 !- Cooling Setpoint Temperature Schedule Name
+  No Heating,                             !- Heating Setpoint Temperature Schedule Name
+  BESTEST clg Night Vent;                 !- Cooling Setpoint Temperature Schedule Name
 
-Schedule:Constant,
-  20.0 C,                                 !- Name
-  Temperature 1,                          !- Schedule Type Limits Name
-  20;                                     !- Hourly Value
+ScheduleTypeLimits,
+  Temperature 3,                          !- Name
+  ,                                       !- Lower Limit Value {BasedOnField A3}
+  ,                                       !- Upper Limit Value {BasedOnField A3}
+  Continuous,                             !- Numeric Type
+  temperature;                            !- Unit Type
 
-Schedule:Constant,
-  27.0 C,                                 !- Name
+Schedule:Day:Interval,
+  Schedule Day 2,                         !- Name
+  Temperature 4,                          !- Schedule Type Limits Name
+  No,                                     !- Interpolate to Timestep
+  24:00,                                  !- Time 1 {hh:mm}
+  -100;                                   !- Value Until Time 1
+
+ScheduleTypeLimits,
+  Temperature 4,                          !- Name
+  ,                                       !- Lower Limit Value {BasedOnField A3}
+  ,                                       !- Upper Limit Value {BasedOnField A3}
+  Continuous,                             !- Numeric Type
+  temperature;                            !- Unit Type
+
+Schedule:Week:Daily,
+  No Heating Week Rule - Jan1-Dec31,      !- Name
+  Schedule Day 2,                         !- Sunday Schedule:Day Name
+  Schedule Day 2,                         !- Monday Schedule:Day Name
+  Schedule Day 2,                         !- Tuesday Schedule:Day Name
+  Schedule Day 2,                         !- Wednesday Schedule:Day Name
+  Schedule Day 2,                         !- Thursday Schedule:Day Name
+  Schedule Day 2,                         !- Friday Schedule:Day Name
+  Schedule Day 2,                         !- Saturday Schedule:Day Name
+  Schedule Day 2,                         !- Holiday Schedule:Day Name
+  Schedule Day 2,                         !- SummerDesignDay Schedule:Day Name
+  Schedule Day 2,                         !- WinterDesignDay Schedule:Day Name
+  Schedule Day 2,                         !- CustomDay1 Schedule:Day Name
+  Schedule Day 2;                         !- CustomDay2 Schedule:Day Name
+
+Schedule:Year,
+  No Heating,                             !- Name
+  Temperature 3,                          !- Schedule Type Limits Name
+  No Heating Week Rule - Jan1-Dec31,      !- Schedule:Week Name 1
+  1,                                      !- Start Month 1
+  1,                                      !- Start Day 1
+  12,                                     !- End Month 1
+  31;                                     !- End Day 1
+
+ScheduleTypeLimits,
+  Temperature 1,                          !- Name
+  ,                                       !- Lower Limit Value {BasedOnField A3}
+  ,                                       !- Upper Limit Value {BasedOnField A3}
+  Continuous,                             !- Numeric Type
+  temperature;                            !- Unit Type
+
+Schedule:Day:Interval,
+  Schedule Day 3,                         !- Name
+  Temperature 2,                          !- Schedule Type Limits Name
+  No,                                     !- Interpolate to Timestep
+  07:00,                                  !- Time 1 {hh:mm}
+  100,                                    !- Value Until Time 1
+  18:00,                                  !- Time 2 {hh:mm}
+  27,                                     !- Value Until Time 2
+  24:00,                                  !- Time 3 {hh:mm}
+  100;                                    !- Value Until Time 3
+
+ScheduleTypeLimits,
+  Temperature 2,                          !- Name
+  ,                                       !- Lower Limit Value {BasedOnField A3}
+  ,                                       !- Upper Limit Value {BasedOnField A3}
+  Continuous,                             !- Numeric Type
+  temperature;                            !- Unit Type
+
+Schedule:Week:Daily,
+  BESTEST clg Night Vent Week Rule - Jan1-Dec31, !- Name
+  Schedule Day 3,                         !- Sunday Schedule:Day Name
+  Schedule Day 3,                         !- Monday Schedule:Day Name
+  Schedule Day 3,                         !- Tuesday Schedule:Day Name
+  Schedule Day 3,                         !- Wednesday Schedule:Day Name
+  Schedule Day 3,                         !- Thursday Schedule:Day Name
+  Schedule Day 3,                         !- Friday Schedule:Day Name
+  Schedule Day 3,                         !- Saturday Schedule:Day Name
+  Schedule Day 3,                         !- Holiday Schedule:Day Name
+  Schedule Day 3,                         !- SummerDesignDay Schedule:Day Name
+  Schedule Day 3,                         !- WinterDesignDay Schedule:Day Name
+  Schedule Day 3,                         !- CustomDay1 Schedule:Day Name
+  Schedule Day 3;                         !- CustomDay2 Schedule:Day Name
+
+Schedule:Year,
+  BESTEST clg Night Vent,                 !- Name
   Temperature 1,                          !- Schedule Type Limits Name
-  27;                                     !- Hourly Value
+  BESTEST clg Night Vent Week Rule - Jan1-Dec31, !- Schedule:Week Name 1
+  1,                                      !- Start Month 1
+  1,                                      !- Start Day 1
+  12,                                     !- End Month 1
+  31;                                     !- End Day 1
 
 ZoneHVAC:EquipmentConnections,
   ZONE ONE,                               !- Zone Name
@@ -776,7 +860,7 @@ Schedule:Constant,
 
 Schedule:Constant,
   Always Off Discrete,                    !- Name
-  OnOff,                                  !- Schedule Type Limits Name
+  OnOff 1,                                !- Schedule Type Limits Name
   0;                                      !- Hourly Value
 
 Schedule:Constant,
@@ -805,25 +889,29 @@ ScheduleTypeLimits,
   availability;                           !- Unit Type
 
 ScheduleTypeLimits,
+  OnOff 1,                                !- Name
+  0,                                      !- Lower Limit Value {BasedOnField A3}
+  1,                                      !- Upper Limit Value {BasedOnField A3}
+  Discrete,                               !- Numeric Type
+  availability;                           !- Unit Type
+
+ScheduleTypeLimits,
   Temperature,                            !- Name
   -60,                                    !- Lower Limit Value {BasedOnField A3}
   200,                                    !- Upper Limit Value {BasedOnField A3}
   Continuous,                             !- Numeric Type
   temperature;                            !- Unit Type
 
-ScheduleTypeLimits,
-  Temperature 1,                          !- Name
-  ,                                       !- Lower Limit Value {BasedOnField A3}
-  ,                                       !- Upper Limit Value {BasedOnField A3}
-  Continuous,                             !- Numeric Type
-  temperature;                            !- Unit Type
-
 Schedule:Day:Interval,
-  Schedule Day 7,                         !- Name
-  Fractional,                             !- Schedule Type Limits Name
+  Schedule Day 4,                         !- Name
+  OnOff,                                  !- Schedule Type Limits Name
   No,                                     !- Interpolate to Timestep
-  24:00,                                  !- Time 1 {hh:mm}
-  1;                                      !- Value Until Time 1
+  07:00,                                  !- Time 1 {hh:mm}
+  1,                                      !- Value Until Time 1
+  18:00,                                  !- Time 2 {hh:mm}
+  0.036719706,                            !- Value Until Time 2
+  24:00,                                  !- Time 3 {hh:mm}
+  1;                                      !- Value Until Time 3
 
 Schedule:Day:Interval,
   Zone Cooling Setpoint All Days,         !- Name
@@ -980,24 +1068,24 @@ Schedule:Year,
   31;                                     !- End Day 1
 
 Schedule:Week:Daily,
-  Always On Ruleset Fractional 1 Week Rule - Jan1-Dec31, !- Name
-  Schedule Day 7,                         !- Sunday Schedule:Day Name
-  Schedule Day 7,                         !- Monday Schedule:Day Name
-  Schedule Day 7,                         !- Tuesday Schedule:Day Name
-  Schedule Day 7,                         !- Wednesday Schedule:Day Name
-  Schedule Day 7,                         !- Thursday Schedule:Day Name
-  Schedule Day 7,                         !- Friday Schedule:Day Name
-  Schedule Day 7,                         !- Saturday Schedule:Day Name
-  Schedule Day 7,                         !- Holiday Schedule:Day Name
-  Schedule Day 7,                         !- SummerDesignDay Schedule:Day Name
-  Schedule Day 7,                         !- WinterDesignDay Schedule:Day Name
-  Schedule Day 7,                         !- CustomDay1 Schedule:Day Name
-  Schedule Day 7;                         !- CustomDay2 Schedule:Day Name
+  BESTEST Night Vent Week Rule - Jan1-Dec31, !- Name
+  Schedule Day 4,                         !- Sunday Schedule:Day Name
+  Schedule Day 4,                         !- Monday Schedule:Day Name
+  Schedule Day 4,                         !- Tuesday Schedule:Day Name
+  Schedule Day 4,                         !- Wednesday Schedule:Day Name
+  Schedule Day 4,                         !- Thursday Schedule:Day Name
+  Schedule Day 4,                         !- Friday Schedule:Day Name
+  Schedule Day 4,                         !- Saturday Schedule:Day Name
+  Schedule Day 4,                         !- Holiday Schedule:Day Name
+  Schedule Day 4,                         !- SummerDesignDay Schedule:Day Name
+  Schedule Day 4,                         !- WinterDesignDay Schedule:Day Name
+  Schedule Day 4,                         !- CustomDay1 Schedule:Day Name
+  Schedule Day 4;                         !- CustomDay2 Schedule:Day Name
 
 Schedule:Year,
-  Always On Ruleset Fractional 1,         !- Name
-  Fractional,                             !- Schedule Type Limits Name
-  Always On Ruleset Fractional 1 Week Rule - Jan1-Dec31, !- Schedule:Week Name 1
+  BESTEST Night Vent,                     !- Name
+  OnOff,                                  !- Schedule Type Limits Name
+  BESTEST Night Vent Week Rule - Jan1-Dec31, !- Schedule:Week Name 1
   1,                                      !- Start Month 1
   1,                                      !- Start Day 1
   12,                                     !- End Month 1

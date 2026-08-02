@@ -201,7 +201,7 @@ LifeCycleCost:UsePriceEscalation,
   1.0950;                                 !- Year Escalation 30
 
 Building,
-  BESTEST Case 600 - Base Case,           !- Name
+  BESTEST Case 620 - East/West Window Orientation, !- Name
   0,                                      !- North Axis {deg}
   Country,                                !- Terrain
   ,                                       !- Loads Convergence Tolerance Value {W}
@@ -248,6 +248,21 @@ BuildingSurface:Detailed,
   8, 0, 0,                                !- X,Y,Z Vertex 2 {m}
   8, 6, 0,                                !- X,Y,Z Vertex 3 {m}
   8, 6, 2.7;                              !- X,Y,Z Vertex 4 {m}
+
+FenestrationSurface:Detailed,
+  ZONE SUBSURFACE 1 EAST WINDOW,          !- Name
+  Window,                                 !- Surface Type
+  Double Pane Window,                     !- Construction Name
+  ZONE SURFACE EAST,                      !- Building Surface Name
+  ,                                       !- Outside Boundary Condition Object
+  0.5,                                    !- View Factor to Ground
+  ,                                       !- Frame and Divider Name
+  1,                                      !- Multiplier
+  ,                                       !- Number of Vertices
+  8, 1.5, 2.2,                            !- X,Y,Z Vertex 1 {m}
+  8, 1.5, 0.2,                            !- X,Y,Z Vertex 2 {m}
+  8, 4.5, 0.2,                            !- X,Y,Z Vertex 3 {m}
+  8, 4.5, 2.2;                            !- X,Y,Z Vertex 4 {m}
 
 BuildingSurface:Detailed,
   ZONE SURFACE FLOOR,                     !- Name
@@ -317,36 +332,6 @@ BuildingSurface:Detailed,
   8, 0, 0,                                !- X,Y,Z Vertex 3 {m}
   8, 0, 2.7;                              !- X,Y,Z Vertex 4 {m}
 
-FenestrationSurface:Detailed,
-  ZONE SUBSURFACE 1,                      !- Name
-  Window,                                 !- Surface Type
-  Double Pane Window,                     !- Construction Name
-  ZONE SURFACE SOUTH,                     !- Building Surface Name
-  ,                                       !- Outside Boundary Condition Object
-  0.5,                                    !- View Factor to Ground
-  ,                                       !- Frame and Divider Name
-  1,                                      !- Multiplier
-  ,                                       !- Number of Vertices
-  0.5, 0, 2.2,                            !- X,Y,Z Vertex 1 {m}
-  0.5, 0, 0.2,                            !- X,Y,Z Vertex 2 {m}
-  3.5, 0, 0.2,                            !- X,Y,Z Vertex 3 {m}
-  3.5, 0, 2.2;                            !- X,Y,Z Vertex 4 {m}
-
-FenestrationSurface:Detailed,
-  ZONE SUBSURFACE 2,                      !- Name
-  Window,                                 !- Surface Type
-  Double Pane Window,                     !- Construction Name
-  ZONE SURFACE SOUTH,                     !- Building Surface Name
-  ,                                       !- Outside Boundary Condition Object
-  0.5,                                    !- View Factor to Ground
-  ,                                       !- Frame and Divider Name
-  1,                                      !- Multiplier
-  ,                                       !- Number of Vertices
-  4.5, 0, 2.2,                            !- X,Y,Z Vertex 1 {m}
-  4.5, 0, 0.2,                            !- X,Y,Z Vertex 2 {m}
-  7.5, 0, 0.2,                            !- X,Y,Z Vertex 3 {m}
-  7.5, 0, 2.2;                            !- X,Y,Z Vertex 4 {m}
-
 BuildingSurface:Detailed,
   ZONE SURFACE WEST,                      !- Name
   Wall,                                   !- Surface Type
@@ -363,6 +348,21 @@ BuildingSurface:Detailed,
   0, 6, 0,                                !- X,Y,Z Vertex 2 {m}
   0, 0, 0,                                !- X,Y,Z Vertex 3 {m}
   0, 0, 2.7;                              !- X,Y,Z Vertex 4 {m}
+
+FenestrationSurface:Detailed,
+  ZONE SUBSURFACE 2 WEST WINDOW,          !- Name
+  Window,                                 !- Surface Type
+  Double Pane Window,                     !- Construction Name
+  ZONE SURFACE WEST,                      !- Building Surface Name
+  ,                                       !- Outside Boundary Condition Object
+  0.5,                                    !- View Factor to Ground
+  ,                                       !- Frame and Divider Name
+  1,                                      !- Multiplier
+  ,                                       !- Number of Vertices
+  0, 4.5, 2.2,                            !- X,Y,Z Vertex 1 {m}
+  0, 4.5, 0.2,                            !- X,Y,Z Vertex 2 {m}
+  0, 1.5, 0.2,                            !- X,Y,Z Vertex 3 {m}
+  0, 1.5, 2.2;                            !- X,Y,Z Vertex 4 {m}
 
 OtherEquipment,
   Other Equipment 1,                      !- Name

@@ -90,7 +90,42 @@ def extract(gsr_root: Path, out_dir: Path) -> None:
     print(f"{out2} — {len(ref)} 행 (기준 엔진: {version})")
 
 
+def extract_programs(gsr_root, out_dir):
+    """프로그램별 원값을 그대로 뽑는다 — **델타 범위를 직접 계산하기 위해서다.**
+
+    델타 범위는 "각 프로그램의 (A−B)를 구한 뒤 그것들의 min/max" 여야 한다.
+    min(A)−max(B) 처럼 집계값끼리 빼면 실제보다 훨씬 넓은 가짜 범위가 나온다.
+    """
+    import openpyxl
+    xlsx = gsr_root / "results" / "resources" / "RESULTS5-2A.xlsx"
+    ws = openpyxl.load_workbook(xlsx, data_only=True)["Tables 1"]
+
+    rows = []
+    for metric, spec in TABLES.items():
+        for row in range(spec["first_data_row"], spec["first_data_row"] + 80):
+            label = ws[f"B{row}"].value
+            if not isinstance(label, str) or not re.match(r"^\d{3}\b", label.strip()):
+                # ⚠️ 여기서 멈추지 않으면 난방 표(11행~)가 냉방 표(63행~)까지 넘어가
+                # 난방 케이스에 냉방 값이 섞인다. 그러면 델타가 통째로 틀린다.
+                break
+            case = label.strip().split()[0]
+            for prog, col in PROGRAM_COLS.items():
+                v = ws[f"{col}{row}"].value
+                if isinstance(v, (int, float)):
+                    rows.append({"case": case, "metric": metric, "program": prog,
+                                 "unit": "MWh", "value": round(float(v), 4)})
+
+    out = out_dir / "std140_by_program.csv"
+    with out.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["case", "metric", "program", "unit", "value"])
+        w.writeheader()
+        w.writerows(rows)
+    print(f"{out} — {len(rows)} 행")
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    extract(Path(sys.argv[1]), Path(__file__).parent / "reference")
+    _root, _out = Path(sys.argv[1]), Path(__file__).parent / "reference"
+    extract(_root, _out)
+    extract_programs(_root, _out)

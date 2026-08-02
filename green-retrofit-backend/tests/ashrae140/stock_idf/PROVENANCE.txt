@@ -1,0 +1,7 @@
+# stock IDF provenance (이 파일은 regenerate_stock_idf.sh 가 만든다)
+생성일: 2026-08-02 19:24:22 +0900
+OpenStudio: 3.11.0+241b8abb4d
+EnergyPlus(동봉): energyplus-25.2.0
+BESTEST-GSR: 80c3f2e56a501da996676086573f4c7f29fe9c5c
+measure: bestest_building_thermal_envelope_and_fabric_load
+기상(measure 내부 고정): 725650TYCST.epw

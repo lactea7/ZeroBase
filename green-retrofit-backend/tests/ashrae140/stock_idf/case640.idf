@@ -201,7 +201,7 @@ LifeCycleCost:UsePriceEscalation,
   1.0950;                                 !- Year Escalation 30
 
 Building,
-  BESTEST Case 600 - Base Case,           !- Name
+  BESTEST Case 640 - Thermostat Setback,  !- Name
   0,                                      !- North Axis {deg}
   Country,                                !- Terrain
   ,                                       !- Loads Convergence Tolerance Value {W}
@@ -461,17 +461,73 @@ ScheduleTypeLimits,
 
 ThermostatSetpoint:DualSetpoint,
   Thermostat Setpoint Dual Setpoint 1,    !- Name
-  20.0 C,                                 !- Heating Setpoint Temperature Schedule Name
+  BESTEST htg SETBACK,                    !- Heating Setpoint Temperature Schedule Name
   27.0 C;                                 !- Cooling Setpoint Temperature Schedule Name
 
-Schedule:Constant,
-  20.0 C,                                 !- Name
+ScheduleTypeLimits,
+  Temperature 1,                          !- Name
+  ,                                       !- Lower Limit Value {BasedOnField A3}
+  ,                                       !- Upper Limit Value {BasedOnField A3}
+  Continuous,                             !- Numeric Type
+  temperature;                            !- Unit Type
+
+Schedule:Day:Interval,
+  Schedule Day 1,                         !- Name
+  Temperature 2,                          !- Schedule Type Limits Name
+  No,                                     !- Interpolate to Timestep
+  07:00,                                  !- Time 1 {hh:mm}
+  10,                                     !- Value Until Time 1
+  07:10,                                  !- Time 2 {hh:mm}
+  11.67,                                  !- Value Until Time 2
+  07:20,                                  !- Time 3 {hh:mm}
+  13.33,                                  !- Value Until Time 3
+  07:30,                                  !- Time 4 {hh:mm}
+  15,                                     !- Value Until Time 4
+  07:40,                                  !- Time 5 {hh:mm}
+  16.67,                                  !- Value Until Time 5
+  07:50,                                  !- Time 6 {hh:mm}
+  18.33,                                  !- Value Until Time 6
+  08:00,                                  !- Time 7 {hh:mm}
+  20,                                     !- Value Until Time 7
+  23:00,                                  !- Time 8 {hh:mm}
+  20,                                     !- Value Until Time 8
+  24:00,                                  !- Time 9 {hh:mm}
+  10;                                     !- Value Until Time 9
+
+ScheduleTypeLimits,
+  Temperature 2,                          !- Name
+  ,                                       !- Lower Limit Value {BasedOnField A3}
+  ,                                       !- Upper Limit Value {BasedOnField A3}
+  Continuous,                             !- Numeric Type
+  temperature;                            !- Unit Type
+
+Schedule:Week:Daily,
+  BESTEST htg SETBACK Week Rule - Jan1-Dec31, !- Name
+  Schedule Day 1,                         !- Sunday Schedule:Day Name
+  Schedule Day 1,                         !- Monday Schedule:Day Name
+  Schedule Day 1,                         !- Tuesday Schedule:Day Name
+  Schedule Day 1,                         !- Wednesday Schedule:Day Name
+  Schedule Day 1,                         !- Thursday Schedule:Day Name
+  Schedule Day 1,                         !- Friday Schedule:Day Name
+  Schedule Day 1,                         !- Saturday Schedule:Day Name
+  Schedule Day 1,                         !- Holiday Schedule:Day Name
+  Schedule Day 1,                         !- SummerDesignDay Schedule:Day Name
+  Schedule Day 1,                         !- WinterDesignDay Schedule:Day Name
+  Schedule Day 1,                         !- CustomDay1 Schedule:Day Name
+  Schedule Day 1;                         !- CustomDay2 Schedule:Day Name
+
+Schedule:Year,
+  BESTEST htg SETBACK,                    !- Name
   Temperature 1,                          !- Schedule Type Limits Name
-  20;                                     !- Hourly Value
+  BESTEST htg SETBACK Week Rule - Jan1-Dec31, !- Schedule:Week Name 1
+  1,                                      !- Start Month 1
+  1,                                      !- Start Day 1
+  12,                                     !- End Month 1
+  31;                                     !- End Day 1
 
 Schedule:Constant,
   27.0 C,                                 !- Name
-  Temperature 1,                          !- Schedule Type Limits Name
+  Temperature 2,                          !- Schedule Type Limits Name
   27;                                     !- Hourly Value
 
 ZoneHVAC:EquipmentConnections,
@@ -808,13 +864,6 @@ ScheduleTypeLimits,
   Temperature,                            !- Name
   -60,                                    !- Lower Limit Value {BasedOnField A3}
   200,                                    !- Upper Limit Value {BasedOnField A3}
-  Continuous,                             !- Numeric Type
-  temperature;                            !- Unit Type
-
-ScheduleTypeLimits,
-  Temperature 1,                          !- Name
-  ,                                       !- Lower Limit Value {BasedOnField A3}
-  ,                                       !- Upper Limit Value {BasedOnField A3}
   Continuous,                             !- Numeric Type
   temperature;                            !- Unit Type
 
