@@ -180,12 +180,7 @@ send_and_wait() {
 #   gemini — 문서 간 상태 대조(중재). gemma 는 13,433자 입력에서 두 번 실패했고,
 #            더 큰 20,662자 단일 문서 요약은 성공했다 → 크기가 아니라 과업 성격 문제다.
 GEMINI_BIN=${GEMINI_BIN:-gemini}
-
-arbitrate_with_gemini() {
-  local history_file=$1 out_file=$2
-  [ -s "$history_file" ] || { echo "ERROR: 이력 파일이 비어있습니다: $history_file" >&2; return 1; }
-
-  local prompt='아래는 한 코드 수정을 놓고 두 검토자(Claude, codex)가 시간순으로 주고받은 기록이다.
+GEMINI_PROMPT='아래는 한 코드 수정을 놓고 두 검토자(Claude, codex)가 시간순으로 주고받은 기록이다.
 [round N] 표시로 순서가 적혀 있다. 뒤 라운드가 앞 라운드를 덮어쓴다 — 앞 라운드에서 codex 가
 지적한 것을 뒤 라운드에서 Claude 가 "반영했다"고 적었으면 그것은 해결된 항목이므로 미해결
 쟁점에 넣지 마라. 원문에 없는 사실이나 수치를 지어내지 마라.
@@ -199,10 +194,92 @@ arbitrate_with_gemini() {
 - 항목 — Claude 입장: … / codex 지적: …
 
 ## 3. 판정하려면 확인해야 할 것
-- …'
+- …' 
+
+# 패널에서 gemini 를 실행하고 **파일**로 결과를 회수한다.
+# 화면을 긁지 않으므로 마커·청크 분할·줄바꿈 복원이 전혀 필요 없다 —
+# 보이는 것은 사용자를 위한 것이고, 읽는 것은 파일이다.
+_arbitrate_in_panel() {
+  local surface=$1 history_file=$2 out_file=$3
+  local rc_file="$out_file.rc" err_file="$out_file.err"
+  local prompt_file="$out_file.prompt"
+  rm -f "$rc_file" "$err_file" "$out_file"
+  printf '%s' "$GEMINI_PROMPT" > "$prompt_file"
+
+  # 보내는 명령은 반드시 한 줄이어야 한다(TUI 는 줄바꿈이 곧 전송).
+  # 긴 프롬프트·이력은 파일 경로로만 참조해 명령을 짧게 유지한다.
+  local cmd="$GEMINI_BIN -p \"\$(cat '$prompt_file')\" --skip-trust < '$history_file' > '$out_file' 2> '$err_file'; echo \$? > '$rc_file'"
+  "$CMUX" send --surface "$surface" "$cmd" >/dev/null || {
+    echo "ERROR: $surface 에 명령 전송 실패" >&2; return 1; }
+  sleep 1
+  "$CMUX" send-key --surface "$surface" Enter >/dev/null
+
+  echo "▸ gemini 실행 중 ($surface 패널에서 진행 상황을 볼 수 있습니다)" >&2
+  local waited=0
+  while [ "$waited" -lt "$POLL_TIMEOUT" ]; do
+    sleep 3; waited=$((waited + 3))
+    [ -f "$rc_file" ] && break
+  done
+  [ -f "$rc_file" ] || { echo "TIMEOUT: ${POLL_TIMEOUT}초 안에 gemini 가 끝나지 않았습니다." >&2; return 1; }
+
+  if grep -qiE "$LIMIT_RE" "$out_file" "$err_file" 2>/dev/null; then
+    echo "🛑 STOP: gemini 에서 사용 한도 신호를 감지했습니다." >&2
+    grep -ihE "$LIMIT_RE" "$out_file" "$err_file" 2>/dev/null | head -3 >&2
+    return 99
+  fi
+  if [ "$(cat "$rc_file")" != "0" ]; then
+    echo "ERROR: gemini 실패 (rc=$(cat "$rc_file"))" >&2
+    tail -5 "$err_file" >&2
+    return 1
+  fi
+  sed -i '' '/^Ripgrep is not available/d' "$out_file" 2>/dev/null || true
+  [ -s "$out_file" ] || { echo "ERROR: gemini 응답이 비어있습니다." >&2; return 1; }
+  return 0
+}
+
+# Gemini 전용 패널을 확보한다.
+#
+# ⚠️ 예전엔 "codex 도 ollama 도 아니면 빈 셸"이라는 내용 기반 추측으로 패널을 골랐다.
+# 그 결과 **다른 Claude Code 세션을 빈 셸로 오인해 셸 명령을 채팅 메시지로 보냈다.**
+# 남의 패널을 추측으로 건드리면 안 된다. 전용 패널을 직접 만들어 제목으로 식별한다.
+GEMINI_PANEL_TITLE=${GEMINI_PANEL_TITLE:-relay-gemini}
+
+ensure_gemini_panel() {
+  # 1) 사용자가 직접 지정했으면 그대로 쓴다
+  if [ -n "${RELAY_GEMINI_SURFACE:-}" ]; then
+    echo "$RELAY_GEMINI_SURFACE"; return 0
+  fi
+  # 2) 이전에 만든 전용 패널이 있으면 재사용한다 (제목으로만 식별 — 내용 추측 금지)
+  local found
+  found=$("$CMUX" tree 2>/dev/null \
+          | grep -F "\"$GEMINI_PANEL_TITLE\"" \
+          | grep -o 'surface:[0-9]*' | head -1)
+  if [ -n "$found" ]; then
+    echo "$found"; return 0
+  fi
+  # 3) 없으면 새로 만든다. 포커스는 뺏지 않는다.
+  local created ref
+  created=$("$CMUX" new-pane --type terminal --direction right --focus false 2>/dev/null) || return 1
+  ref=$(grep -o 'surface:[0-9]*' <<<"$created" | head -1)
+  [ -n "$ref" ] || return 1
+  "$CMUX" rename-tab --surface "$ref" "$GEMINI_PANEL_TITLE" >/dev/null 2>&1 || true
+  echo "$ref"
+}
+
+arbitrate_with_gemini() {
+  local history_file=$1 out_file=$2
+  [ -s "$history_file" ] || { echo "ERROR: 이력 파일이 비어있습니다: $history_file" >&2; return 1; }
+
+  # 패널에서 돌릴 수 있으면 그렇게 한다 — 사용자가 진행을 볼 수 있어야 한다.
+  # 결과는 화면이 아니라 파일로 읽으므로 마커·청크 분할·스크래핑이 필요 없다.
+  local panel
+  if [ "${GEMINI_IN_PANEL:-1}" = "1" ] && panel=$(ensure_gemini_panel); then
+    _arbitrate_in_panel "$panel" "$history_file" "$out_file"
+    return $?
+  fi
 
   # --skip-trust: 헤드리스 실행 시 신뢰 디렉터리 확인을 건너뛴다.
-  if ! "$GEMINI_BIN" -p "$prompt" --skip-trust < "$history_file" > "$out_file" 2>"$out_file.err"; then
+  if ! "$GEMINI_BIN" -p "$GEMINI_PROMPT" --skip-trust < "$history_file" > "$out_file" 2>"$out_file.err"; then
     echo "ERROR: gemini 호출 실패" >&2
     tail -5 "$out_file.err" >&2
     return 1
