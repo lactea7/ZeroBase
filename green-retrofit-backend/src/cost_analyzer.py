@@ -10,6 +10,9 @@ except ImportError:
 
 # 비거주 구역 판별 키워드 — LED 공사 면적 축소·설비(냉방기) 설치 제외 등에 공용.
 # (ep_simulator도 import: 계단실 등엔 WindowAC를 설치하지 않아 냉방부하 0 → 사이징 실패 방지)
+from src.domain.models import BaselineSource, TariffResult
+from src.economics import tariffs as _tariffs
+
 NON_HABITABLE_KEYWORDS = [
     'stair', 'chase', 'shaft', 'lift', 'elevator', 'store', 'storage',
     'parking', 'garage', 'vent', 'mechanical', 'duct', 'pipe',
@@ -28,40 +31,18 @@ class LCCAnalyzer:
     Building Energy Modeling (BEM) 경제성 및 요금(LCC) 분석 오픈소스 모듈
     EnergyPlus 결과와 독립적으로 계산을 수행합니다.
     """
-    # ── 전기요금: 2026.4.16 시행 '일반용(갑) 저압' 계절 요금 (원/kWh) ──
-    # (한전 전기요금표 종합 기준 — 일반 비주거 건물 적용. 저압은 시간대별 차등 없이 계절 평탄)
-    ELEC_RATE_SUMMER = 123.6   # 여름철 6~8월
-    ELEC_RATE_WINTER = 110.8   # 겨울철 11~2월
-    ELEC_RATE_SPRING = 86.4    # 봄·가을철 3~5, 9~10월
-    ELEC_BASE_CHARGE = 5230    # 일반용 저압 기본요금 (원/kW)
-
-    # ── 시간대별(TOU) 요율: 일반용(을) 고압A 선택Ⅱ 기준 (원/kWh) ──
-    # ⚠️ 요금 개정 시 위 계절 요율과 함께 이 테이블만 수정하면 된다 (요율의 단일 소스).
-    #    시간별 출력(hourly)이 있으면 TOU, 월별 출력뿐이면 위 계절 평탄 요율을 적용한다.
-    #    (엄밀히는 요금제 선택은 건물 계약 종별을 따라야 하나, 현재는 출력 주기 기준 근사)
-    TOU_RATES = {
-        "summer": {"peak": 147.3, "mid": 109.0, "off": 56.1},   # 6~8월
-        "winter": {"peak": 137.9, "mid": 109.0, "off": 61.6},   # 11~2월
-        "spring": {"peak": 65.5,  "mid": 65.5,  "off": 56.1},   # 3~5, 9~10월 (피크 구간 없음)
-    }
-    # 지역난방: KDHC 공식 열요금표(2024.7.1, 부가세 별도) — 주택용 난방 사용요금
-    #   단일요금 112.32원/Mcal 적용. (참고: 업무용 145.82 / 공공용 127.34 원/Mcal)
-    #   1 Mcal = 1.163 kWh → 원/kWh = 원/Mcal ÷ 1.163 (≈ ×0.8598)
-    HEAT_RATE_MCAL = 112.32     # 주택용 난방 단일요금
-    HEAT_RATE_KWH = HEAT_RATE_MCAL / 1.163   # ≈ 96.6원/kWh
-
-    # ── 난방 열원별 {요금(원/kWh), 1차에너지계수, CO2계수(kgCO2/kWh)} ──
-    # 열원에 따라 요금·1차·CO2가 모두 달라진다. 지열/히트펌프는 전기로 본다.
-    # 전기=한전 공식, 지역난방=KDHC 공식. (가스·등유는 미사용으로 제외)
-    HEAT_SOURCE_DB = {
-        # 가스/등유 단가는 GR_Simulator(Site2Cost) 검증값 — 지역난방(94.98)이 당사 96.6과
-        # 일치해 상호 신뢰 확인됨. CO2는 연료 연소 배출계수.
-        1:  {"label": "가스보일러",     "rate": 78.12,            "primary": 1.10,  "co2": 0.232},
-        2:  {"label": "전기(히트펌프)", "rate": ELEC_RATE_WINTER, "primary": 2.75,  "co2": 0.466},
-        4:  {"label": "등유보일러",     "rate": 141.92,           "primary": 1.10,  "co2": 0.260},
-        11: {"label": "지역난방",       "rate": HEAT_RATE_KWH,    "primary": 0.728, "co2": 0.200},
-    }
-    DEFAULT_HEAT_SOURCE = 11   # 미지정 시 지역난방(기존 동작과 동일)
+    # ── 요율은 economics/tariffs.py 가 **단일 소스**다 ──
+    # ⚠️ 예전엔 여기에도 같은 값이 있었고 실제 계산은 이쪽을 썼다.
+    # 두 곳에 두면 한쪽만 갱신했을 때 결과가 조용히 갈라진다.
+    # 하위 호환을 위해 이름만 남기고 값은 tariffs 에서 가져온다.
+    ELEC_RATE_SUMMER = _tariffs.ELEC_RATE_SUMMER
+    ELEC_RATE_WINTER = _tariffs.ELEC_RATE_WINTER
+    ELEC_RATE_SPRING = _tariffs.ELEC_RATE_SPRING
+    ELEC_BASE_CHARGE = _tariffs.ELEC_BASE_CHARGE
+    TOU_RATES = _tariffs.TOU_RATES
+    HEAT_RATE_KWH = _tariffs.HEAT_RATE_KWH
+    HEAT_SOURCE_DB = _tariffs.HEAT_SOURCE_DB
+    DEFAULT_HEAT_SOURCE = _tariffs.DEFAULT_HEAT_SOURCE
 
     # ── 비교 기준이 되는 '기존 노후 건물' 운영비 추정 ──
     # ⚠️ 실측 데이터가 없으므로 단일·투명·보수적 가정을 쓴다.
@@ -577,7 +558,8 @@ class LCCAnalyzer:
             from src.domain.energy_aggregation import annual_summary, monthly_breakdown
             from src.domain.energy_metrics import build_metrics
             from src.economics.tariffs import (apply_pv_self_consumption, electricity_rates,
-                                                heat_source_entry, split_by_carrier)
+                                                annual_bills, heat_source_entry,
+                                                split_by_carrier)
             from src.energyplus.surfaces import extract_surface_outputs
 
             total_rows = len(df)
@@ -597,8 +579,6 @@ class LCCAnalyzer:
 
             use_pthp = kwargs.get("use_pthp", False)
             monthly_data = []
-            df['month'] = np.array(series.months)
-            df['hour'] = np.array(series.hours)
             is_hourly = series.resolution.value == "hourly"
 
             total_h_req_kwh = np.array(series.heating_requirement_kwh)
@@ -618,25 +598,21 @@ class LCCAnalyzer:
             # 미터가 없어 추정으로 대체한 항목 — 조용한 추정을 막기 위해 사용자에게 노출
             _meter_fallback_notes = [s.note for s in series.context.fallback_steps if s.note]
 
-            # 에너지원 배분·요율은 economics/tariffs.py 로 옮겼다.
+            # ── 요금 (economics/tariffs.py) ──
+            # ⚠️ DataFrame 에 파생 열을 붙이지 않는다. 예전엔 total_elec_kwh/elec_rate/
+            # elec_cost/heat_cost 를 df 에 실어 계산했는데, 그러면 요금 로직이 엔진 출력
+            # 자료구조에 묶여 계층 분리가 되지 않는다.
             split = split_by_carrier(series, vent_kwh, use_pthp=use_pthp)
-            df['total_elec_kwh'] = np.array(split.electricity_kwh)
-            df['total_heat_kwh'] = np.array(split.heat_kwh)
-
-            df['elec_rate'] = np.array(electricity_rates(series))
-
-            # PV 자가소비 차감도 tariffs 로 옮겼다(잉여는 버림 — 보수적 추정).
-            df['total_elec_kwh'] = np.array(apply_pv_self_consumption(
-                df['total_elec_kwh'].values, series.hours, pv_capacity_kw))
-
-            df['elec_cost'] = df['total_elec_kwh'] * df['elec_rate']
+            elec_rates = electricity_rates(series)
+            elec_kwh = apply_pv_self_consumption(
+                split.electricity_kwh, series.hours, pv_capacity_kw)
+            heat_kwh_series = split.heat_kwh
             # 난방 열원 결정: 지열/히트펌프면 전기(2), 아니면 프로젝트 선택값(기본 지역난방)
             heat_source_id = 2 if is_geothermal else kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
             heat_src = heat_source_entry(heat_source_id, is_geothermal=is_geothermal)
-            df['heat_cost'] = df['total_heat_kwh'] * heat_src["rate"]
 
-            annual_elec_bill = df['elec_cost'].sum()
-            annual_heat_bill = df['heat_cost'].sum()
+            annual_elec_bill, annual_heat_bill = annual_bills(
+                elec_kwh, heat_kwh_series, elec_rates, heat_src["rate"])
 
             # 연간 집계는 domain/energy_aggregation.py 의 계약에서 받는다.
             # (환기 요구량 = 소비 − 팬, 급탕 요구량 = 소비 ÷ 배관손실 — 그쪽에 명시돼 있다)
@@ -959,6 +935,17 @@ class LCCAnalyzer:
             else:
                 base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
                 baseline_source = "estimate"             # 추정(1.6배)
+
+            # ── 요금 계약 생성 ──
+            # 정의만 해두고 안 쓰면 계약이 아니다. 실제 경로에서 만들어
+            # 이후 계층(현금흐름·응답 조립)이 dict 대신 이것을 받게 한다.
+            tariff = TariffResult(
+                electricity_won=float(annual_elec_bill),
+                heating_won=float(annual_heat_bill),
+                heating_fuel=str(heat_src.get("label", "")),
+                baseline_total_won=float(base_running_cost),
+                baseline_source=BaselineSource(baseline_source),
+            )
 
             if baseline_source != "estimate" and base_running_cost <= retrofit_running_cost:
                 cost_warnings.append(

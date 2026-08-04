@@ -166,3 +166,43 @@ def test_bills_use_per_row_rates():
     elec, heat = annual_bills([10.0, 10.0], [5.0], [100.0, 200.0], heat_rate_won_per_kwh=50.0)
     assert elec == pytest.approx(10 * 100 + 10 * 200)
     assert heat == pytest.approx(5 * 50)
+
+
+# ── 실제 경로에서 계약이 만들어지는가 ─────────────────────
+# ⚠️ 정의만 해두고 안 쓰면 계약이 아니다. codex 가 "TariffResult 는 정의됐지만
+# calculate() 가 생성하지 않는다"고 지적했다.
+
+def test_analyzer_produces_tariff_result(analyzer, base_kwargs):
+    """`calculate()` 가 TariffResult 를 실제로 만들고 응답 값과 일치하는지."""
+    import src.cost_analyzer as ca
+    captured = {}
+    original = ca.TariffResult
+
+    class Spy(original):
+        def __post_init__(self):
+            original.__post_init__(self)
+            captured["value"] = self
+
+    ca.TariffResult = Spy
+    try:
+        result = analyzer.calculate(**base_kwargs)
+    finally:
+        ca.TariffResult = original
+
+    t = captured.get("value")
+    assert t is not None, "calculate() 가 TariffResult 를 만들지 않는다"
+    fin = result["financial"]
+    # 응답은 정수로 반올림해 내보내고 계약은 원값을 들고 있다 — 1원 이내면 같다
+    assert t.electricity_won == pytest.approx(fin["annual_elec_bill"], abs=1.0)
+    assert t.heating_won == pytest.approx(fin["annual_heat_bill"], abs=1.0)
+    assert t.baseline_source.value == fin["baseline_assumptions"]["source"]
+
+
+def test_rates_have_a_single_source():
+    """⚠️ 요율이 두 곳에 있으면 한쪽만 갱신했을 때 결과가 조용히 갈라진다."""
+    from src.cost_analyzer import LCCAnalyzer
+    from src.economics import tariffs
+    assert LCCAnalyzer.ELEC_BASE_CHARGE is tariffs.ELEC_BASE_CHARGE
+    assert LCCAnalyzer.TOU_RATES is tariffs.TOU_RATES
+    assert LCCAnalyzer.HEAT_SOURCE_DB is tariffs.HEAT_SOURCE_DB
+    assert LCCAnalyzer.DEFAULT_HEAT_SOURCE is tariffs.DEFAULT_HEAT_SOURCE
