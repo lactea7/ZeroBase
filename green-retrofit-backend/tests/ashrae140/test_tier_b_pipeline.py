@@ -231,8 +231,11 @@ def test_plain_payload_keeps_user_path_objects(tmp_path, monkeypatch):
         ep_simulator.generate_idf_and_simulate(payload, str(tmp_path))
 
     text = (tmp_path / "assembled.idf").read_text()
-    assert "AirflowNetwork:SimulationControl" in text, \
-        "AFN 이 기본 경로에서 사라졌다 (disableAirflowNetwork 가 샜다)"
+    # 기본 침기 모델은 고정 ACH 다. AFN 은 infiltrationModel="afn" 을 명시했을 때만.
+    # (예전 기본값이던 AFN 은 침기가 표면 개수에 좌우되는 결함이 있었다)
+    assert "AirflowNetwork:SimulationControl" not in text, \
+        "기본 경로에 AFN 이 들어갔다 — 기본은 고정 ACH 여야 한다"
+    assert "ZoneInfiltration:DesignFlowRate" in text, "기본 경로에 고정 침기가 없다"
     assert "OtherEquipment" not in text, "벤치마크 전용 고정 발열이 기본 경로로 샜다"
     assert "FullExterior" in text and "FullInteriorAndExterior" not in text, \
         "벤치마크 태양복사 분배가 샜다"
@@ -245,3 +248,30 @@ def test_plain_payload_keeps_user_path_objects(tmp_path, monkeypatch):
         "용도별 자동 부하가 기본 경로에서 사라졌다 (suppressAutoLoads 가 샜다)"
     # 아키타입 스케줄(야간 setback)이 상시 고정으로 바뀌지 않았는지
     assert "Op_office" in text, "용도별 운영 스케줄이 사라졌다 (constantSetpoints 가 샜다)"
+
+
+@pytest.mark.slow
+def test_afn_is_opt_in(tmp_path, monkeypatch):
+    """AFN 은 제거하지 않고 **명시 opt-in** 으로 남긴다.
+
+    압력시험값·개구부 운전 스케줄이 있으면 의미가 있는 모델이다. 다만 계수의
+    형상 의존성은 그대로이므로 정규화 없이 기본값으로 쓰면 안 된다.
+    """
+    import ep_simulator
+    from bestest import build_payload
+
+    payload = build_payload("600")
+    payload.pop("benchmark")
+    payload["projectData"]["infiltrationModel"] = "afn"
+
+    def fake_run(self, weather_file, out_dir):
+        self.write(str(tmp_path / "afn.idf"))
+        raise RuntimeError("stop-after-assembly")
+
+    monkeypatch.setattr(ep_simulator.IdfBuilder, "run", fake_run)
+    with pytest.raises(Exception):
+        ep_simulator.generate_idf_and_simulate(payload, str(tmp_path))
+
+    text = (tmp_path / "afn.idf").read_text()
+    assert "AirflowNetwork:SimulationControl" in text, \
+        "infiltrationModel='afn' 을 명시했는데 AFN 이 안 들어갔다"

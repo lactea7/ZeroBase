@@ -769,7 +769,10 @@ class IdfBuilder:
             "AFN Zone Ventilation Air Change Rate",
             "AFN Zone Mixing Volume",
             # 고정 ACH 경로
-            "Zone Infiltration Air Change Rate",
+            # ⚠️ `Zone Infiltration Air Change Rate` 는 Output:Diagnostics 의
+            # DisplayAdvancedReportVariables 가 있어야 생성된다(요청해도 조용히 빠진다).
+            # 체적을 받아 존 체적으로 나눠 ACH 를 직접 계산하는 편이 확실하다.
+            "Zone Infiltration Standard Density Volume",
             "Zone Infiltration Sensible Heat Loss Energy",
             "Zone Infiltration Sensible Heat Gain Energy",
             # 열수지 대조용
