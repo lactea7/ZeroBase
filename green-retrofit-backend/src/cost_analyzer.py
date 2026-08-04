@@ -574,6 +574,7 @@ class LCCAnalyzer:
             
             import numpy as np
             from src.energyplus.outputs import parse_outputs, ventilation_energy_kwh
+            from src.domain.energy_aggregation import annual_summary, monthly_breakdown
 
             total_rows = len(df)
 
@@ -608,6 +609,7 @@ class LCCAnalyzer:
             fan_kwh = np.array(series.fan_kwh)
             vent_kwh = ventilation_energy_kwh(series, np)
             v_flow = np.array(series.ventilation_kg_s)
+            annual = annual_summary(series, vent_kwh)
 
             # 미터가 없어 추정으로 대체한 항목 — 조용한 추정을 막기 위해 사용자에게 노출
             _meter_fallback_notes = [s.note for s in series.context.fallback_steps if s.note]
@@ -665,19 +667,19 @@ class LCCAnalyzer:
             annual_elec_bill = df['elec_cost'].sum()
             annual_heat_bill = df['heat_cost'].sum()
 
-            a_h_req = np.sum(total_h_req_kwh)
-            a_c_req = np.sum(total_c_req_kwh)
-            # dhw_kwh 에는 배관손실 1.1 이 곱해져 있으므로 요구량은 되돌린다
-            a_dhw_req = np.sum(dhw_kwh) / 1.1
-            # 환기 요구량도 에너지(kWh)여야 한다. 팬 전력은 소요량 쪽에만 더한다.
-            a_vent_req = np.sum(vent_kwh - fan_kwh)
-            
-            a_h_con = np.sum(total_h_con_kwh)
-            a_c_con = np.sum(total_c_con_kwh)
-            a_l_con = np.sum(l_kwh)
-            a_e_con = np.sum(e_kwh)
-            a_dhw_con = np.sum(dhw_kwh)
-            a_vent_con = np.sum(vent_kwh)
+            # 연간 집계는 domain/energy_aggregation.py 의 계약에서 받는다.
+            # (환기 요구량 = 소비 − 팬, 급탕 요구량 = 소비 ÷ 배관손실 — 그쪽에 명시돼 있다)
+            a_h_req = annual.heating_requirement_kwh
+            a_c_req = annual.cooling_requirement_kwh
+            a_dhw_req = annual.dhw_requirement_kwh
+            a_vent_req = annual.ventilation_requirement_kwh
+
+            a_h_con = annual.heating_consumption_kwh
+            a_c_con = annual.cooling_consumption_kwh
+            a_l_con = annual.lighting_kwh
+            a_e_con = annual.equipment_kwh
+            a_dhw_con = annual.dhw_consumption_kwh
+            a_vent_con = annual.ventilation_consumption_kwh
 
             demand_col = next((c for c in df.columns
                                if 'Facility Total Electric Demand Rate' in c), None)
@@ -704,25 +706,8 @@ class LCCAnalyzer:
             # 그렇게 사이징하지 않는다. 단열 좋은 건물은 하한 미만이라 설비비가 싸진다(정상).
             hvac_capacity_kw = min(max(hvac_capacity_kw, total_area * 0.04), total_area * 0.10)
             
-            def _monthly_sum(series, mask):
-                """시계열이 스칼라(해당 부하 없음)일 수 있어 안전하게 월합산."""
-                if isinstance(series, np.ndarray):
-                    return float(np.sum(series[mask]))
-                return 0.0
-
-            for m in range(1, 13):
-                mask_m = (df['month'] == m).values
-                # 난방은 '공간 난방'만 (급탕 DHW는 연중 발생하므로 제외 → 냉방과 대칭)
-                # 기존엔 total_heat_kwh(=공간난방+급탕)를 써서 여름에도 급탕만큼 난방값이 떠 보였음
-                _a = total_area if total_area > 0 else 1.0
-                monthly_data.append({
-                    "name": f"{m}월",
-                    "heating": round(_monthly_sum(total_h_con_kwh, mask_m) / _a, 1),
-                    "cooling": round(_monthly_sum(total_c_con_kwh, mask_m) / _a, 1),
-                    "lighting": round(_monthly_sum(l_kwh, mask_m) / _a, 1),
-                    "equipment": round(_monthly_sum(e_kwh, mask_m) / _a, 1),
-                    "hotwater": round(_monthly_sum(dhw_kwh, mask_m) / _a, 1),
-                })
+            # 월별 집계는 domain/energy_aggregation.py 로 옮겼다 (순수 합산).
+            monthly_data = monthly_breakdown(series, total_area)
 
             pv_gen = ((pv_capacity_kw * 1300) / total_area) if pv_capacity_kw and total_area > 0 else 0.0
             
