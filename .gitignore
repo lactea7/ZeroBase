@@ -63,3 +63,10 @@ green-retrofit-backend/mcp_tasks.db*
 
 # relay pipeline 산출물
 .relay/
+
+# 저장소 루트에 놓인 작업용 데이터 파일
+#   - 나라장터_DB.csv 는 _data/g2b_costs.csv 와 동일한 사본이다(해시 일치).
+#     정본은 _data/ 쪽이므로 루트 사본은 올리지 않는다.
+#   - 건물 도면(gbXML)은 실제 프로젝트 데이터라 공개 저장소에 넣지 않는다.
+나라장터_DB.csv
+/*.xml
