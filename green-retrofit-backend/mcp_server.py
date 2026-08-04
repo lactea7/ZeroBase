@@ -19,7 +19,7 @@ from mcp.server.fastmcp import FastMCP
 
 from src.gbxml_parser import parse_gbxml_to_json
 from src.ep_simulator import calculate_surface_area, generate_idf_and_simulate
-from src.task_store import TaskStore
+from src.jobs.repository import TaskStore
 
 WEATHER_DIR = os.path.join(os.path.dirname(BACKEND_DIR), "_data", "weather")
 WORKSPACE_ROOT = os.path.join(BACKEND_DIR, "temp_workspace")

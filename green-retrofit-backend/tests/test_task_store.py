@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from src.task_store import TaskStore
+from src.jobs.repository import TaskStore
 
 
 @pytest.fixture

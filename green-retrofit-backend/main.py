@@ -1,8 +1,6 @@
 # main.py
 import os
 import uuid
-import shutil
-import threading
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +13,8 @@ from slowapi.errors import RateLimitExceeded
 
 from src.gbxml_parser import parse_gbxml_to_json
 from src.ep_simulator import generate_idf_and_simulate
-from src.task_store import TaskStore
+from src.jobs.repository import TaskStore
+from src.jobs.worker import SimulationWorker, cleanup_workspace
 from src.model_validation import validate_simulation_payload
 
 # Rate Limiter 설정
@@ -39,15 +38,6 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 # 업로드 상한 (샘플 gbXML이 ~5MB 수준이므로 50MB면 충분)
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "50")) * 1024 * 1024
-
-def cleanup_workspace(path: str):
-    """안전한 디렉토리 정리를 위한 헬퍼 함수"""
-    if os.path.exists(path) and os.path.isdir(path):
-        try:
-            shutil.rmtree(path)
-            print(f"🧹 임시 작업 공간 정리 완료: {path}")
-        except Exception as e:
-            print(f"⚠️ 임시 작업 공간 정리 실패: {e}")
 
 # ---------------------------------------------------------
 # API 1: gbXML 업로드 및 React용 3D 데이터 파싱
@@ -133,24 +123,10 @@ if _orphans:
 # (세마포어는 프로세스 단위 — 멀티 워커로 띄우면 워커 수만큼 배수가 되니 주의)
 MAX_CONCURRENT_SIMULATIONS = int(os.environ.get("MAX_CONCURRENT_SIMULATIONS", "1"))
 MAX_PENDING_TASKS = int(os.environ.get("MAX_PENDING_TASKS", "10"))
-_sim_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_SIMULATIONS)
 
-def _run_simulation_task(task_id: str, payload_dict: Dict[str, Any], session_dir: str):
-    """백그라운드에서 시뮬레이션을 실행하고 결과를 task_store에 저장"""
-    try:
-        with _sim_semaphore:
-            task_store.mark_running(task_id)
-            result = generate_idf_and_simulate(
-                payload_dict, session_dir,
-                on_stage=lambda s: task_store.set_stage(task_id, s),
-            )
-        task_store.finish(task_id, result=result)
-    except Exception as e:
-        print(f"❌ 시뮬레이션 에러: {str(e)}")
-        task_store.finish(task_id, error=str(e))
-    finally:
-        # 시뮬레이션이 모두 끝난 뒤에 임시 폴더 삭제
-        cleanup_workspace(session_dir)
+_worker = SimulationWorker(task_store, generate_idf_and_simulate,
+                           max_concurrent=MAX_CONCURRENT_SIMULATIONS)
+_run_simulation_task = _worker.run
 
 @app.post("/api/simulate")
 @limiter.limit("50/minute")
