@@ -78,6 +78,52 @@ def test_monthly_structure(result):
     assert {"name", "heating", "cooling", "lighting", "equipment", "hotwater"} <= set(result["monthly"][0].keys())
 
 
+# 월별 값 자체를 고정한다 (구조만 보던 시험으로는 **월 배분 오류를 못 잡는다**).
+# 시계열 → 월별 집계를 별도 모듈로 옮기기 전에 현재 동작을 못박아 둔다.
+# 단위는 kWh/㎡. 값을 의도적으로 바꿨다면 아래를 함께 갱신할 것.
+MONTHLY_GOLDEN = [
+    # (월, 난방, 냉방, 조명, 기기, 급탕)
+    (1,  44.9, 0.0, 1.9, 1.3, 1.7),
+    (2,  29.1, 0.0, 1.7, 1.1, 1.5),
+    (3,  14.5, 0.0, 1.9, 1.3, 1.7),
+    (4,   6.6, 0.0, 1.8, 1.2, 1.6),
+    (5,   0.0, 0.3, 1.9, 1.3, 1.7),
+    (6,   0.0, 3.1, 1.8, 1.2, 1.6),
+    (7,   0.0, 6.4, 1.9, 1.3, 1.7),
+    (8,   0.0, 7.1, 1.9, 1.3, 1.7),
+    (9,   0.0, 2.3, 1.8, 1.2, 1.6),
+    (10,  0.9, 0.1, 1.9, 1.3, 1.7),
+    (11, 12.5, 0.0, 1.8, 1.2, 1.6),
+    (12, 34.4, 0.0, 1.9, 1.3, 1.7),
+]
+
+
+@pytest.mark.parametrize("month,heating,cooling,lighting,equipment,hotwater", MONTHLY_GOLDEN)
+def test_monthly_values_golden(result, month, heating, cooling, lighting, equipment, hotwater):
+    row = result["monthly"][month - 1]
+    assert row["name"] == f"{month}월"
+    assert row["heating"] == pytest.approx(heating, abs=0.05)
+    assert row["cooling"] == pytest.approx(cooling, abs=0.05)
+    assert row["lighting"] == pytest.approx(lighting, abs=0.05)
+    assert row["equipment"] == pytest.approx(equipment, abs=0.05)
+    assert row["hotwater"] == pytest.approx(hotwater, abs=0.05)
+
+
+def test_monthly_sums_match_annual(result):
+    """월별 합이 연간 값과 어긋나면 월 배분이 틀린 것이다."""
+    m = result["matrix"]
+    total_heat = sum(r["heating"] for r in result["monthly"])
+    total_cool = sum(r["cooling"] for r in result["monthly"])
+    assert total_heat == pytest.approx(m["heating"]["con"], rel=0.02)
+    assert total_cool == pytest.approx(m["cooling"]["con"], rel=0.02)
+
+
+def test_no_cooling_outside_season(result):
+    """냉방기간(5~10월) 밖에 냉방이 잡히면 계절 마스크가 깨진 것이다."""
+    for month in (1, 2, 3, 4, 11, 12):
+        assert result["monthly"][month - 1]["cooling"] == pytest.approx(0.0, abs=0.05)
+
+
 def test_pv_reduces_elec_bill(analyzer, base_kwargs):
     """PV 자가소비가 전기요금에서 차감돼야 한다.
 
