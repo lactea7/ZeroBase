@@ -66,22 +66,20 @@ def _split_north_wall(payload: dict, n: int) -> dict:
     return payload
 
 
-@pytest.fixture(scope="module")
-def split_results(tmp_path_factory) -> dict:
-    """북벽을 1/2/4/8 로 나눈 네 모델의 결과. 물리적으로 전부 같은 건물이다."""
-    _energyplus()
+def _run_splits(tmp_root, infiltration_model=None) -> dict:
+    """북벽을 1/2/4/8 로 나눠 실행한다. 물리적으로 전부 같은 건물이다."""
     from bestest import build_payload
     from ep_simulator import generate_idf_and_simulate
 
-    root = tmp_path_factory.mktemp("metamorphic")
     out = {}
     for n in SPLITS:
         payload = _split_north_wall(build_payload("600"), n)
         # ⚠️ 벤치마크의 AFN 차단을 **일부러 뺀다.** 이 시험이 검사하는 것은
-        # ASHRAE 140 재현이 아니라 **실제 프로젝트가 타는 기본 침기 경로**다.
-        # 여기서 AFN 을 꺼버리면 결함이 재현되지 않아 시험이 무의미해진다.
+        # ASHRAE 140 재현이 아니라 **실제 프로젝트가 타는 침기 경로**다.
         payload["benchmark"].pop("disableAirflowNetwork", None)
-        d = root / f"split{n}"
+        if infiltration_model:
+            payload["projectData"]["infiltrationModel"] = infiltration_model
+        d = tmp_root / f"split{n}"
         d.mkdir(parents=True, exist_ok=True)
         generate_idf_and_simulate(payload, str(d), allow_benchmark=True)
 
@@ -102,6 +100,20 @@ def split_results(tmp_path_factory) -> dict:
                                     or total("Zone Infiltration Standard Density Volume")),
         }
     return out
+
+
+@pytest.fixture(scope="module")
+def split_results(tmp_path_factory) -> dict:
+    """**기본 경로**(고정 ACH). 실제 프로젝트가 타는 길이다."""
+    _energyplus()
+    return _run_splits(tmp_path_factory.mktemp("metamorphic_fixed"))
+
+
+@pytest.fixture(scope="module")
+def afn_split_results(tmp_path_factory) -> dict:
+    """**AFN opt-in 경로**. 형상 의존성이 아직 남아 있다(계수 미정규화)."""
+    _energyplus()
+    return _run_splits(tmp_path_factory.mktemp("metamorphic_afn"), infiltration_model="afn")
 
 
 @pytest.mark.slow
@@ -134,4 +146,25 @@ def test_air_change_rate_is_independent_of_surface_subdivision(split_results):
         "실효 ACH 가 표면 분할에 따라 달라진다.\n"
         + "\n".join(f"  분할 {n}개: {v:.4f} ACH" for n, v in values.items())
         + f"\n  최대-최소 = {spread:.4f} (허용 {ACH_TOLERANCE})"
+    )
+
+
+# ── AFN opt-in 경로 ────────────────────────────────────────
+#
+# AFN 은 제거하지 않고 opt-in 으로 남겼는데, **계수 정규화는 아직 구현되지 않았다.**
+# 즉 형상 의존성이 그대로 살아 있다. 이걸 시험 없이 두면 나중에 "AFN 도 고쳐졌겠지"
+# 하고 오해하게 되므로, 결함이 남아 있다는 사실 자체를 xfail(strict) 로 고정한다.
+# 계수를 면적·둘레 기준으로 정규화하면 이 시험이 XPASS 로 바뀌어 알려준다.
+
+@pytest.mark.slow
+@pytest.mark.xfail(strict=True,
+                   reason="AFN crack 계수가 면적·둘레로 정규화되지 않아 표면 개수에 비례한다 "
+                          "(미구현). 기본 경로가 아니므로 opt-in 사용자에게만 영향.")
+def test_afn_load_is_independent_of_surface_subdivision(afn_split_results):
+    values = {n: afn_split_results[n]["heating"] for n in SPLITS}
+    spread = max(values.values()) - min(values.values())
+    assert spread <= LOAD_TOLERANCE_MWH, (
+        "AFN 난방이 표면 분할에 따라 달라진다.\n"
+        + "\n".join(f"  분할 {n}개: {v:.4f} MWh" for n, v in values.items())
+        + f"\n  최대-최소 = {spread:.4f} MWh"
     )

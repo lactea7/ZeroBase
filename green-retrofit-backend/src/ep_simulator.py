@@ -661,13 +661,23 @@ LEGACY_INFILTRATION_MODEL_VERSION = "legacy-afn-surface-count-v1"
 # 실측 기밀성이 없을 때 쓰는 **건물 전체 자연침기 목표 가정값**.
 # "현재 결과와 비슷한 값"이 아니라 보수적 기본값이다. 0.3 / 1.0 민감도와 함께 본다.
 DEFAULT_INFILTRATION_ACH = 0.5
+# 일반 건물의 자연침기는 0.1~2 ACH 범위다. 그 밖의 값은 입력 오류로 본다.
+MAX_INFILTRATION_ACH = 10.0
 
 
-def _measure_infiltration(temp_dir, zones):
+def _measure_infiltration(temp_dir, zones, zone_floor_areas=None):
     """실행 결과에서 **실제** 침기량을 집계한다.
 
     모델이 무엇을 의도했는지가 아니라 **무엇이 실제로 적용됐는지**를 봐야 한다.
     AFN 모드에서는 표기 ACH 와 실제 침기가 전혀 다르기 때문이다.
+
+    ⚠️ 두 침기 경로가 **한 건물에 섞일 수 있다**(legacy AFN 은 외기면 2개 이상 존만
+    적용됐다). AFN 열이 하나라도 있으면 AFN 만 집계하면 고정 ACH 존이 통째로 빠져
+    건물 전체 실효 ACH 가 왜곡된다 — 존별로 활성 경로를 골라 합산한다.
+
+    체적 분모는 **IDF 생성에 쓴 것과 같은 면적**(`zone_floor_areas`)을 써야 한다.
+    선언면적·기하면적·재계산면적이 다른 존에서는 원본 `z["area"]` 와 어긋난다.
+
     출력 변수가 없으면 조용히 빈 dict 를 돌려준다(진단 실패가 시뮬을 막으면 안 된다).
     """
     import csv as _csv
@@ -680,13 +690,18 @@ def _measure_infiltration(temp_dir, zones):
         if len(rows) < 2:
             return {}
         header, data = rows[0], rows[1:]
+        hours = len(data)
+        if not hours:
+            return {}
 
         # 존 이름 → 체적. IDF 의 존 이름은 공백이 밑줄로 바뀐 대문자다.
         vol_by_zone = {}
         for z in zones:
-            zid = str(z.get("id", "")).replace(" ", "_").upper()
-            area = z.get("area") or 0.0
-            vol_by_zone[zid] = (area or 0.0) * (z.get("height") or 3.0)
+            raw_id = str(z.get("id", ""))
+            area = (zone_floor_areas or {}).get(raw_id)
+            if area is None:
+                area = z.get("area") or 0.0
+            vol_by_zone[raw_id.replace(" ", "_").upper()] = (area or 0.0) * (z.get("height") or 3.0)
         total_volume = sum(vol_by_zone.values())
 
         def _cols(fragment):
@@ -695,27 +710,30 @@ def _measure_infiltration(temp_dir, zones):
         def _sum(fragment):
             return sum(float(r[i] or 0) for r in data for i in _cols(fragment))
 
-        # AFN 경로와 고정 ACH 경로 중 실제로 값이 나온 쪽을 쓴다
-        vol_frag = ("AFN Zone Infiltration Volume"
-                    if _cols("AFN Zone Infiltration Volume")
-                    else "Zone Infiltration Standard Density Volume")
-        total_vol = _sum(vol_frag)
-        hours = len(data)
+        # 존별로 두 계열을 모두 읽고 **실제로 값이 나온 쪽**을 그 존의 침기로 삼는다.
+        vol_by_zone_measured = {}
+        for fragment in ("AFN Zone Infiltration Volume",
+                         "Zone Infiltration Standard Density Volume"):
+            for i in _cols(fragment):
+                # AFN 열 이름도 "ZONE:AFN Zone Infiltration Volume" 형태다
+                name = header[i].split(":")[0].strip().upper()
+                total = sum(float(r[i] or 0) for r in data)
+                if total > 1e-9 and name not in vol_by_zone_measured:
+                    vol_by_zone_measured[name] = total
 
-        per_zone = []
-        for i in _cols(vol_frag):
-            name = header[i].split(":")[0].strip().upper()
-            zvol = vol_by_zone.get(name)
-            if not zvol:
-                continue
-            zsum = sum(float(r[i] or 0) for r in data)
-            per_zone.append(zsum / zvol / hours if hours else 0.0)
-        per_zone = sorted(a for a in per_zone if a > 1e-6)
+        total_vol = sum(vol_by_zone_measured.values())
+        per_zone = sorted(
+            v / vol_by_zone[n] / hours
+            for n, v in vol_by_zone_measured.items()
+            if vol_by_zone.get(n)
+        )
 
         out = {
             "annualInfiltrationVolumeM3": round(total_vol, 1),
             "effectiveAchBuildingAvg": round(total_vol / total_volume / hours, 3)
-            if total_volume and hours else None,
+            if total_volume else None,
+            "measuredZoneCount": len(vol_by_zone_measured),
+            # 부분문자열이 AFN·단순 침기 양쪽을 잡으므로 두 경로 합계가 된다(의도한 것)
             "heatLossKwh": round(_sum("Infiltration Sensible Heat Loss Energy") / 3.6e6, 1),
             "heatGainKwh": round(_sum("Infiltration Sensible Heat Gain Energy") / 3.6e6, 1),
         }
@@ -723,7 +741,7 @@ def _measure_infiltration(temp_dir, zones):
             out["zoneAchMin"] = round(per_zone[0], 3)
             out["zoneAchMedian"] = round(per_zone[len(per_zone) // 2], 3)
             out["zoneAchMax"] = round(per_zone[-1], 3)
-            # 같은 건물 안에서 존별로 이만큼 벌어지면 기밀성 차이가 아니라 모델 결함이다
+            # 같은 건물 안에서 존별로 크게 벌어지면 기밀성 차이가 아니라 모델 결함이다
             out["zoneAchSpreadRatio"] = round(per_zone[-1] / per_zone[0], 1) if per_zone[0] else None
         return out
     except Exception as exc:      # 진단 실패가 시뮬레이션을 막으면 안 된다
@@ -755,15 +773,18 @@ def _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
         confidence = "low"
         note = ("AirflowNetwork 는 틈새 계수로 침기를 계산하는데, 그 계수가 외피 면적이 "
                 "아니라 면 개수에 비례합니다. 같은 건물이라도 도면에서 벽을 잘게 나눌수록 "
-                "침기가 커집니다. 실측 기밀성이 있을 때만 사용하시기 바랍니다.")
+                "침기가 커집니다. **실측 기밀성을 이 계수로 환산하는 구현이 아직 없으므로 "
+                "개발 진단용으로만 사용하시기 바랍니다.**")
     else:
-        summary = "침기값 가정 — 실측 기밀성 없이 표준 침기율을 적용했습니다."
+        # ⚠️ "표준"이라고 쓰면 안 된다 — 근거가 되는 국내 실측 데이터셋이 없다.
+        # 0.5 는 원래 코드에 있던 값이고 검증된 기준값이 아니다.
+        summary = "침기값 가정 — 실측 기밀성이 없어 임시 기본값을 적용했습니다."
         value = f"고정 {building_ach} ACH (건물 전체 동일)"
-        confidence = "medium"
+        confidence = "low"
         note = (f"건물 전체에 자연침기 {building_ach} ACH 를 가정했습니다. "
-                "기밀성 실측값(ACH50 등)을 입력받지 않으므로 검증되지 않은 가정이며, "
-                "난방부하에 직접 영향을 줍니다. 0.3~1.0 ACH 범위의 민감도를 함께 "
-                "검토하시기 바랍니다.")
+                "국내 건물의 실측 기반 기본값이 아니라 임시값이며, 기밀성 실측값(ACH50 등)을 "
+                "입력받지 않습니다. **난방부하가 이 가정에 크게 좌우됩니다** — 실측에서 "
+                "0.3~1.0 ACH 범위에 난방이 수 배 변했습니다. 난방 결과는 범위로 보시기 바랍니다.")
 
     detail = {
         "model": "afn" if use_afn else "fixed",
@@ -786,9 +807,44 @@ def _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
         "value": value,
         "note": note,
         "confidence": confidence,
-        "modelVersion": INFILTRATION_MODEL_VERSION,
+        # ⚠️ AFN 으로 돌렸으면 **legacy 버전으로 기록**해야 한다. 결함 있는 모델의
+        # 결과를 fixed-ach-v2 로 적으면 재계산 판단이 깨진다.
+        "modelVersion": (LEGACY_INFILTRATION_MODEL_VERSION if use_afn
+                         else INFILTRATION_MODEL_VERSION),
         "detail": detail,
     }
+
+
+def resolve_infiltration_settings(project_data: dict, bench: dict) -> tuple:
+    """침기 모델과 ACH 를 결정한다. 잘못된 입력은 조용히 통과시키지 않는다.
+
+    ACH 는 난방부하를 지배하므로(0.3~1.0 에서 수 배 변동) 음수·NaN·비현실적 값이
+    그대로 들어가면 결과가 통째로 무의미해진다.
+    """
+    model = str(project_data.get("infiltrationModel") or "fixed").strip().lower()
+    if model not in ("fixed", "afn"):
+        raise ValueError(
+            f"infiltrationModel 은 'fixed' 또는 'afn' 이어야 합니다 (받은 값: {model!r})")
+
+    raw = bench.get("infiltrationAch", project_data.get("infiltrationAch"))
+    if raw is None:
+        ach = DEFAULT_INFILTRATION_ACH
+    else:
+        try:
+            ach = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"infiltrationAch 는 숫자여야 합니다 (받은 값: {raw!r})")
+        if not math.isfinite(ach):
+            raise ValueError(f"infiltrationAch 가 유한한 값이 아닙니다: {raw!r}")
+        if not (0.0 <= ach <= MAX_INFILTRATION_ACH):
+            raise ValueError(
+                f"infiltrationAch 는 0 이상 {MAX_INFILTRATION_ACH} 이하여야 합니다 "
+                f"(받은 값: {ach}). 일반 건물의 자연침기는 0.1~2 ACH 범위다.")
+
+    use_afn = model == "afn"
+    if bench.get("disableAirflowNetwork"):
+        use_afn = False
+    return use_afn, ach
 
 
 def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
@@ -1336,7 +1392,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     #      좌우된다.** 실측: 케이스 600 의 북벽만 1→8 폴리곤으로 쪼개자 난방이
     #      6.50 → 8.67 MWh (+33%). 용호동에서는 반대로 실효 0.327 ACH 로 표기값보다
     #      낮았다 — "항상 과대"가 아니라 외피면수/체적 비에 따라 방향이 뒤집힌다.
-    #   ⚠️ 외기면 2개 이상인 존에만 켜지므로 한 건물 안에서 두 침기 모델이 섞였다.
+    #   ⚠️ 외기면 2개 이상인 존에만 켜졌는데, EnergyPlus 의 "ZoneInfiltration objects
+    #      will not be simulated" 는 **건물 전체에 적용된다.** 즉 나머지 존은
+    #      0.5 ACH 가 아니라 **침기가 아예 0** 이었다. 용호동 실측에서 확인:
+    #      AFN 존 15개는 crack 기반 침기, 나머지 5개는 침기량 정확히 0.
+    #      "두 모델이 섞였다"가 아니라 "한쪽은 아예 빠졌다"가 맞는 서술이다.
     #
     # 자연환기를 잃는 것도 아니다 — 창 AFN surface 제어가 `NoVent` 라 의도적
     # 자연환기는 애초에 일어나지 않았고, 관측된 냉방 감소는 찬 외기가 틈새로 더
@@ -1345,14 +1405,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     # AFN 은 제거하지 않고 **명시 opt-in** 으로 남긴다. 압력시험값·개구부 운전
     # 스케줄이 입력되면 그때 의미가 있다. 다만 그 경우에도 위 형상 의존성은
     # 그대로이므로 계수 정규화 없이 쓰면 안 된다.
-    infil_model = str(project_data.get("infiltrationModel") or "fixed").lower()
-    use_afn = infil_model == "afn"
-    if bench.get("disableAirflowNetwork"):
-        use_afn = False
-    # 건물 전체 자연침기 **목표 가정값**. "현재 결과와 비슷한 값"이 아니라
-    # 실측 기밀성이 없을 때 쓰는 보수적 기본값이다. 0.3 / 1.0 민감도와 함께 본다.
-    building_ach = float(bench.get("infiltrationAch",
-                                   project_data.get("infiltrationAch", DEFAULT_INFILTRATION_ACH)))
+    # 건물 전체 자연침기 **목표 가정값**. 검증된 기준값이 아니라 임시 기본값이다.
+    use_afn, building_ach = resolve_infiltration_settings(project_data, bench)
     if use_afn:
         idf.setup_airflow_network()
         print(f"💨 침기 모델: AirflowNetwork (opt-in) — 표면 개수 의존성 주의")
@@ -1806,7 +1860,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             "confidence": "medium",
         }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
                                     building_ach, use_afn,
-                                    measured=_measure_infiltration(temp_dir_abs, zones))]
+                                    measured=_measure_infiltration(temp_dir_abs, zones,
+                                                                   zone_floor_areas))]
 
         # 적용된 설비 내역 동봉 (입력/자동 배지 표시용)
         hvac_equipment_block = {
