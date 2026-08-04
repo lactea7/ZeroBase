@@ -78,26 +78,51 @@ def _sum_kwh(df, cols, n_rows, np_mod):
     return df[cols].sum(axis=1).values / J_TO_KWH
 
 
-def extract_time_axis(df, np_mod) -> Tuple[TimeResolution, Any, Any]:
-    """월·시각 축을 뽑는다.
+def detect_resolution(df) -> TimeResolution:
+    """해상도를 판정한다.
 
-    ⚠️ 해상도를 **행 수로 추정하지 않는다.** 예전 코드는 `len(df) > 365` 로
-    판단했는데 그것은 데이터가 무엇인지가 아니라 얼마나 많은지를 본 것이다.
-    첫 열이 EnergyPlus 시각 형식(' 01/01  01:00:00')인지로 판정한다.
+    ⚠️ **행 수로 추정하면 안 된다.** 예전 코드(그리고 내가 처음 옮긴 판본)는
+    `len(df) > 365` 를 썼는데, 그것은 데이터가 무엇인지가 아니라 얼마나 많은지를
+    본 것이다. 365행 이하의 정상적인 시간별 부분 실행(설계일·부분 기간)이
+    월별로 오판되고, 그러면 환기에 730배가 붙어 결과가 통째로 틀어진다.
+
+    EnergyPlus 는 **모든 열 이름 끝에 보고주기를 적는다**
+    (`...Lights Electricity Energy [J](Hourly)`). 그것을 1순위로 쓴다.
+    없으면 타임스탬프 간격을 보고, 그래도 모르면 마지막으로 행 수를 쓴다.
     """
-    total_rows = len(df)
+    names = " ".join(str(c) for c in df.columns)
+    hourly_tags = names.count("(Hourly)") + names.count("(TimeStep)")
+    monthly_tags = names.count("(Monthly)")
+    if hourly_tags or monthly_tags:
+        return TimeResolution.HOURLY if hourly_tags >= monthly_tags else TimeResolution.MONTHLY
+
+    # 2순위: 타임스탬프에 시각이 붙어 있고 서로 다른 시각이 나오면 시간별이다.
     first = df.iloc[:, 0].astype(str)
-    looks_timestamped = first.str.contains(r"\d{2}/\d{2}", regex=True).any()
+    hours = first.str.extract(r"\s+(\d{1,2}):")[0].dropna()
+    if len(hours) > 1 and hours.nunique() > 1:
+        return TimeResolution.HOURLY
 
-    if looks_timestamped and total_rows > 365:
-        months = first.str.extract(r"(\d{2})/\d{2}")[0].fillna(1).astype(int).values
-        hours = first.str.extract(r"\s+(\d{2}):")[0].fillna(12).astype(int).values
-        return TimeResolution.HOURLY, months, hours
+    # 3순위(호환 폴백): 행 수. 여기까지 오면 판정 근거가 약하다.
+    return TimeResolution.HOURLY if len(df) > 365 else TimeResolution.MONTHLY
 
+
+def extract_time_axis(df, np_mod) -> Tuple[TimeResolution, Any, Any]:
+    """해상도와 월·시각 축을 뽑는다."""
+    total_rows = len(df)
+    resolution = detect_resolution(df)
+    first = df.iloc[:, 0].astype(str)
+    has_stamp = first.str.contains(r"\d{1,2}/\d{1,2}", regex=True).any()
+
+    if resolution is TimeResolution.HOURLY and has_stamp:
+        months = first.str.extract(r"(\d{1,2})/\d{1,2}")[0].fillna(1).astype(int).values
+        hours = first.str.extract(r"\s+(\d{1,2}):")[0].fillna(12).astype(int).values
+        return resolution, months, hours
+
+    # 월별(또는 타임스탬프가 없는 경우): 1월부터 순서대로 매긴다.
     months = np_mod.arange(1, min(13, total_rows + 1))
     if len(months) < total_rows:                     # 방어: 13행 이상인 월별 파일
         months = np_mod.resize(months, total_rows)
-    return TimeResolution.MONTHLY, months, np_mod.full(total_rows, 12)
+    return resolution, months, np_mod.full(total_rows, 12)
 
 
 def parse_outputs(df, zones: List[dict], *, np_mod,

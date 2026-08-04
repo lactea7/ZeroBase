@@ -47,13 +47,41 @@ def _kwh(values):
 
 # ── 시간축 ──────────────────────────────────────────────
 
-def test_monthly_csv_is_detected_as_monthly():
-    """행이 12개뿐이면 시각 형식이라도 월별이다."""
+# ⚠️ 해상도를 **행 수로 추정하면 안 된다.** 365행 이하의 정상적인 시간별 부분 실행이
+# 월별로 오판되면 환기에 730 배가 붙어 결과가 통째로 틀어진다.
+# EnergyPlus 는 모든 열 이름 끝에 보고주기를 적으므로 그것을 1순위로 쓴다.
+
+def test_monthly_csv_is_detected_by_column_tag():
     df = pd.DataFrame({"Date/Time": [f"January {i}" for i in range(1, 13)],
-                       "X:Lights Electricity Energy [J](Hourly)": [0.0] * 12})
+                       "X:Lights Electricity Energy [J](Monthly)": [0.0] * 12})
     s = parse_outputs(df, [], np_mod=np)
     assert s.resolution is TimeResolution.MONTHLY
     assert list(s.months) == list(range(1, 13))
+
+
+def test_short_hourly_run_is_not_mistaken_for_monthly():
+    """설계일·부분 기간 실행은 행이 적어도 시간별이다."""
+    stamps = [f" 07/21  {h:02d}:00:00" for h in range(1, 25)]
+    df = pd.DataFrame({"Date/Time": stamps,
+                       "X:Lights Electricity Energy [J](Hourly)": [0.0] * 24})
+    s = parse_outputs(df, [], np_mod=np)
+    assert s.resolution is TimeResolution.HOURLY
+    assert set(s.months) == {7}
+
+
+def test_full_year_hourly_is_hourly():
+    stamps = [f" {m:02d}/{d:02d}  {h:02d}:00:00"
+              for m in range(1, 13) for d in (1, 2) for h in range(1, 25)]
+    df = pd.DataFrame({"Date/Time": stamps,
+                       "X:Lights Electricity Energy [J](Hourly)": [0.0] * len(stamps)})
+    assert parse_outputs(df, [], np_mod=np).resolution is TimeResolution.HOURLY
+
+
+def test_unlabelled_columns_fall_back_to_timestamps():
+    """보고주기 표기가 없으면 타임스탬프 간격으로 판정한다."""
+    stamps = [f" 03/01  {h:02d}:00:00" for h in range(1, 13)]
+    df = pd.DataFrame({"Date/Time": stamps, "X:Lights Electricity Energy [J]": [0.0] * 12})
+    assert parse_outputs(df, [], np_mod=np).resolution is TimeResolution.HOURLY
 
 
 def test_hourly_stamps_are_parsed():
@@ -202,10 +230,11 @@ def test_ventilation_energy_includes_fan_and_uses_same_factor():
         "Fans:Electricity [J](Hourly)": _kwh([0.5] * N),
     })
     s = parse_outputs(df, [ZONE], np_mod=np, hvac_mode="pthp")
+    # 열 이름이 (Hourly) 이므로 4행이라도 시간별이다 — 730 배가 붙으면 안 된다
+    assert s.resolution is TimeResolution.HOURLY
     vent = ventilation_energy_kwh(s, np)
-    # 4행이라 월별로 판정된다 → 시간 환산 730 이 걸린다.
-    # 1.2 kg/s ÷ 1.2 = 1 m³/s → ×730 h → ×0.8 kWh/m³ + 팬 0.5
-    assert vent == pytest.approx(np.array([1.0 * MONTHLY_HOURS * VENT_ENERGY_PER_M3 + 0.5] * N))
+    # 1.2 kg/s ÷ 1.2 = 1 m³ → ×0.8 kWh/m³ + 팬 0.5
+    assert vent == pytest.approx(np.array([1.0 * VENT_ENERGY_PER_M3 + 0.5] * N))
 
 
 def test_hourly_ventilation_has_no_monthly_multiplier():

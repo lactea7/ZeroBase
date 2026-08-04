@@ -54,6 +54,12 @@ detect_surfaces() {
   done
 }
 
+# codex 패널만 필수다.
+#
+# ⚠️ 예전엔 ollama 패널도 필수로 요구했다. 그런데 중재를 gemma → Gemini 로 옮긴 뒤로
+# **ollama 는 어떤 스크립트에서도 쓰이지 않는다**(review-loop.sh 에 OLLAMA 참조 0건).
+# 그 결과 ollama 패널을 닫아두면 codex 가 멀쩡히 떠 있어도 검토 전체가 거부됐다.
+# 쓰지 않는 자원을 필수로 요구하면 안 된다.
 require_surfaces() {
   CODEX_SURFACE=${RELAY_CODEX_SURFACE:-}
   OLLAMA_SURFACE=${RELAY_OLLAMA_SURFACE:-}
@@ -61,18 +67,18 @@ require_surfaces() {
   # 한 번 비었다고 탐지 전체를 포기하면 재부팅 직후마다 실패한다.
   local attempt=1
   while [ "$attempt" -le 3 ]; do
-    if [ -n "${CODEX_SURFACE:-}" ] && [ -n "${OLLAMA_SURFACE:-}" ]; then break; fi
+    [ -n "${CODEX_SURFACE:-}" ] && break
     [ "$attempt" -gt 1 ] && sleep 2
     detect_surfaces
     attempt=$((attempt + 1))
   done
-  if [ -z "${CODEX_SURFACE:-}" ] || [ -z "${OLLAMA_SURFACE:-}" ]; then
-    echo "ERROR: 패널을 찾지 못했습니다. codex/ollama 세션이 떠 있는지 확인하거나" >&2
-    echo "       RELAY_CODEX_SURFACE / RELAY_OLLAMA_SURFACE 로 직접 지정하세요." >&2
+  if [ -z "${CODEX_SURFACE:-}" ]; then
+    echo "ERROR: codex 패널을 찾지 못했습니다. 터미널 패널에서 'codex' 를 띄우거나" >&2
+    echo "       RELAY_CODEX_SURFACE=surface:N 으로 직접 지정하세요." >&2
     "$CMUX" tree >&2
     exit 1
   fi
-  echo "▸ codex=$CODEX_SURFACE  ollama=$OLLAMA_SURFACE" >&2
+  echo "▸ codex=$CODEX_SURFACE  ollama=${OLLAMA_SURFACE:-(미사용)}" >&2
 }
 
 # --- TUI 줄바꿈 되돌리기 -------------------------------------------------------
