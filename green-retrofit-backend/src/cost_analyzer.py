@@ -572,142 +572,45 @@ class LCCAnalyzer:
             df = pd.read_csv(eplus_csv_path).fillna(0)
             df.columns = [c.strip() for c in df.columns]
             
-            h_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Heating Energy' in c and '[J]' in c]
-            c_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Cooling Energy' in c and '[J]' in c]
-            h_rate_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Heating Rate' in c and '[W]' in c]
-            c_rate_cols = [c for c in df.columns if 'Ideal Loads' in c and 'Cooling Rate' in c and '[W]' in c]
-            l_cols = [c for c in df.columns if 'Lights' in c and 'Electricity Energy' in c and '[J]' in c]
-            e_cols = [c for c in df.columns if 'Electric Equipment' in c and 'Electricity Energy' in c and '[J]' in c]
-            # ⚠️ 급탕은 존마다 컬럼이 따로 있으므로 전부 합산 (기존 next()는 1개 존만 잡아 과소)
-            dhw_cols = [c for c in df.columns if 'Water Use Equipment Heating Energy' in c]
-            vent_cols = [c for c in df.columns if 'Mechanical Ventilation Mass Flow Rate' in c and '[kg/s]' in c]
-            demand_col = next((c for c in df.columns if 'Facility Total Electric Demand Rate' in c), None)
-
             import numpy as np
+            from src.energyplus.outputs import parse_outputs, ventilation_energy_kwh
 
-            monthly_data = []
-            
             total_rows = len(df)
-            is_hourly = total_rows > 365
-            
-            if is_hourly:
-                dt_str = df.iloc[:, 0].astype(str)
-                # EnergyPlus format: ' 01/01  01:00:00'
-                df['month'] = dt_str.str.extract(r'(\d{2})/\d{2}')[0].fillna(1).astype(int)
-                df['hour'] = dt_str.str.extract(r'\s+(\d{2}):')[0].fillna(12).astype(int)
-            else:
-                df['month'] = np.arange(1, min(13, total_rows + 1))
-                df['hour'] = 12
 
-            total_c_con_kwh = np.zeros(total_rows)
-            total_h_con_kwh = np.zeros(total_rows)
-            total_c_req_kwh = np.zeros(total_rows)
-            total_h_req_kwh = np.zeros(total_rows)
-            total_c_rate_w = np.zeros(total_rows)
-            total_h_rate_w = np.zeros(total_rows)
+            # ── EnergyPlus 출력 파싱 ──
+            # 열 탐색·단위 환산·HVAC 모드별 요구량/소비량 산출은 energyplus/outputs.py 로
+            # 옮겼다. 여기서는 계약(EnergyTimeSeries)을 받아 기존 지역변수에 풀어놓는다.
+            # (아래 요금·PV·월별 집계가 아직 이 변수들과 원본 df 를 쓰고 있어 과도기적이다)
+            series = parse_outputs(
+                df, zones, np_mod=np,
+                hvac_mode=kwargs.get("hvac_mode") or ("pthp" if kwargs.get("use_pthp") else "ideal"),
+                heating_fuel=kwargs.get("heating_fuel"),
+                heating_fuel_eff=kwargs.get("heating_fuel_eff") or 0.9,
+                heat_source=kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE),
+                is_geothermal=is_geothermal,
+            )
 
-            # 실기기 모드: EnergyPlus가 산출한 '실제 소비'를 그대로 사용 (COP 나눗셈 근사 제거)
-            #   pthp — 히트펌프(전기/지열): 난방·냉방 모두 전기 미터
-            #   fuel — 연료 보일러+개별냉방(가스/등유/지역난방): 난방은 Heating:<연료> 미터(연소효율
-            #          반영된 연료 소비), 냉방은 Cooling:Electricity(DX 실소비)
             use_pthp = kwargs.get("use_pthp", False)
-            hvac_mode = kwargs.get("hvac_mode") or ("pthp" if use_pthp else "ideal")
-            heating_fuel = kwargs.get("heating_fuel")
-            heating_fuel_eff = kwargs.get("heating_fuel_eff") or 0.9
-            # 난방 효율은 '프로젝트 열원'으로 결정해야 함(존 heatingFuelId 기본값=전기 오용 방지).
-            # 지역난방(11)인데 전기 히트펌프 COP를 적용하던 버그 수정.
-            proj_heat_source = kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
-            fan_kwh = np.zeros(total_rows)
+            monthly_data = []
+            df['month'] = np.array(series.months)
+            df['hour'] = np.array(series.hours)
+            is_hourly = series.resolution.value == "hourly"
 
-            # 실기기 미터가 없어 추정 폴백을 쓴 경우 사용자 경고로 남긴다 (조용한 추정 방지)
-            _meter_fallback_notes = []
+            total_h_req_kwh = np.array(series.heating_requirement_kwh)
+            total_c_req_kwh = np.array(series.cooling_requirement_kwh)
+            total_h_con_kwh = np.array(series.heating_consumption_kwh)
+            total_c_con_kwh = np.array(series.cooling_consumption_kwh)
+            total_h_rate_w = np.array(series.heating_rate_w)
+            total_c_rate_w = np.array(series.cooling_rate_w)
+            l_kwh = np.array(series.lighting_kwh)
+            e_kwh = np.array(series.equipment_kwh)
+            dhw_kwh = np.array(series.dhw_kwh)
+            fan_kwh = np.array(series.fan_kwh)
+            vent_kwh = ventilation_energy_kwh(series, np)
+            v_flow = np.array(series.ventilation_kg_s)
 
-            def _note_fallback(what, how):
-                _meter_fallback_notes.append(
-                    f"실기기 미터({what})가 시뮬레이션 출력에 없어 {how}로 추정했습니다 — 해당 항목은 실소비가 아닌 근사치입니다"
-                )
-
-            if hvac_mode in ("pthp", "fuel"):
-                sh_cols = [c for c in df.columns if 'Zone Air System Sensible Heating Energy' in c]
-                sc_cols = [c for c in df.columns if 'Zone Air System Sensible Cooling Energy' in c]
-                total_h_req_kwh = (df[sh_cols].sum(axis=1).values / 3600000.0) if sh_cols else np.zeros(total_rows)
-                total_c_req_kwh = (df[sc_cols].sum(axis=1).values / 3600000.0) if sc_cols else np.zeros(total_rows)
-                ce_col = next((c for c in df.columns if 'Cooling:Electricity' in c and '[J]' in c), None)
-                fe_col = next((c for c in df.columns if 'Fans:Electricity' in c and '[J]' in c), None)
-                if not ce_col:
-                    _note_fallback("Cooling:Electricity", "냉방 요구량÷대표COP")
-
-                if hvac_mode == "pthp":
-                    he_col = next((c for c in df.columns if 'Heating:Electricity' in c and '[J]' in c), None)
-                    if not he_col:
-                        _note_fallback("Heating:Electricity", "난방 요구량÷대표COP 3.5")
-                    # 실소비(전력). 미터가 없으면 요구량/대표COP로 보수적 추정.
-                    total_h_con_kwh = (df[he_col].values / 3600000.0) if he_col else (total_h_req_kwh / 3.5)
-                    total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 4.2)
-                else:
-                    hf_col = next((c for c in df.columns
-                                   if heating_fuel and f'Heating:{heating_fuel}' in c and '[J]' in c), None)
-                    if not hf_col:
-                        _note_fallback(f"Heating:{heating_fuel}", f"난방 요구량÷효율 {heating_fuel_eff}")
-                    # 난방 = 연료 실소비(연소효율 반영). 미터 없으면 요구량/효율로 추정.
-                    total_h_con_kwh = (df[hf_col].values / 3600000.0) if hf_col else (total_h_req_kwh / heating_fuel_eff)
-                    # 냉방 = 개별 에어컨 DX 실소비(전기)
-                    total_c_con_kwh = (df[ce_col].values / 3600000.0) if ce_col else (total_c_req_kwh / 3.3)
-
-                fan_kwh = (df[fe_col].values / 3600000.0) if fe_col else np.zeros(total_rows)
-            else:
-                for z in zones:
-                    # 컬럼명은 "{존ID}_IDEAL:Zone Ideal Loads ..." 형식 → 접두 정확 매칭.
-                    # 부분문자열(in) 매칭은 (1) 'HEATING'이라는 존이 모든 존의 Heating 컬럼과
-                    # 매칭돼 난방이 통째로 이중집계되고 (2) '1 TOILET'이 '1 TOILET / ACCESSIBLE'
-                    # 컬럼에도 매칭돼 중복 합산되는 버그가 있었음.
-                    z_key = z['id'].replace(" ", "_").upper() + "_IDEAL:"
-                    zh_cols = [c for c in h_cols if c.upper().startswith(z_key)]
-                    zc_cols = [c for c in c_cols if c.upper().startswith(z_key)]
-                    zr_h_cols = [c for c in h_rate_cols if c.upper().startswith(z_key)]
-                    zr_c_cols = [c for c in c_rate_cols if c.upper().startswith(z_key)]
-
-                    zh_kwh = df[zh_cols].sum(axis=1).values / 3600000.0 if zh_cols else 0.0
-                    zc_kwh = df[zc_cols].sum(axis=1).values / 3600000.0 if zc_cols else 0.0
-                    zh_rate = df[zr_h_cols].sum(axis=1).values if zr_h_cols else 0.0
-                    zc_rate = df[zr_c_cols].sum(axis=1).values if zr_c_cols else 0.0
-
-                    if not z.get("isConditioned", True):
-                        continue
-
-                    hvac_sys = z.get('hvacSystemId', 5)
-                    # 난방 연료는 프로젝트 열원(proj_heat_source)으로 결정. 존 heatingFuelId(기본=전기)를
-                    # 쓰면 지역난방(11)에도 전기 히트펌프 COP(~3.5)가 적용돼 난방 에너지가 ~3배 과소산정됨.
-                    fuel_type = proj_heat_source
-
-                    if is_geothermal:
-                        h_cop, c_cop = 4.5, 5.0
-                    else:
-                        c_cop = self.COOLING_EFF_DB.get(hvac_sys, 2.8)
-                        # 지역난방(11)은 효율~1.0(열량 전달 거의 손실 없음). DB에 없으면 0.95로 폴백.
-                        h_default = 0.95 if fuel_type == 11 else 1.0
-                        h_cop = self.HEATING_EFF_DB.get(hvac_sys, {}).get(fuel_type, h_default)
-
-                    total_h_req_kwh += zh_kwh
-                    total_c_req_kwh += zc_kwh
-                    total_h_con_kwh += zh_kwh / h_cop
-                    total_c_con_kwh += zc_kwh / c_cop
-                    total_h_rate_w += zh_rate / h_cop
-                    total_c_rate_w += zc_rate / c_cop
-
-            l_kwh = df[l_cols].sum(axis=1).values / 3600000.0 if l_cols else 0.0
-            e_kwh = df[e_cols].sum(axis=1).values / 3600000.0 if e_cols else 0.0
-
-            dhw_j = df[dhw_cols].sum(axis=1).values if dhw_cols else np.zeros(total_rows)
-            dhw_kwh = (dhw_j / 3600000.0) * 1.1
-
-            v_flow = df[vent_cols].sum(axis=1).values if vent_cols else np.zeros(total_rows)
-            vent_multiplier = 1.0 if is_hourly else 730.0
-            # 외기 처리 에너지 = 환기 체적(m³) × 단위체적당 에너지(kWh/m³).
-            # req(요구량)와 con(소요량)이 반드시 같은 계수를 거쳐야 한다 —
-            # 예전에는 req 에만 이 계수가 빠져 체적(m³)이 kWh 합계에 섞여 들어갔다.
-            vent_vol_m3 = (v_flow / 1.2) * vent_multiplier          # 질량유량 → 체적
-            vent_kwh = vent_vol_m3 * self.VENT_ENERGY_PER_M3 + fan_kwh  # PTHP 팬 전력 포함
+            # 미터가 없어 추정으로 대체한 항목 — 조용한 추정을 막기 위해 사용자에게 노출
+            _meter_fallback_notes = [s.note for s in series.context.fallback_steps if s.note]
 
             if use_pthp:
                 # 히트펌프 난방=전기 → 난방 소비도 전기요금으로 (열 요금엔 급탕만)
@@ -764,9 +667,10 @@ class LCCAnalyzer:
 
             a_h_req = np.sum(total_h_req_kwh)
             a_c_req = np.sum(total_c_req_kwh)
-            a_dhw_req = np.sum(dhw_j / 3600000.0) if dhw_cols else 0.0
+            # dhw_kwh 에는 배관손실 1.1 이 곱해져 있으므로 요구량은 되돌린다
+            a_dhw_req = np.sum(dhw_kwh) / 1.1
             # 환기 요구량도 에너지(kWh)여야 한다. 팬 전력은 소요량 쪽에만 더한다.
-            a_vent_req = np.sum(vent_vol_m3) * self.VENT_ENERGY_PER_M3
+            a_vent_req = np.sum(vent_kwh - fan_kwh)
             
             a_h_con = np.sum(total_h_con_kwh)
             a_c_con = np.sum(total_c_con_kwh)
@@ -775,6 +679,8 @@ class LCCAnalyzer:
             a_dhw_con = np.sum(dhw_kwh)
             a_vent_con = np.sum(vent_kwh)
 
+            demand_col = next((c for c in df.columns
+                               if 'Facility Total Electric Demand Rate' in c), None)
             base_demand = df[demand_col].values if demand_col else np.zeros(total_rows)
             peak_kw_series = (base_demand + total_c_rate_w + total_h_rate_w + (v_flow / 1.2 * 0.8 * 1000.0)) / 1000.0
             
