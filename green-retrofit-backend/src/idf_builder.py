@@ -750,6 +750,33 @@ class IdfBuilder:
         self.add("Output:Meter", ["Heating:Electricity", "Hourly"])
         self.add("Output:Meter", ["Cooling:Electricity", "Hourly"])
         self.add("Output:Meter", ["Fans:Electricity", "Hourly"])
+
+        # ── 침기 진단 ──
+        # 침기 가정이 결과에 얼마나 영향을 주는지 **측정 가능하게** 만든다.
+        # 지금까지는 코드가 add_infiltration(ach=0.5) 로 표기하면서 실제로는
+        # AFN 의 crack 계수가 침기를 정했고(AFN 존에서 ZoneInfiltration 은
+        # 시뮬레이션되지 않는다), 그 값이 외피 기밀성이 아니라 **표면 개수**에
+        # 좌우됐다. 어느 존이 어느 모델로 얼마나 새는지 볼 수 없으면 판정할 수 없다.
+        #
+        # 존재하지 않는 변수는 EnergyPlus 가 조용히 건너뛴다(경고만) — AFN 존과
+        # 고정 ACH 존이 섞여 있어도 양쪽을 같이 요청해 두는 것이 맞다.
+        for var in (
+            # AFN 경로
+            "AFN Zone Infiltration Air Change Rate",
+            "AFN Zone Infiltration Volume",
+            "AFN Zone Infiltration Sensible Heat Loss Energy",
+            "AFN Zone Infiltration Sensible Heat Gain Energy",
+            "AFN Zone Ventilation Air Change Rate",
+            "AFN Zone Mixing Volume",
+            # 고정 ACH 경로
+            "Zone Infiltration Air Change Rate",
+            "Zone Infiltration Sensible Heat Loss Energy",
+            "Zone Infiltration Sensible Heat Gain Energy",
+            # 열수지 대조용
+            "Zone Mean Air Temperature",
+        ):
+            self.add("Output:Variable", ["*", var, "Hourly"])
+
         self.add("OutputControl:Table:Style", ["Comma"])
         self.add("Output:Table:SummaryReports", ["AllSummary"])
         return self

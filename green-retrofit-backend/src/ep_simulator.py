@@ -651,6 +651,68 @@ def _evaluate_alternatives(payload: dict, result_data: dict, temp_dir: str, stag
               f"{'' if rec['advisable'] else ' → 비권장(장기 손해)'}")
 
 
+# 현재 침기 모델의 식별자. 모델을 바꾸면 반드시 올린다 —
+# 저장된 과거 결과가 어느 모델로 계산됐는지 구별할 수 없으면 재계산 판단을 못 한다.
+INFILTRATION_MODEL_VERSION = "legacy-afn-surface-count-v1"
+
+
+def _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas, bench):
+    """침기 가정을 결과에 남긴다 — 지금은 **숨어 있어서** 판정이 불가능하다.
+
+    코드는 `add_infiltration(ach=0.5)` 로 0.5 ACH 를 표기하지만, AFN 이 켜진 존에서는
+    EnergyPlus 가 ZoneInfiltration 을 아예 시뮬레이션하지 않고 AFN 의 crack 계수가
+    침기를 정한다. 그 계수(`WallCrack` 0.01/0.65)는 면적·둘레로 정규화돼 있지 않아
+    **총 누기가 외피 기밀성이 아니라 표면 개수에 좌우된다.**
+    ASHRAE 140 케이스 600 실측: 같은 건물의 북벽만 1→8 폴리곤으로 쪼개자
+    난방부하가 6.50 → 8.67 MWh (+33%) 늘었고, 실효 침기는 약 1.3 → 2.0 ACH 였다.
+    """
+    afn_zones = [z for z in zones if z.get("id") in valid_afn_zones]
+    fixed_zones = [z for z in zones if z.get("id") not in valid_afn_zones]
+
+    def _area(zs):
+        return sum(zone_floor_areas.get(z.get("id"), 0.0) or 0.0 for z in zs)
+
+    afn_area, fixed_area = _area(afn_zones), _area(fixed_zones)
+    total_area = afn_area + fixed_area
+    afn_pct = (afn_area / total_area * 100) if total_area else 0.0
+    declared_ach = bench.get("infiltrationAch", 0.5)
+
+    if afn_zones and fixed_zones:
+        value = (f"혼합 — AFN {len(afn_zones)}개 실({afn_pct:.0f}% 면적) / "
+                 f"고정 {declared_ach} ACH {len(fixed_zones)}개 실")
+        confidence = "low"
+    elif afn_zones:
+        value = f"AirflowNetwork 전체 {len(afn_zones)}개 실"
+        confidence = "low"
+    else:
+        value = f"고정 {declared_ach} ACH 전체 {len(fixed_zones)}개 실"
+        confidence = "medium"
+
+    note = ("외기 접촉면이 2개 이상인 실에는 AirflowNetwork 가, 그 외에는 고정 ACH 가 "
+            "적용됩니다. AFN 실에서는 표기된 고정 ACH 가 적용되지 않고 틈새 계수가 "
+            "침기를 결정하며, 그 값이 외피 기밀성이 아니라 면 분할 개수에 좌우됩니다 "
+            "— 같은 건물이라도 도면에서 벽을 잘게 나눌수록 침기가 커집니다. "
+            "기밀성 실측값을 입력받지 않으므로 이 값은 검증되지 않은 가정입니다.")
+    if afn_zones:
+        note += " ⚠️ 난방·냉방 결과의 불확실성이 큽니다."
+
+    return {
+        "key": "infiltration",
+        "label": "침기(외기 누입)",
+        "value": value,
+        "note": note,
+        "confidence": confidence,
+        "modelVersion": INFILTRATION_MODEL_VERSION,
+        "detail": {
+            "afnZoneCount": len(afn_zones),
+            "fixedZoneCount": len(fixed_zones),
+            "afnFloorAreaPct": round(afn_pct, 1),
+            "declaredAch": declared_ach,
+            "declaredAchAppliesTo": "고정 ACH 실만" if afn_zones else "전체",
+        },
+    }
+
+
 def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                               allow_benchmark: bool = False):
     project_data = payload.get("projectData", {})
@@ -1644,7 +1706,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             "note": ("자기참조로 기록된 최하층 바닥의 경계조건입니다. "
                      "지면 접촉으로 바꾸면 지면 열손실이 반영됩니다."),
             "confidence": "medium",
-        }]
+        }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas, bench)]
 
         # 적용된 설비 내역 동봉 (입력/자동 배지 표시용)
         hvac_equipment_block = {
