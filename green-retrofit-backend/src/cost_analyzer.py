@@ -575,6 +575,7 @@ class LCCAnalyzer:
             import numpy as np
             from src.energyplus.outputs import parse_outputs, ventilation_energy_kwh
             from src.domain.energy_aggregation import annual_summary, monthly_breakdown
+            from src.domain.energy_metrics import build_metrics
             from src.economics.tariffs import (apply_pv_self_consumption, electricity_rates,
                                                 heat_source_entry, split_by_carrier)
             from src.energyplus.surfaces import extract_surface_outputs
@@ -871,51 +872,15 @@ class LCCAnalyzer:
                 lcc_pv += discounted_cost
                 cumulative_lcc_30y.append(int(lcc_pv))
 
-            matrix = {
-                "heating": {"req": round(a_h_req/total_area, 1), "con": round(a_h_con/total_area, 1)},
-                "cooling": {"req": round(a_c_req/total_area, 1), "con": round(a_c_con/total_area, 1)},
-                "hotwater": {"req": round(a_dhw_req/total_area, 1), "con": round(a_dhw_con/total_area, 1)},
-                "lighting": {"req": round(a_l_con/total_area, 1), "con": round(a_l_con/total_area, 1)},
-                "ventilation": {"req": round(a_vent_req/total_area, 1), "con": round(a_vent_con/total_area, 1)},
-                "equipment": {"req": round(a_e_con/total_area, 1), "con": round(a_e_con/total_area, 1)},
-                "renewable": {"req": -round(pv_gen, 1), "con": -round(pv_gen, 1)}
-            }
-            
-            # ZEB 등급 평가용 5대 에너지 기준 소요량 (신재생, 기기부하 제외)
-            total_con_zeb = sum(v["con"] for k,v in matrix.items() if k not in ["renewable", "equipment"])
-            independence_val = min(100, (abs(matrix["renewable"]["con"]) / total_con_zeb * 100)) if total_con_zeb > 0 else 0
-            
-            # 실제 전체 에너지 소요량 (LCC 및 탄소배출, 요금제용)
-            total_con_actual = sum(v["con"] for k,v in matrix.items() if k != "renewable")
-
-            # ── 에너지원별 분리: 전기(냉방·조명·환기·기기) vs 열(난방·급탕) ──
-            # 1차에너지/CO2를 단일 전기계수로 일괄 적용하던 것을 원별 계수로 분리
-            elec_con_zeb = matrix["cooling"]["con"] + matrix["lighting"]["con"] + matrix["ventilation"]["con"]
-            heat_con     = matrix["heating"]["con"] + matrix["hotwater"]["con"]
-            elec_con_actual = elec_con_zeb + matrix["equipment"]["con"]
-
-            primary_per_m2 = elec_con_zeb * self.PRIMARY_FACTOR_ELEC + heat_con * heat_src["primary"]
-            co2_per_m2     = elec_con_actual * self.CO2_FACTOR_ELEC + heat_con * heat_src["co2"]
-
-            # ── 항목별 1차에너지·CO2를 matrix 에 실어 내린다 ──────────────────────
-            # 프런트가 모든 항목에 전기계수(2.75/0.466)를 곱하던 탓에, 지역난방·가스를
-            # 고르면 상세 표 합계와 요약 카드가 서로 달랐다. 계수 적용은 백엔드에서만
-            # 하고 프런트는 받은 값을 그대로 표시한다.
-            #   primary      : 원별 1차계수 적용 (기기 포함 — 정보용 총량)
-            #   gradePrimary : 등급 산정용. 기기·신재생 제외 → 합계가 summary.primary_per_m2
-            #   co2          : 원별 배출계수 적용. 신재생 제외 → 합계가 summary.co2_per_m2
-            _heat_cats = ("heating", "hotwater")
-            for _cat, _v in matrix.items():
-                _con = _v["con"]
-                if _cat in _heat_cats:
-                    _pf, _cf = heat_src["primary"], heat_src["co2"]
-                else:
-                    _pf, _cf = self.PRIMARY_FACTOR_ELEC, self.CO2_FACTOR_ELEC
-                _v["primary"] = round(_con * _pf, 1)
-                _v["co2"] = 0.0 if _cat == "renewable" else round(_con * _cf, 2)
-                _v["gradePrimary"] = (
-                    0.0 if _cat in ("equipment", "renewable") else round(_con * _pf, 1)
-                )
+            # 매트릭스·1차에너지·CO2·자립률은 domain/energy_metrics.py 로 옮겼다.
+            metrics = build_metrics(
+                annual, floor_area_m2=total_area, pv_generation_kwh_m2=pv_gen,
+                heat_primary_factor=heat_src["primary"], heat_co2_factor=heat_src["co2"])
+            matrix = metrics.as_response_dict()
+            independence_val = metrics.renewable_independence_pct
+            total_con_actual = metrics.consumption_kwh_m2
+            primary_per_m2 = metrics.primary_energy_kwh_m2
+            co2_per_m2 = metrics.co2_kg_m2
 
             summary = {
                 "demand_per_m2": sum(v["req"] for k,v in matrix.items() if k != "renewable"),
