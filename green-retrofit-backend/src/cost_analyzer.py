@@ -577,6 +577,7 @@ class LCCAnalyzer:
             from src.domain.energy_aggregation import annual_summary, monthly_breakdown
             from src.economics.tariffs import (apply_pv_self_consumption, electricity_rates,
                                                 heat_source_entry, split_by_carrier)
+            from src.energyplus.surfaces import extract_surface_outputs
 
             total_rows = len(df)
 
@@ -1140,7 +1141,7 @@ class LCCAnalyzer:
                 ]
             }
             
-            surface_thermal, surface_airflow = self._surface_outputs(df, surfaces)
+            surface_thermal, surface_airflow = extract_surface_outputs(df, surfaces)
 
             final_data = {
                 "summary": summary, 
@@ -1319,38 +1320,4 @@ class LCCAnalyzer:
 
         return recommendations
 
-    def _surface_outputs(self, df, surfaces):
-        """면별 외피 온도/일사량과 창호 기류(월별 12개) 시계열 추출 — 3D 뷰어 오버레이용."""
-        surface_thermal = {}
-        surface_airflow = {}
-        for s in surfaces or []:
-            s_id = s['id'].upper()
-            temp_col = rad_col = None
-            win_id = f"WIN_{s['id']}".upper()
-            flow1_col = flow2_col = None
-            for col in df.columns:
-                col_upper = col.upper()
-                if col_upper.startswith(s_id + ":") or col_upper.startswith(s_id + "_MIRROR:"):
-                    if 'SURFACE OUTSIDE FACE TEMPERATURE' in col_upper:
-                        temp_col = col
-                    elif 'SURFACE OUTSIDE FACE INCIDENT SOLAR' in col_upper:
-                        rad_col = col
-                elif col_upper.startswith(win_id + ":"):
-                    if 'NODE 1 TO NODE 2 VOLUME FLOW RATE' in col_upper:
-                        flow1_col = col
-                    elif 'NODE 2 TO NODE 1 VOLUME FLOW RATE' in col_upper:
-                        flow2_col = col
-
-            temp_months, rad_months = [], []
-            inflow_months, outflow_months = [], []
-            for m in range(min(12, len(df))):
-                temp_months.append(round(float(df.iloc[m][temp_col]) if temp_col else 20.0, 2))
-                rad_months.append(round(float(df.iloc[m][rad_col]) if rad_col else 100.0, 2))
-                inflow_months.append(round((float(df.iloc[m][flow1_col]) if flow1_col else 0.0) * 1000.0, 2))
-                outflow_months.append(round((float(df.iloc[m][flow2_col]) if flow2_col else 0.0) * 1000.0, 2))
-
-            surface_thermal[s['id']] = {"temperature": temp_months, "radiation": rad_months}
-            surface_airflow[s['id']] = {"inflow": inflow_months, "outflow": outflow_months}
-
-        return surface_thermal, surface_airflow
 
