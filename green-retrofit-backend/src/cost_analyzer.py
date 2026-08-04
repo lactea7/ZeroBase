@@ -575,6 +575,8 @@ class LCCAnalyzer:
             import numpy as np
             from src.energyplus.outputs import parse_outputs, ventilation_energy_kwh
             from src.domain.energy_aggregation import annual_summary, monthly_breakdown
+            from src.economics.tariffs import (apply_pv_self_consumption, electricity_rates,
+                                                heat_source_entry, split_by_carrier)
 
             total_rows = len(df)
 
@@ -614,54 +616,21 @@ class LCCAnalyzer:
             # 미터가 없어 추정으로 대체한 항목 — 조용한 추정을 막기 위해 사용자에게 노출
             _meter_fallback_notes = [s.note for s in series.context.fallback_steps if s.note]
 
-            if use_pthp:
-                # 히트펌프 난방=전기 → 난방 소비도 전기요금으로 (열 요금엔 급탕만)
-                df['total_elec_kwh'] = total_c_con_kwh + total_h_con_kwh + l_kwh + e_kwh + vent_kwh
-                df['total_heat_kwh'] = dhw_kwh
-            else:
-                df['total_elec_kwh'] = total_c_con_kwh + l_kwh + e_kwh + vent_kwh
-                df['total_heat_kwh'] = total_h_con_kwh + dhw_kwh
+            # 에너지원 배분·요율은 economics/tariffs.py 로 옮겼다.
+            split = split_by_carrier(series, vent_kwh, use_pthp=use_pthp)
+            df['total_elec_kwh'] = np.array(split.electricity_kwh)
+            df['total_heat_kwh'] = np.array(split.heat_kwh)
 
-            # TOU Rate calculation (시간대별 차등 요금제 — 요율은 self.TOU_RATES 단일 소스)
-            def get_tou_rate(row):
-                m, h = row['month'], row['hour']
-                if m in [6, 7, 8]:
-                    r = self.TOU_RATES["summer"]
-                    if 13 <= h < 17: return r["peak"]
-                    if (9 <= h < 13) or (17 <= h < 23): return r["mid"]
-                    return r["off"]
-                elif m in [11, 12, 1, 2]:
-                    r = self.TOU_RATES["winter"]
-                    if (9 <= h < 12) or (16 <= h < 19): return r["peak"]
-                    if (12 <= h < 16) or (19 <= h < 23): return r["mid"]
-                    return r["off"]
-                else:
-                    r = self.TOU_RATES["spring"]
-                    if 9 <= h < 23: return r["mid"]
-                    return r["off"]
-                    
-            if is_hourly:
-                df['elec_rate'] = df.apply(get_tou_rate, axis=1)
-            else:
-                df['elec_rate'] = df['month'].apply(lambda m: self.ELEC_RATE_SUMMER if m in [6,7,8] else (self.ELEC_RATE_WINTER if m in [11,12,1,2] else self.ELEC_RATE_SPRING))
+            df['elec_rate'] = np.array(electricity_rates(series))
 
-            # ── 태양광(PV) 자가소비 차감 ──
-            # 연간 발전량(설치kW × 1300kWh/kW·년)을 주간(9~17시)에 균등 분배해 시간별
-            # 소비에서 차감. TOU와 상호작용해 '비싼 낮 요금'을 깎는 실제 효과가 반영된다.
-            # 잉여 발전(소비 초과분)은 버림 — 역송 보상(상계거래) 미반영, 보수적 추정.
-            # (기존엔 PV가 ZEB 자립률 표시에만 쓰이고 요금에서 빠지지 않는 버그가 있었음)
-            if pv_capacity_kw and pv_capacity_kw > 0:
-                _day_mask = ((df['hour'] >= 9) & (df['hour'] < 17)).values
-                _n_day = int(_day_mask.sum())
-                if _n_day > 0:
-                    _gen_per_step = (pv_capacity_kw * 1300.0) / _n_day
-                    _gen_series = np.where(_day_mask, _gen_per_step, 0.0)
-                    df['total_elec_kwh'] = np.maximum(df['total_elec_kwh'].values - _gen_series, 0.0)
+            # PV 자가소비 차감도 tariffs 로 옮겼다(잉여는 버림 — 보수적 추정).
+            df['total_elec_kwh'] = np.array(apply_pv_self_consumption(
+                df['total_elec_kwh'].values, series.hours, pv_capacity_kw))
 
             df['elec_cost'] = df['total_elec_kwh'] * df['elec_rate']
             # 난방 열원 결정: 지열/히트펌프면 전기(2), 아니면 프로젝트 선택값(기본 지역난방)
             heat_source_id = 2 if is_geothermal else kwargs.get("heat_source", self.DEFAULT_HEAT_SOURCE)
-            heat_src = self.HEAT_SOURCE_DB.get(heat_source_id, self.HEAT_SOURCE_DB[self.DEFAULT_HEAT_SOURCE])
+            heat_src = heat_source_entry(heat_source_id, is_geothermal=is_geothermal)
             df['heat_cost'] = df['total_heat_kwh'] * heat_src["rate"]
 
             annual_elec_bill = df['elec_cost'].sum()
