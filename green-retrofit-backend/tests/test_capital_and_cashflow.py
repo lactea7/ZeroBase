@@ -173,3 +173,104 @@ def test_estimate_baseline_savings_is_fixed_by_the_multiplier(analyzer, base_kwa
     b = fin["baseline_assumptions"]
     assert b["source"] == "estimate"
     assert b["savings_pct"] == round((1 - 1 / b["running_cost_multiplier"]) * 100)
+
+
+# ── 기준선 우선순위 ──────────────────────────────────────
+# ⚠️ 우선순위: 실측 요금 → 실측 사용량 → 개선 전 시뮬 → 전후 동일 → 1.6배 추정.
+# 순서가 바뀌면 사용자가 입력한 실측값이 무시되고 추정으로 계산된다.
+
+def test_actual_bill_wins_over_everything(analyzer, base_kwargs):
+    fin = _calc(analyzer, base_kwargs,
+                actual_elec_bill=10_000_000, actual_heat_bill=5_000_000,
+                actual_elec_kwh=99_999, sim_base_elec_bill=1)["financial"]
+    b = fin["baseline_assumptions"]
+    assert b["source"] == "actual_bill"
+    assert b["base_running_cost"] == 15_000_000
+
+
+def test_actual_usage_is_used_when_no_bill(analyzer, base_kwargs):
+    fin = _calc(analyzer, base_kwargs,
+                actual_elec_kwh=100_000, sim_base_elec_bill=1)["financial"]
+    assert fin["baseline_assumptions"]["source"] == "actual_usage"
+
+
+def test_simulated_baseline_is_used_when_no_actuals(analyzer, base_kwargs):
+    fin = _calc(analyzer, base_kwargs,
+                sim_base_elec_bill=20_000_000, sim_base_heat_bill=3_000_000)["financial"]
+    b = fin["baseline_assumptions"]
+    assert b["source"] == "simulated"
+    assert b["base_running_cost"] == 23_000_000
+
+
+def test_identical_model_reports_zero_saving_not_fake_16x(analyzer, base_kwargs):
+    """⚠️ 편집이 없으면 절감 0 이 정직한 답이다.
+    ×1.6 추정을 쓰면 아무것도 안 고쳤는데 37% 절감이 표시된다."""
+    result = _calc(analyzer, base_kwargs, sim_base_same=True)
+    fin = result["financial"]
+    assert fin["baseline_assumptions"]["source"] == "simulated"
+    assert fin["baseline_assumptions"]["savings_pct"] == 0
+    assert any("동일" in w for w in fin["cost_warnings"]), "동일 모델 경고가 없다"
+
+
+def test_estimate_is_the_last_resort(analyzer, base_kwargs):
+    assert _calc(analyzer, base_kwargs)["financial"]["baseline_assumptions"]["source"] == "estimate"
+
+
+# ── 비거주 구역 제외 ─────────────────────────────────────
+
+def test_hvac_cost_drops_when_non_habitable_excluded(analyzer, base_kwargs):
+    """계단실·화장실에 냉방기를 안 넣으면 설비비가 그만큼 준다."""
+    full = _calc(analyzer, base_kwargs, hvac_exclude_non_habitable=False)
+    reduced = _calc(analyzer, base_kwargs, hvac_exclude_non_habitable=True)
+    assert reduced["financial"]["cost_details"]["hvac"] < full["financial"]["cost_details"]["hvac"]
+
+
+def test_exclusion_does_not_touch_other_trades(analyzer, base_kwargs):
+    """설비 제외가 창호·단열 공사비까지 깎으면 안 된다."""
+    full = _calc(analyzer, base_kwargs, hvac_exclude_non_habitable=False)["financial"]
+    reduced = _calc(analyzer, base_kwargs, hvac_exclude_non_habitable=True)["financial"]
+    for trade in ("window", "insulation", "led"):
+        assert reduced["cost_details"][trade] == full["cost_details"][trade]
+
+
+# ── 구성체 override ──────────────────────────────────────
+
+def test_construction_override_changes_insulation_tier_and_cost(analyzer, base_kwargs):
+    """면별 구성체를 지정하면 단열재 등급이 바뀌고 단가가 따라 바뀐다.
+
+    ⚠️ 등급은 **열전도율 λ = 두께 / 단열저항** 으로 정해진다
+    (λ: 고성능 <0.03 / 중성능 0.03~0.04 / 일반 0.04~0.07 / 저성능 0.07~).
+    두께나 U 를 바꿔도 **같은 등급 안에 머물면 단가는 그대로다** — 시험을 쓸 때
+    등급 경계를 넘는 값을 골라야 한다.
+    """
+    base = _calc(analyzer, base_kwargs)["financial"]
+    target = base["insulation_details"][0]["surfaceId"]
+
+    def insul_for(thick_mm, u):
+        ov = {target: {"isCustom": True, "insulThick": thick_mm, "uValue": u}}
+        fin = _calc(analyzer, base_kwargs, construction_overrides=ov)["financial"]
+        row = next(d for d in fin["insulation_details"] if d["surfaceId"] == target)
+        return row["price"], row["cost"], row["tier"]
+
+    # λ = 0.05/(1/0.5 − 0.17) ≈ 0.027 → 고성능
+    premium_price, premium_cost, premium_tier = insul_for(50, 0.5)
+    # λ = 0.05/(1/1.6 − 0.17) ≈ 0.11 → 저성능
+    basic_price, basic_cost, basic_tier = insul_for(50, 1.6)
+
+    assert premium_tier != basic_tier, "등급이 바뀌지 않았다 — override 가 반영되지 않는다"
+    assert premium_price > basic_price
+    assert premium_cost > basic_cost
+
+
+def test_override_within_same_tier_keeps_price(analyzer, base_kwargs):
+    """같은 등급 안에서는 두께를 바꿔도 ㎡당 단가가 같다 — 단가는 등급별 중앙값이다."""
+    base = _calc(analyzer, base_kwargs)["financial"]
+    target = base["insulation_details"][0]["surfaceId"]
+
+    def price_for(thick_mm, u):
+        ov = {target: {"isCustom": True, "insulThick": thick_mm, "uValue": u}}
+        fin = _calc(analyzer, base_kwargs, construction_overrides=ov)["financial"]
+        return next(d for d in fin["insulation_details"]
+                    if d["surfaceId"] == target)["price"]
+
+    assert price_for(30, 1.5) == price_for(300, 0.15)
