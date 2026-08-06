@@ -20,6 +20,7 @@ from src.simulation.variants import (  # noqa: E402
     INSULATION_STANDARD_ID,
     INSULATION_STANDARD_K,
     build_variant_payload,
+    insulated_u_value,
     net_effect,
     payback_years,
 )
@@ -92,9 +93,14 @@ def test_insulation_downgrade_uses_product_conductivity_not_tier_default():
                        constructions=[_construction("C1", 0.030)],
                        overrides={"S1": {"tier": "premium", "thickness": 150}})
     v = build_variant_payload(payload, "insulation")
-    assert v["constructionOverrides"]["S1"] == {
-        "insulationId": INSULATION_STANDARD_ID, "tier": "standard", "thickness": 150}
-    assert v["insulationOverrides"]["C1"]["conductivity"] == INSULATION_STANDARD_K
+    assert v["constructionOverrides"]["S1"]["insulationId"] == INSULATION_STANDARD_ID
+    assert v["constructionOverrides"]["S1"]["tier"] == "standard"
+    assert v["constructionOverrides"]["S1"]["thickness"] == 150
+    # 프런트도 override 에 uValue 를 심는다 — 같은 모양이어야 한다
+    assert v["constructionOverrides"]["S1"]["uValue"] == v["surfaces"][0]["uValue"]
+    assert v["surfaces"][0]["uValue"] == pytest.approx(
+        insulated_u_value(_construction("C1", 0.030),
+                          conductivity=INSULATION_STANDARD_K, thickness_mm=150))
 
 
 def test_insulation_downgrade_preserves_thickness():
@@ -103,7 +109,7 @@ def test_insulation_downgrade_preserves_thickness():
                        constructions=[_construction("C1", 0.030)],
                        overrides={"S1": {"tier": "high", "thickness": 220}})
     v = build_variant_payload(payload, "insulation")
-    assert v["insulationOverrides"]["C1"]["thickness"] == 220
+    assert v["constructionOverrides"]["S1"]["thickness"] == 220
 
 
 # ── 열모델이 실제로 바뀌는지 ────────────────────────────
@@ -123,25 +129,21 @@ def test_override_without_a_real_construction_is_not_simulatable(c_ref):
     assert build_variant_payload(payload, "insulation_upgrade") is None
 
 
-def test_shared_construction_takes_the_last_thickness():
-    """⚠️ **알려진 결함을 고정한 시험이다 — 이게 옳은 동작이라는 뜻이 아니다.**
-
-    `insulationOverrides` 키가 면이 아니라 **구성**이라, 같은 구성을 공유하는
-    면들의 두께가 다르면 마지막 값이 전부에 적용된다. 프런트는 면별 `uValue` 를
-    계산하므로 "대안 효과 예고"와 "실제 적용 결과"가 달라진다.
-
-    고칠 때 이 시험은 **삭제하고** 면별 U 값을 검사하는 시험으로 바꿔야 한다.
-    그때까지는 변경 감지기로 둔다.
-    """
+def test_shared_construction_keeps_each_surface_thickness():
+    """⚠️ 예전에는 `insulationOverrides` 키가 면이 아니라 **구성**이라, 같은
+    구성을 공유하는 면들의 두께가 다르면 마지막 값이 전부에 적용됐다. 프런트는
+    면별로 계산하므로 "대안이 예고한 효과"와 "실제 적용 결과"가 갈렸다."""
     payload = _payload([{"id": "S1", "constructionRef": "C1"},
                         {"id": "S2", "constructionRef": "C1"}],
                        constructions=[_construction("C1", 0.030)],
                        overrides={"S1": {"tier": "premium", "thickness": 150},
                                   "S2": {"tier": "premium", "thickness": 250}})
     v = build_variant_payload(payload, "insulation")
+    by_id = {s["id"]: s for s in v["surfaces"]}
     assert v["constructionOverrides"]["S1"]["thickness"] == 150
     assert v["constructionOverrides"]["S2"]["thickness"] == 250
-    assert v["insulationOverrides"]["C1"]["thickness"] == 250   # 마지막 면의 두께
+    # 두꺼운 쪽이 반드시 U 값이 낮아야 한다 — 같으면 구성 단위로 뭉갠 것이다
+    assert by_id["S1"]["uValue"] > by_id["S2"]["uValue"]
 
 
 def test_insulation_downgrade_detects_good_insulation_without_override():
@@ -150,7 +152,7 @@ def test_insulation_downgrade_detects_good_insulation_without_override():
                        constructions=[_construction("C1", 0.034)])
     v = build_variant_payload(payload, "insulation")
     assert v["constructionOverrides"]["S1"]["tier"] == "standard"
-    assert v["insulationOverrides"]["C1"]["thickness"] == 120
+    assert v["constructionOverrides"]["S1"]["thickness"] == 120
 
 
 def test_insulation_downgrade_skips_already_poor_insulation():
@@ -165,7 +167,9 @@ def test_insulation_upgrade_is_the_mirror_image():
                        constructions=[_construction("C1", 0.060)])
     v = build_variant_payload(payload, "insulation_upgrade")
     assert v["constructionOverrides"]["S1"]["insulationId"] == INSULATION_HIGH_ID
-    assert v["insulationOverrides"]["C1"]["conductivity"] == INSULATION_HIGH_K
+    assert v["surfaces"][0]["uValue"] == pytest.approx(
+        insulated_u_value(_construction("C1", 0.060),
+                          conductivity=INSULATION_HIGH_K, thickness_mm=120))
 
 
 def test_upgrade_and_downgrade_boundaries_do_not_overlap():
@@ -260,3 +264,53 @@ def test_payback_only_when_cost_rises_and_bills_fall():
 def test_payback_is_none_when_the_concept_does_not_apply(capital, bill):
     """⚠️ 0 이나 음수를 내보내면 화면에서 '즉시 회수'로 읽힌다."""
     assert payback_years(capital, bill) is None
+
+
+# ── 프런트와 산식 일치 ───────────────────────────────────
+# ⚠️ 여기서 예고한 U 값과 사용자가 실제로 적용한 뒤의 U 값이 다르면
+# "적용 시 실제 차액" 원칙이 깨진다. 프런트는 App.jsx `calculateUpdatedUValue`.
+
+def test_u_value_matches_the_frontend_formula():
+    """U = 1 / (0.17 + Σ 비단열층 R + 새 단열층 R)"""
+    c = _construction("C1", 0.030, thickness=100)
+    # 콘크리트 200mm/1.6 = 0.125, 단열 150mm/0.036 = 4.1667
+    expected = 1.0 / (0.17 + 0.2 / 1.6 + 0.150 / 0.036)
+    assert insulated_u_value(c, conductivity=0.036, thickness_mm=150) == pytest.approx(
+        round(expected, 4))
+
+
+def test_thicker_insulation_lowers_u():
+    c = _construction("C1", 0.030)
+    thin = insulated_u_value(c, conductivity=0.036, thickness_mm=50)
+    thick = insulated_u_value(c, conductivity=0.036, thickness_mm=200)
+    assert thick < thin
+
+
+def test_original_insulation_layer_is_replaced_not_added():
+    """⚠️ 기존 단열층 R 을 남기고 새 층을 더하면 U 가 실제보다 낮게 나온다."""
+    c = _construction("C1", 0.030, thickness=300)   # 원래 아주 두꺼운 단열
+    u = insulated_u_value(c, conductivity=0.036, thickness_mm=50)
+    bare = 1.0 / (0.17 + 0.2 / 1.6 + 0.050 / 0.036)
+    assert u == pytest.approx(round(bare, 4))
+
+
+def test_construction_without_layers_returns_none():
+    assert insulated_u_value({"id": "C1", "layers": []}, conductivity=0.036,
+                             thickness_mm=100) is None
+
+
+def test_zero_conductivity_layers_are_skipped_not_infinite():
+    """⚠️ 0 으로 나누면 죽는다. 물성이 빠진 층은 저항 0 으로 본다."""
+    c = {"id": "C1", "layers": [{"conductivity": 0, "thickness": 100},
+                                {"conductivity": 0.03, "thickness": 100,
+                                 "isInsulation": True}]}
+    assert insulated_u_value(c, conductivity=0.036, thickness_mm=100) is not None
+
+
+def test_no_stale_construction_level_override_remains():
+    """구성 단위 키를 남겨 두면 조립부가 그것으로 면별 값을 덮어쓴다."""
+    payload = _payload([{"id": "S1", "constructionRef": "C1"}],
+                       constructions=[_construction("C1", 0.030)],
+                       overrides={"S1": {"tier": "premium", "thickness": 150}})
+    v = build_variant_payload(payload, "insulation")
+    assert "insulationOverrides" not in v

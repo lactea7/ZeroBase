@@ -61,6 +61,35 @@ def _swap_glazing(payload: Dict[str, Any], target_id: int) -> Optional[Dict[str,
     return variant
 
 
+# 실내외 표면 열전달저항 합 (㎡K/W). 프런트 `calculateUpdatedUValue` 와 같은 값이다.
+SURFACE_FILM_RESISTANCE = 0.17
+
+
+def insulated_u_value(construction: Dict[str, Any], *,
+                      conductivity: float, thickness_mm: float) -> Optional[float]:
+    """단열층만 교체했을 때의 면 U 값 (W/㎡K).
+
+    ⚠️ **프런트 `App.jsx: calculateUpdatedUValue` 와 같은 산식이어야 한다.**
+    여기서 예고한 U 값과 사용자가 실제로 적용한 뒤의 U 값이 다르면 "적용 시
+    실제 차액" 원칙이 깨진다.
+
+        U = 1 / (0.17 + Σ 비단열층 R + 새 단열층 R)
+    """
+    layers = construction.get("layers") or []
+    if not layers:
+        return None
+    r_other = 0.0
+    for layer in layers:
+        if layer.get("isInsulation"):
+            continue
+        k = layer.get("conductivity") or 1.0
+        if k > 0:
+            r_other += (layer.get("thickness") or 0) / 1000.0 / k
+    r_insul = (thickness_mm / 1000.0 / conductivity) if conductivity > 0 else 0.0
+    r_total = SURFACE_FILM_RESISTANCE + r_other + r_insul
+    return round(1.0 / r_total, 4) if r_total > 0 else None
+
+
 def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
                      to_id: int, to_k: float, bare_matches) -> Optional[Dict[str, Any]]:
     """단열 등급 교체.
@@ -70,20 +99,20 @@ def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
       ② 지정이 없는 면 → 원 구성의 단열층 열전도율을 `bare_matches` 로 판정
 
     ⚠️ **양쪽 다 `constructionRef` 가 `materials.constructions` 에 있어야 한다.**
-    IDF 조립부의 기본 모드는 면의 `uValue` 만 보므로, `constructionOverrides`
-    항목(`{insulationId, tier, thickness}`)만으로는 **열모델이 안 바뀐다.**
-    실제로 U 값을 바꾸는 건 `insulationOverrides[c_ref]` 경로뿐이고, 그건
-    구성이 실재할 때만 동작한다(`ep_simulator` 의 `constr_map.get(c_ref)`).
+    구성의 층 구성을 알아야 U 값을 다시 계산할 수 있고, IDF 조립부의 기본 모드는
+    면의 `uValue` 만 본다. 구성이 없으면 열모델을 바꿀 방법이 없다 —
+    EnergyPlus 를 2.5분 돌리고 `simulated: True, delta 0.0` 이 나올 뿐이다.
+    `constructionIdRef` 가 아예 없는 gbXML 이 실제로 있다(회의실.xml: 1,230면 전부).
 
-    이 확인을 빼면 EnergyPlus 를 2.5분 돌리고 `simulated: True, delta 0.0` 이
-    나온다 — "효과 없음"과 구별되지 않는다. `constructionIdRef` 가 아예 없는
-    gbXML 이 실제로 있다(회의실.xml: 1,230면 전부).
+    ⚠️ U 값은 **면마다** 계산해 면에 심는다. 예전에는 구성 단위
+    (`insulationOverrides[c_ref]`)로 보냈는데, 같은 구성을 공유하는 면들의 두께가
+    다르면 **마지막 값이 전부에 적용**됐다. 프런트는 면별로 계산하므로 "대안이
+    예고한 효과"와 "실제 적용 결과"가 갈렸다.
     """
     surfaces = copy.deepcopy(payload.get("surfaces", []))
     constructions = {c.get("id"): c
                      for c in (payload.get("materials", {}) or {}).get("constructions", [])}
     overrides = copy.deepcopy(payload.get("constructionOverrides", {}) or {})
-    insul_overrides: Dict[Any, Dict[str, Any]] = {}
     changed = 0
 
     for s in surfaces:
@@ -104,11 +133,13 @@ def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
         else:
             continue
 
-        overrides[s_id] = {"insulationId": to_id, "tier": to_tier, "thickness": thickness}
-        # ⚠️ 같은 구성을 공유하는 면들의 두께가 다르면 **마지막 값이 전부에 적용된다.**
-        # 키가 면이 아니라 구성이라 구조적으로 그렇다. 아래 시험이 이 동작을 고정한다.
-        insul_overrides[c_ref] = {"tier": to_tier, "thickness": thickness,
-                                  "conductivity": to_k}
+        new_u = insulated_u_value(constructions[c_ref],
+                                  conductivity=to_k, thickness_mm=thickness)
+        if new_u is None:
+            continue
+        overrides[s_id] = {"insulationId": to_id, "tier": to_tier,
+                           "thickness": thickness, "uValue": new_u}
+        s["uValue"] = new_u          # 조립부가 실제로 읽는 값
         changed += 1
 
     if not changed:
@@ -116,7 +147,6 @@ def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
     variant = dict(payload)
     variant["surfaces"] = surfaces
     variant["constructionOverrides"] = overrides
-    variant["insulationOverrides"] = insul_overrides
     return variant
 
 

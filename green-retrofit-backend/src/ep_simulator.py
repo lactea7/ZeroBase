@@ -697,60 +697,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             baseline_result = generate_idf_and_simulate(base_payload, os.path.join(temp_dir, "baseline"))
             print("⏮️ [전/후 비교] 개선 전 시뮬레이션 완료 → 기준선으로 사용")
     _stage("retrofit")
-    insulation_overrides = payload.get("insulationOverrides", {})
+    # ⚠️ 예전에 `insulationOverrides`(구성 단위) 재계산 블록이 여기 있었다.
+    # 생산자는 `simulation/variants.py` 하나뿐이었는데, 키가 면이 아니라 구성이라
+    # 같은 구성을 공유하는 면들의 두께가 다르면 **마지막 값이 전부에 적용**됐다.
+    # 게다가 재계산 산식(원 U 값에서 단열 R 을 빼고 새 R 을 더함)이 프런트
+    # (`App.jsx: calculateUpdatedUValue` — 층 구성에서 직접 합산)와 달라
+    # "대안이 예고한 효과"와 "실제 적용 결과"가 갈렸다.
+    #
+    # 이제 variants 가 프런트와 **같은 산식**으로 면별 U 값을 계산해 면에 직접
+    # 심는다(`variants.insulated_u_value`). 이 경로는 필요 없다.
     materials_data = payload.get("materials", {})
-    
-    # 💡 단열재 오버라이드 및 U-value 재계산 반영
-    if insulation_overrides and materials_data:
-        constr_map = {c["id"]: c for c in materials_data.get("constructions", [])}
-        for s in surfaces:
-            c_ref = s.get("constructionRef")
-            if c_ref and c_ref in insulation_overrides:
-                override = insulation_overrides[c_ref]
-                c_info = constr_map.get(c_ref)
-                if c_info:
-                    orig_insul = None
-                    for layer in c_info.get("layers", []):
-                        if layer.get("isInsulation"):
-                            orig_insul = layer
-                            break
-                    orig_u = c_info.get("uValue")
-                    if orig_u is None:
-                        orig_u = s.get("uValue", 0.8)
-                    
-                    if orig_u > 0:
-                        r_total = 1.0 / orig_u
-                        if orig_insul:
-                            d_orig = orig_insul.get("thickness", 0.0) # mm
-                            lambda_orig = orig_insul.get("conductivity", 0.04)
-                            r_insul_orig = (d_orig / 1000.0) / (lambda_orig if lambda_orig else 0.04)
-                        else:
-                            r_insul_orig = 0.0
-                            
-                        r_other = max(0.01, r_total - r_insul_orig)
-                        
-                        new_tier = override.get("tier")
-                        new_thickness = float(override.get("thickness", 0.0)) # mm
 
-                        TIER_CONDUCTIVITY = {
-                            "premium": 0.025,
-                            "high": 0.035,
-                            "standard": 0.055,
-                            "basic": 0.085
-                        }
-                        # 제품 λ가 명시되면 tier 대표값 대신 사용 — 실제 적용 제품
-                        # (예: 비드법 1종 1호 λ0.036)과 재시뮬레이션 U가 일치해야
-                        # '약속 = 실제 차액' 원칙이 에너지에서도 유지된다.
-                        lambda_new = (float(override["conductivity"])
-                                      if override.get("conductivity")
-                                      else TIER_CONDUCTIVITY.get(new_tier, 0.04))
-                        r_insul_new = (new_thickness / 1000.0) / lambda_new
-                        r_total_new = r_other + r_insul_new
-                        new_u = 1.0 / r_total_new
-                        
-                        s["uValue"] = round(new_u, 4)
-                        print(f"🔄 [Simulation] Construction '{c_ref}' insulation override: {new_tier} ({new_thickness}mm) -> U-value {orig_u:.4f} -> {new_u:.4f}")
-    
     pv_capacity_kw = project_data.get("pvCapacity", 0)
     is_geothermal = project_data.get("geothermalApplied", False)
     location_key = project_data.get("location", "KOR_SO_Seoul")
