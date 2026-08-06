@@ -115,3 +115,67 @@ def test_cumulative_discounts_later_years():
 def test_cumulative_is_monotonic_for_positive_costs():
     series = cumulative_present_value(500.0, [100.0] * 10, discount_rate=0.03)
     assert all(b >= a for a, b in zip(series, series[1:]))
+
+
+# ── 생애주기 가정 ────────────────────────────────────────
+# ⚠️ 예전에는 유지비·교체 주기가 **두 곳에 복제**돼 있었다(누적 LCC 곡선과 순절감
+# 현금흐름). 한쪽만 고치면 차트와 NPV/IRR 이 서로 다른 가정에서 나온 값이 된다.
+
+from src.economics.cashflow import (  # noqa: E402
+    HVAC_REPLACEMENT_YEARS,
+    LED_REPLACEMENT_YEARS,
+    build_lifecycle_costs,
+    build_savings_cash_flows,
+    maintenance_cost,
+    replacement_cost,
+)
+
+
+def test_maintenance_grows_with_inflation():
+    a = maintenance_cost(1000.0, 100.0, 0.0, 1)
+    b = maintenance_cost(1000.0, 100.0, 0.10, 1)
+    assert b == pytest.approx(a * 1.10)
+
+
+def test_replacement_only_on_cycle_years():
+    for year in (1, 5, 9, 11, 14):
+        assert replacement_cost(1000.0, 100.0, 0.0, year) == 0.0
+    assert replacement_cost(1000.0, 100.0, 0.0, LED_REPLACEMENT_YEARS) > 0
+    assert replacement_cost(1000.0, 100.0, 0.0, HVAC_REPLACEMENT_YEARS) > 0
+
+
+def test_year_zero_has_no_replacement():
+    """0 % N == 0 이므로 방어하지 않으면 0년차에 교체비가 붙는다."""
+    assert replacement_cost(1000.0, 100.0, 0.0, 0) == 0.0
+
+
+def test_both_paths_share_the_same_assumptions():
+    """누적 LCC 곡선과 순절감 현금흐름이 **같은** 유지·교체 가정을 쓰는지.
+
+    두 경로가 갈라지면 차트의 손익분기와 NPV/IRR 이 서로 다른 모델에서 나온다.
+    """
+    kw = dict(hvac_cost=1_000_000.0, led_cost=100_000.0, years=20,
+              utility_inflation=0.04, inflation_rate=0.03)
+    retrofit = 5_000_000.0
+    costs = build_lifecycle_costs(retrofit_running_cost=retrofit, **kw)
+    flows = build_savings_cash_flows(capital_cost=0.0, baseline_running_cost=retrofit,
+                                     retrofit_running_cost=retrofit, **kw)
+    # 기준선 = 개선 후이면 절감이 0 이므로, 순현금흐름은 정확히 −(유지+교체)다.
+    for year in range(1, 21):
+        operating = retrofit * ((1 + 0.04) ** year)
+        assert flows[year] == pytest.approx(-(costs[year - 1] - operating))
+
+
+def test_savings_cash_flow_starts_with_negative_capital():
+    flows = build_savings_cash_flows(
+        capital_cost=1_000_000.0, baseline_running_cost=2_000_000.0,
+        retrofit_running_cost=1_000_000.0, hvac_cost=0.0, led_cost=0.0,
+        years=3, utility_inflation=0.0, inflation_rate=0.0)
+    assert flows[0] == -1_000_000.0
+    assert flows[1] == pytest.approx(1_000_000.0)      # 절감액
+
+
+def test_lifecycle_costs_length_matches_years():
+    costs = build_lifecycle_costs(retrofit_running_cost=1.0, hvac_cost=0.0, led_cost=0.0,
+                                  years=7, utility_inflation=0.0, inflation_rate=0.0)
+    assert len(costs) == 7

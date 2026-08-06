@@ -10,7 +10,9 @@ from src.domain.models import BaselineSource, TariffResult
 from src.economics import tariffs as _tariffs
 from src.economics.baseline import resolve_baseline, savings_pct
 from src.economics.capital_cost import estimate_capital_cost
-from src.economics.cashflow import irr, simple_payback_years
+from src.economics.cashflow import (build_lifecycle_costs, build_savings_cash_flows,
+                                    cumulative_present_value, irr, npv,
+                                    simple_payback_years)
 from src.economics.cost_db import CostDatabase
 from src.economics.recommendations import build_recommendations
 
@@ -242,26 +244,18 @@ class LCCAnalyzer:
 
             # 누적 생애주기비용(LCC) 곡선: 초기투자비 + 연차별 할인 운영/유지/교체비
             # (순절감액이 아닌 '총 소유비용'의 현재가치 누적 → 손익분기 차트용)
-            cumulative_lcc_30y = []
-            lcc_pv = total_capital_cost
-
-            for y in range(1, years + 1):
-                yearly_op_cost = (annual_elec_bill + annual_heat_bill) * ((1 + utility_inflation) ** y)
-                maint_cost = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
-
-                replacement_cost = 0
-                if y % 15 == 0:
-                    # 15년차 설비 전면 교체가 아닌 핵심기기(50%) 부분 교체 반영
-                    replacement_cost += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
-                if y % 10 == 0:
-                    replacement_cost += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
-
-                total_year_cost = yearly_op_cost + maint_cost + replacement_cost
-
-                # 해당 연도 비용을 현재가치로 할인하여 누적
-                discounted_cost = total_year_cost / ((1 + discount_rate) ** y)
-                lcc_pv += discounted_cost
-                cumulative_lcc_30y.append(int(lcc_pv))
+            # 누적 생애주기비용 곡선: 초기투자비 + 연차별 할인 운영/유지/교체비
+            # (순절감액이 아닌 '총 소유비용'의 현재가치 누적 → 손익분기 차트용)
+            # ⚠️ 유지비·교체 가정은 economics/cashflow.py 가 **단일 소스**다.
+            # 예전엔 여기와 _build_cash_flows 두 곳에 복제돼 있었다 — 한쪽만 고치면
+            # 차트와 NPV/IRR 이 서로 다른 가정에서 나온 값이 된다.
+            _yearly_costs = build_lifecycle_costs(
+                retrofit_running_cost=annual_elec_bill + annual_heat_bill,
+                hvac_cost=hvac_cost, led_cost=led_cost, years=years,
+                utility_inflation=utility_inflation, inflation_rate=inflation_rate)
+            _cumulative = cumulative_present_value(total_capital_cost, _yearly_costs, discount_rate)
+            cumulative_lcc_30y = [int(v) for v in _cumulative]
+            lcc_pv = _cumulative[-1] if _cumulative else total_capital_cost
 
             # 매트릭스·1차에너지·CO2·자립률은 domain/energy_metrics.py 로 옮겼다.
             metrics = build_metrics(
@@ -340,25 +334,15 @@ class LCCAnalyzer:
 
 
             def _build_cash_flows(ui):
-                """요금상승률 ui 가정의 연차별 순절감액 현금흐름 (민감도 재계산에도 사용)."""
-                flows = [-total_capital_cost]
-                for y in range(1, years + 1):
-                    base_cost_y = base_running_cost * ((1 + ui) ** y)
-                    yearly_op_cost_y = (annual_elec_bill + annual_heat_bill) * ((1 + ui) ** y)
-                    maint_cost_y = ((hvac_cost * 0.02) + (led_cost * 0.01)) * ((1 + inflation_rate) ** y)
+                """요금상승률 ui 가정의 연차별 순절감액 (민감도 재계산에도 쓴다)."""
+                return build_savings_cash_flows(
+                    capital_cost=total_capital_cost,
+                    baseline_running_cost=base_running_cost,
+                    retrofit_running_cost=annual_elec_bill + annual_heat_bill,
+                    hvac_cost=hvac_cost, led_cost=led_cost, years=years,
+                    utility_inflation=ui, inflation_rate=inflation_rate)
 
-                    rep_cost_y = 0
-                    # NPV 누적 계산(cumulative_lcc_30y)과 동일한 교체 가정 사용:
-                    #   15년차 핵심기기 50% 부분 교체, 10년차 LED 40% 교체
-                    if y % 15 == 0: rep_cost_y += (hvac_cost * 0.5) * ((1 + inflation_rate) ** y)
-                    if y % 10 == 0: rep_cost_y += (led_cost * 0.4) * ((1 + inflation_rate) ** y)
-
-                    # 절감액 = (기존 건물 운영비) - (리모델링 후 운영비 + 유지보수 + 교체비)
-                    flows.append(base_cost_y - (yearly_op_cost_y + maint_cost_y + rep_cost_y))
-                return flows
-
-            def _npv_of(flows, dr):
-                return sum(cf / ((1 + dr) ** t) for t, cf in enumerate(flows))
+            _npv_of = npv
 
             cash_flows = _build_cash_flows(utility_inflation)
             _irr_rate = irr(cash_flows)

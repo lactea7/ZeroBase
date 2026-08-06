@@ -92,3 +92,62 @@ def cumulative_present_value(capital_cost: float, yearly_costs: Sequence[float],
         running += cost / ((1 + discount_rate) ** year)
         out.append(running)
     return out
+
+
+# ── 생애주기 가정 ──
+# ⚠️ 예전에는 유지비·교체 주기가 **두 곳에 복제**돼 있었다(누적 LCC 곡선과 순절감
+# 현금흐름). 한쪽만 고치면 차트와 NPV/IRR 이 서로 다른 가정에서 나온 값이 된다.
+HVAC_MAINTENANCE_RATE = 0.02     # 설비 공사비 대비 연간 유지비
+LED_MAINTENANCE_RATE = 0.01
+HVAC_REPLACEMENT_YEARS = 15      # 전면 교체가 아니라 핵심기기 부분 교체
+HVAC_REPLACEMENT_RATIO = 0.5
+LED_REPLACEMENT_YEARS = 10
+LED_REPLACEMENT_RATIO = 0.4
+
+
+def maintenance_cost(hvac_cost: float, led_cost: float,
+                     inflation_rate: float, year: int) -> float:
+    """해당 연도의 유지보수비(명목)."""
+    base = hvac_cost * HVAC_MAINTENANCE_RATE + led_cost * LED_MAINTENANCE_RATE
+    return base * ((1 + inflation_rate) ** year)
+
+
+def replacement_cost(hvac_cost: float, led_cost: float,
+                     inflation_rate: float, year: int) -> float:
+    """해당 연도의 교체비(명목). 주기가 아닌 해는 0."""
+    total = 0.0
+    if year > 0 and year % HVAC_REPLACEMENT_YEARS == 0:
+        total += hvac_cost * HVAC_REPLACEMENT_RATIO * ((1 + inflation_rate) ** year)
+    if year > 0 and year % LED_REPLACEMENT_YEARS == 0:
+        total += led_cost * LED_REPLACEMENT_RATIO * ((1 + inflation_rate) ** year)
+    return total
+
+
+def build_savings_cash_flows(*, capital_cost: float, baseline_running_cost: float,
+                             retrofit_running_cost: float, hvac_cost: float,
+                             led_cost: float, years: int,
+                             utility_inflation: float, inflation_rate: float) -> List[float]:
+    """연차별 **순절감액** 현금흐름. `[0]` 은 −초기투자비.
+
+    절감액 = 기존 건물 운영비 − (개선 후 운영비 + 유지보수 + 교체비)
+    """
+    flows = [-capital_cost]
+    for year in range(1, years + 1):
+        escalation = (1 + utility_inflation) ** year
+        saved = baseline_running_cost * escalation - retrofit_running_cost * escalation
+        cost = (maintenance_cost(hvac_cost, led_cost, inflation_rate, year)
+                + replacement_cost(hvac_cost, led_cost, inflation_rate, year))
+        flows.append(saved - cost)
+    return flows
+
+
+def build_lifecycle_costs(*, retrofit_running_cost: float, hvac_cost: float,
+                          led_cost: float, years: int,
+                          utility_inflation: float, inflation_rate: float) -> List[float]:
+    """연차별 **총 소유비용**(명목). 누적 LCC 곡선용 — 순절감액이 아니다."""
+    return [
+        retrofit_running_cost * ((1 + utility_inflation) ** year)
+        + maintenance_cost(hvac_cost, led_cost, inflation_rate, year)
+        + replacement_cost(hvac_cost, led_cost, inflation_rate, year)
+        for year in range(1, years + 1)
+    ]
