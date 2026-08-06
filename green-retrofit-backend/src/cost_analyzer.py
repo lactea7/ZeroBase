@@ -98,6 +98,8 @@ class LCCAnalyzer:
             from src.energyplus.outputs import parse_outputs, ventilation_energy_kwh
             from src.domain.energy_aggregation import annual_summary, monthly_breakdown
             from src.domain.energy_metrics import build_metrics
+            from src.domain.sizing import (hvac_capacity_kw as compute_hvac_capacity_kw,
+                                           peak_electric_kw)
             from src.economics.tariffs import (apply_pv_self_consumption, electricity_rates,
                                                 annual_bills, heat_source_entry,
                                                 split_by_carrier)
@@ -120,20 +122,10 @@ class LCCAnalyzer:
 
             use_pthp = kwargs.get("use_pthp", False)
             monthly_data = []
-            is_hourly = series.resolution.value == "hourly"
 
-            total_h_req_kwh = np.array(series.heating_requirement_kwh)
-            total_c_req_kwh = np.array(series.cooling_requirement_kwh)
-            total_h_con_kwh = np.array(series.heating_consumption_kwh)
-            total_c_con_kwh = np.array(series.cooling_consumption_kwh)
-            total_h_rate_w = np.array(series.heating_rate_w)
-            total_c_rate_w = np.array(series.cooling_rate_w)
-            l_kwh = np.array(series.lighting_kwh)
-            e_kwh = np.array(series.equipment_kwh)
             dhw_kwh = np.array(series.dhw_kwh)
             fan_kwh = np.array(series.fan_kwh)
             vent_kwh = ventilation_energy_kwh(series, np)
-            v_flow = np.array(series.ventilation_kg_s)
             annual = annual_summary(series, vent_kwh)
 
             # 미터가 없어 추정으로 대체한 항목 — 조용한 추정을 막기 위해 사용자에게 노출
@@ -155,45 +147,23 @@ class LCCAnalyzer:
             annual_elec_bill, annual_heat_bill = annual_bills(
                 elec_kwh, heat_kwh_series, elec_rates, heat_src["rate"])
 
-            # 연간 집계는 domain/energy_aggregation.py 의 계약에서 받는다.
-            # (환기 요구량 = 소비 − 팬, 급탕 요구량 = 소비 ÷ 배관손실 — 그쪽에 명시돼 있다)
-            a_h_req = annual.heating_requirement_kwh
-            a_c_req = annual.cooling_requirement_kwh
-            a_dhw_req = annual.dhw_requirement_kwh
-            a_vent_req = annual.ventilation_requirement_kwh
 
-            a_h_con = annual.heating_consumption_kwh
-            a_c_con = annual.cooling_consumption_kwh
-            a_l_con = annual.lighting_kwh
-            a_e_con = annual.equipment_kwh
-            a_dhw_con = annual.dhw_consumption_kwh
-            a_vent_con = annual.ventilation_consumption_kwh
 
+            # 피크·설비용량 산정은 domain/sizing.py 로 옮겼다.
             demand_col = next((c for c in df.columns
                                if 'Facility Total Electric Demand Rate' in c), None)
-            base_demand = df[demand_col].values if demand_col else np.zeros(total_rows)
-            peak_kw_series = (base_demand + total_c_rate_w + total_h_rate_w + (v_flow / 1.2 * 0.8 * 1000.0)) / 1000.0
-            
-            # 동시사용률(Diversity Factor) 0.8 적용하여 피크 과대평가 방지
-            peak_elec_kw = peak_kw_series.max() * 0.8 if len(peak_kw_series) > 0 else 0
-            peak_kw_estimate = peak_elec_kw if peak_elec_kw > 0 else total_area * 0.05
+            peak_kw_estimate = peak_electric_kw(
+                base_demand_w=(df[demand_col].values if demand_col else np.zeros(total_rows)),
+                cooling_rate_w=series.cooling_rate_w, heating_rate_w=series.heating_rate_w,
+                ventilation_kg_s=series.ventilation_kg_s,
+                floor_area_m2=total_area, np_mod=np)
             annual_elec_bill += peak_kw_estimate * self.ELEC_BASE_CHARGE * 12
 
-            # 냉난방 설비 용량(kW) — 설비비 산정용.
-            # 시간당 현열부하(kWh/h ≈ kW)의 99퍼센타일로 산정한다. 이상부하의 순간 .max()는
-            # 셋백 복귀 시 용량제한 없이 치솟아(예: 228 W/㎡) 설비비를 과대평가하므로 백분위로 완화하고,
-            # PTHP·이상부하 양 경로가 같은 현열부하 시계열을 써 시스템 선택과 무관하게 일관되게 한다.
-            if len(total_h_req_kwh) > 0:
-                heat_peak_kw = float(np.percentile(total_h_req_kwh, 99))
-                cool_peak_kw = float(np.percentile(total_c_req_kwh, 99))
-            else:
-                heat_peak_kw = cool_peak_kw = 0.0
-            hvac_capacity_kw = max(heat_peak_kw, cool_peak_kw)
-            # 현실 설계부하 범위로 클램프: 40~100 W/㎡.
-            # 일부 gbXML 모델(폐합 갭·과대 침기 등)은 현열부하가 200 W/㎡까지 치솟지만 실제 설비는
-            # 그렇게 사이징하지 않는다. 단열 좋은 건물은 하한 미만이라 설비비가 싸진다(정상).
-            hvac_capacity_kw = min(max(hvac_capacity_kw, total_area * 0.04), total_area * 0.10)
-            
+            hvac_capacity_kw = compute_hvac_capacity_kw(
+                heating_requirement_kwh=series.heating_requirement_kwh,
+                cooling_requirement_kwh=series.cooling_requirement_kwh,
+                floor_area_m2=total_area, np_mod=np)
+
             # 월별 집계는 domain/energy_aggregation.py 로 옮겼다 (순수 합산).
             monthly_data = monthly_breakdown(series, total_area)
 
@@ -383,9 +353,10 @@ class LCCAnalyzer:
             ]
 
             financial = {
-                "annual_elec_bill": int(annual_elec_bill),
-                "annual_heat_bill": int(annual_heat_bill),
-                "total_energy_bill": int(annual_elec_bill + annual_heat_bill),
+                # 계약(TariffResult)에서 꺼낸다 — 정의만 해두고 안 쓰면 계약이 아니다
+                "annual_elec_bill": int(tariff.electricity_won),
+                "annual_heat_bill": int(tariff.heating_won),
+                "total_energy_bill": int(tariff.total_won),
                 "capital_cost": int(total_capital_cost),
                 "target_budget": int(target_budget),
                 "cost_details": {
