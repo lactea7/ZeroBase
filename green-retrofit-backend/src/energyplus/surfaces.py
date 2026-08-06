@@ -2,12 +2,13 @@
 
 `cost_analyzer._surface_outputs()` 에서 옮겼다. 순수 이동이며 동작을 바꾸지 않았다.
 
-⚠️ **알려진 결함(이동 시점에 발견, 아직 안 고침)**:
-`_MONTHS` 개의 값을 뽑을 때 **행 인덱스 0~11 을 그대로 쓴다.** 월별 CSV(12행)에서는
-우연히 맞지만, 실제 운영에서 쓰는 **시간별 CSV(8,760행)에서는 1월 1일 1~12시**가
-"월별" 값으로 나간다. 화면에는 12개월로 표시된다.
-고치면 3D 뷰어의 값이 전부 바뀌므로 별도 커밋에서 다룬다 — 여기서는 이동만 한다.
-`tests/test_surface_outputs.py` 의 xfail 시험이 이 결함을 고정하고 있다.
+⚠️ **집계 규칙은 물리량에 따라 다르다.**
+온도·일사율(W/㎡)·유량(m³/s)은 **상태량**이라 월평균이고, 에너지량이 추가되면
+월합계여야 한다. 모든 열에 같은 집계를 적용하면 안 된다.
+
+과거 결함(2026-08-06 수정): 행 인덱스 0~11 을 그대로 "월"로 썼다. 월별 CSV(12행)
+에서는 우연히 맞았지만 실제 운영의 시간별 CSV(8,760행)에서는 **1월 1일 1~12시**가
+월별 값으로 나갔다 — 3D 뷰어에 12개월로 표시됐다.
 """
 from typing import Any, Dict, List, Tuple
 
@@ -64,15 +65,36 @@ def _find_columns(df_or_index, surface_id: str) -> Tuple[Any, Any, Any, Any]:
             win.get("flow_in"), win.get("flow_out"))
 
 
-def extract_surface_outputs(df, surfaces: List[dict]) -> Tuple[Dict, Dict]:
-    """(면별 온도·일사, 창호 기류) 두 dict."""
+def _monthly_means(values: List[float], months: List[int], missing: float) -> List[float]:
+    """월별 **평균**. 데이터가 없는 달은 `missing` 으로 채운다.
+
+    온도·일사율·유량은 상태량이므로 합계가 아니라 평균이다.
+    (에너지량 열이 추가되면 합계용 함수를 따로 둘 것)
+    """
+    sums = [0.0] * _MONTHS
+    counts = [0] * _MONTHS
+    for v, m in zip(values, months):
+        if 1 <= m <= _MONTHS:
+            sums[m - 1] += v
+            counts[m - 1] += 1
+    return [sums[i] / counts[i] if counts[i] else missing for i in range(_MONTHS)]
+
+
+def extract_surface_outputs(df, surfaces: List[dict], months=None) -> Tuple[Dict, Dict]:
+    """(면별 온도·일사, 창호 기류) 두 dict. 각 12개월.
+
+    `months` 를 주지 않으면 DataFrame 에서 시간축을 직접 읽는다.
+    """
     thermal: Dict[str, Dict[str, List[float]]] = {}
     airflow: Dict[str, Dict[str, List[float]]] = {}
     if not surfaces:
         return thermal, airflow
 
+    if months is None:
+        months = _months_of(df)
+    months = list(months)
+
     index = _build_column_index(df)
-    rows = min(_MONTHS, len(df))
     cache: Dict[str, List[float]] = {}
 
     def values(col):
@@ -82,27 +104,36 @@ def extract_surface_outputs(df, surfaces: List[dict]) -> Tuple[Dict, Dict]:
         행 하나를 만드는 데 전 열을 순회하므로, 면 1,209개 × 12행이면 23초가 걸렸다.
         """
         if col not in cache:
-            cache[col] = [float(v) for v in df[col].to_numpy()[:rows]]
+            cache[col] = [float(v) for v in df[col].to_numpy()]
         return cache[col]
+
+    def series(col, missing):
+        if not col:
+            return [missing] * _MONTHS
+        return _monthly_means(values(col), months, missing)
 
     for s in surfaces:
         temp_col, rad_col, flow1_col, flow2_col = _find_columns(index, s["id"])
-        temp_vals = values(temp_col) if temp_col else None
-        rad_vals = values(rad_col) if rad_col else None
-        in_vals = values(flow1_col) if flow1_col else None
-        out_vals = values(flow2_col) if flow2_col else None
-
         thermal[s["id"]] = {
-            "temperature": [round(temp_vals[i] if temp_vals else DEFAULT_SURFACE_TEMP_C, 2)
-                            for i in range(rows)],
-            "radiation": [round(rad_vals[i] if rad_vals else DEFAULT_SOLAR_W_M2, 2)
-                          for i in range(rows)],
+            "temperature": [round(v, 2) for v in series(temp_col, DEFAULT_SURFACE_TEMP_C)],
+            "radiation": [round(v, 2) for v in series(rad_col, DEFAULT_SOLAR_W_M2)],
         }
         airflow[s["id"]] = {
-            "inflow": [round((in_vals[i] if in_vals else 0.0) * M3_S_TO_L_S, 2)
-                       for i in range(rows)],
-            "outflow": [round((out_vals[i] if out_vals else 0.0) * M3_S_TO_L_S, 2)
-                        for i in range(rows)],
+            "inflow": [round(v * M3_S_TO_L_S, 2) for v in series(flow1_col, 0.0)],
+            "outflow": [round(v * M3_S_TO_L_S, 2) for v in series(flow2_col, 0.0)],
         }
 
     return thermal, airflow
+
+
+def _months_of(df) -> List[int]:
+    """각 행의 월. 시간별이면 타임스탬프에서, 월별이면 순서대로."""
+    from src.energyplus.outputs import TimeResolution, detect_resolution
+
+    n = len(df)
+    if detect_resolution(df) is TimeResolution.HOURLY:
+        first = df.iloc[:, 0].astype(str)
+        extracted = first.str.extract(r"(\d{1,2})/\d{1,2}")[0]
+        if extracted.notna().any():
+            return [int(v) if v == v else 1 for v in extracted.fillna(1).astype(int)]
+    return [(i % _MONTHS) + 1 for i in range(n)]

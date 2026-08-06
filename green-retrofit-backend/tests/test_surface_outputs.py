@@ -82,10 +82,14 @@ def test_every_surface_gets_an_entry():
     assert set(thermal) == {"A", "B", "C"} == set(airflow)
 
 
-def test_short_data_yields_short_series():
+def test_always_twelve_months_even_with_partial_data():
+    """데이터가 3개월치뿐이어도 12개월 구조를 유지한다.
+    없는 달은 표시용 기본값으로 채워 뷰어가 비지 않게 한다."""
     df = _df(**{f"A:{TEMP}": [1.0, 2.0, 3.0]})
-    thermal, _ = extract_surface_outputs(df, [{"id": "A"}])
-    assert thermal["A"]["temperature"] == [1.0, 2.0, 3.0]
+    temps = extract_surface_outputs(df, [{"id": "A"}])[0]["A"]["temperature"]
+    assert len(temps) == 12
+    assert temps[:3] == [1.0, 2.0, 3.0]
+    assert temps[3:] == [DEFAULT_SURFACE_TEMP_C] * 9
 
 
 def test_values_are_rounded_to_two_decimals():
@@ -98,14 +102,11 @@ def test_no_surfaces_returns_empty():
     assert extract_surface_outputs(_df(**{f"A:{TEMP}": [1.0] * 12}), []) == ({}, {})
 
 
-# ── 알려진 결함 ──────────────────────────────────────────
+# ── 시간별 → 월별 집계 ───────────────────────────────────
+# ⚠️ 예전에는 행 인덱스 0~11 을 그대로 "월"로 썼다. 시간별 CSV(8,760행)에서는
+# **1월 1일 1~12시**가 월별 값으로 나갔고 3D 뷰어에 12개월로 표시됐다.
 
-@pytest.mark.xfail(strict=True, reason=(
-    "행 인덱스 0~11 을 그대로 '월'로 쓴다. 월별 CSV(12행)에서는 우연히 맞지만 "
-    "실제 운영에서 쓰는 시간별 CSV(8,760행)에서는 **1월 1일 1~12시**가 월별 값으로 "
-    "나간다. 3D 뷰어에는 12개월로 표시된다. 고치면 뷰어 값이 전부 바뀌므로 "
-    "별도 커밋에서 다룬다."))
-def test_hourly_csv_should_aggregate_by_month_not_first_12_rows():
+def test_hourly_csv_is_aggregated_by_month():
     hourly = pd.DataFrame({
         "Date/Time": [f" {m:02d}/01  {h:02d}:00:00"
                       for m in range(1, 13) for h in range(1, 25)],
@@ -114,5 +115,24 @@ def test_hourly_csv_should_aggregate_by_month_not_first_12_rows():
                                                    for m in range(1, 13) for _ in range(24)],
     })
     thermal, _ = extract_surface_outputs(hourly, [{"id": "A"}])
-    # 월별로 집계했다면 0..11 이 나와야 한다. 실제로는 1월 1일 12시간이라 전부 0 이다.
+    # 각 달의 24시간 평균 — 1월 0℃ … 12월 11℃
     assert thermal["A"]["temperature"] == [float(m) for m in range(12)]
+
+
+def test_hourly_aggregation_is_mean_not_first_value():
+    """한 달 안에서 값이 변하면 **평균**이어야 한다.
+    온도·일사율·유량은 상태량이므로 합계가 아니다."""
+    hourly = pd.DataFrame({
+        "Date/Time": [f" 01/01  {h:02d}:00:00" for h in range(1, 25)],
+        f"A:{TEMP.replace('Monthly', 'Hourly')}": [float(h) for h in range(1, 25)],
+    })
+    temps = extract_surface_outputs(hourly, [{"id": "A"}])[0]["A"]["temperature"]
+    assert temps[0] == pytest.approx(12.5)      # (1+…+24)/24
+    assert temps[1:] == [DEFAULT_SURFACE_TEMP_C] * 11
+
+
+def test_monthly_csv_values_are_unchanged():
+    """월별 CSV 는 이미 월 단위다 — 평균을 내도 값이 그대로여야 한다."""
+    df = _df(**{f"A:{TEMP}": [float(m) for m in range(1, 13)]})
+    temps = extract_surface_outputs(df, [{"id": "A"}])[0]["A"]["temperature"]
+    assert temps == [float(m) for m in range(1, 13)]
