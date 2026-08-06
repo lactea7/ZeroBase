@@ -8,6 +8,7 @@ import shutil
 import sys
 import re
 
+from src.energyplus.weather import select_weather
 from src.idf_builder import IdfBuilder
 
 try:
@@ -1066,63 +1067,22 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         target_u = _DEFAULT_GLZ["u"]
         target_shgc = _DEFAULT_GLZ["shgc"]
     
-    # 💡 [날씨 파일 강제 지정] — 벤치마크는 지정된 EPW 를 반드시 써야 한다.
-    # 자동 탐색에 맡기면 `_data/weather` 의 한국 EPW 가 잡힌다. 반대로 벤치마크
-    # EPW 를 `_data/weather` 에 넣어 해결하려 하면, 이번엔 한국 프로젝트가
-    # Denver 를 집을 수 있다 — 그래서 탐색 대상 밖에 두고 여기서 직접 지정한다.
-    _bench_epw = bench.get("weatherFile")
-    if _bench_epw:
-        weather_file_abs = os.path.abspath(_bench_epw)
-        if not os.path.isfile(weather_file_abs):
-            raise FileNotFoundError(f"벤치마크 기상 파일이 없습니다: {weather_file_abs}")
-        print(f"🌤️ [벤치마크] 기상 강제 지정: {os.path.basename(weather_file_abs)}")
-
-    # 💡 [날씨 파일 자동 탐색] — _data/weather 우선, 없으면 _data 전체.
-    # (예전처럼 프로젝트 루트 전체를 걸으면 node_modules/.git까지 매 요청마다 순회하게 됨)
-    weather_dir = os.path.join(db_dir, "weather")
-    search_root = weather_dir if os.path.isdir(weather_dir) else db_dir
-
-    epw_files = []
-    for root_walk, dirs, files in os.walk(search_root):
-        for f in files:
-            if f.lower().endswith('.epw'):
-                epw_files.append(os.path.join(root_walk, f))
-    epw_files.sort()  # 동일 조건 다중 매칭 시 선택이 순회 순서에 좌우되지 않도록 고정
-
-    if _bench_epw:
-        pass          # 위에서 강제 지정했다 — 자동 선택이 덮어쓰지 않도록 건너뛴다
-    elif epw_files:
-        target_key = location_key.lower()
-        city_name = location_key.split('_')[-1].lower()
-        
-        matched = []
-        for f in epw_files:
-            if target_key in os.path.basename(f).lower():
-                matched.append(f)
-                
-        if not matched: 
-            for f in epw_files:
-                if city_name in os.path.basename(f).lower():
-                    matched.append(f)
-                    
-        if not matched: 
-            for f in epw_files:
-                if "kor" in os.path.basename(f).lower():
-                    matched.append(f)
-                    
-        if matched:
-            # 여러 파일이 걸리면 알파벳 순이 아니라 명시적 기준으로 고른다.
-            #   1) 최신 TMYx 기간 (대전은 2007-2021 과 2009-2023 이 함께 있다)
-            #   2) 공항(AP)보다 관측소(WS) — 도시 대표 기상에 가깝다
-            matched.sort(key=_weather_rank, reverse=True)
-            weather_file_abs = os.path.abspath(matched[0])
-        else:
-            weather_file_abs = os.path.abspath(epw_files[0])
-            
-        print(f"🌤️ 엔진 기상 데이터 세팅 완료: {os.path.basename(weather_file_abs)}")
-    else:
-        weather_file_abs = os.path.join(temp_dir_abs, "default.epw")
+    # ── 기상 파일 선택 (energyplus/weather.py) ──
+    # ⚠️ 벤치마크는 지정 EPW 를 반드시 써야 한다. 자동 탐색에 맡기면 `_data/weather` 의
+    # 한국 EPW 가 잡힌다. 반대로 벤치마크 EPW 를 `_data/weather` 에 넣어 해결하려 하면
+    # 이번엔 한국 프로젝트가 Denver 를 집을 수 있다 — 그래서 탐색 대상 밖에 둔다.
+    _choice = select_weather(
+        db_dir, location_key,
+        forced_path=bench.get("weatherFile"),
+        fallback_path=os.path.join(temp_dir_abs, "default.epw"))
+    weather_file_abs = _choice.path
+    if _choice.is_missing:
         print("🚨 치명적 경고: .epw 날씨 파일을 찾을 수 없습니다!")
+    elif _choice.reason == "forced":
+        print(f"🌤️ [벤치마크] 기상 강제 지정: {os.path.basename(weather_file_abs)}")
+    else:
+        print(f"🌤️ 엔진 기상 데이터 세팅 완료: {os.path.basename(weather_file_abs)} "
+              f"(매칭 {_choice.reason}, 후보 {_choice.candidates_found}개)")
 
     # =========================================================
     # 💡 2단계: IDF 생성 (IdfBuilder 객체 패턴)
