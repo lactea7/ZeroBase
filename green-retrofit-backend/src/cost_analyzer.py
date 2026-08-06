@@ -15,6 +15,7 @@ from src.economics.cashflow import (build_lifecycle_costs, build_savings_cash_fl
                                     simple_payback_years)
 from src.economics.cost_db import CostDatabase
 from src.economics.recommendations import build_recommendations
+from src.simulation.result_assembler import assemble_response
 
 NON_HABITABLE_KEYWORDS = [
     'stair', 'chase', 'shaft', 'lift', 'elevator', 'store', 'storage',
@@ -443,16 +444,11 @@ class LCCAnalyzer:
             
             surface_thermal, surface_airflow = extract_surface_outputs(df, surfaces)
 
-            final_data = {
-                "summary": summary, 
-                "monthly": monthly_data, 
-                "matrix": matrix, 
-                "financial": financial,
-                "surfaceThermal": surface_thermal,
-                "surfaceAirflow": surface_airflow
-            }
-            
-            return { **final_data, "result": final_data }
+            # 응답 조립은 simulation/result_assembler.py 로 옮겼다 (계산 없음).
+            return assemble_response(
+                summary=summary, monthly=monthly_data, matrix=matrix,
+                financial=financial, surface_thermal=surface_thermal,
+                surface_airflow=surface_airflow)
             
         except Exception as e:
             # 실패 시 가짜(fallback) 수치를 내보내지 않고 명시적으로 실패시킨다.

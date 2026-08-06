@@ -139,10 +139,6 @@ def test_pv_reduces_elec_bill(analyzer, base_kwargs):
     assert saved <= 10.0 * 1300.0 * 150.0
 
 
-def test_response_contract(result):
-    """프론트가 의존하는 키가 빠지면 화면이 깨진다 — 계약을 고정."""
-    assert {"summary", "monthly", "matrix", "financial"} <= set(result.keys())
-    fin = result["financial"]
-    for key in ("capital_cost", "target_budget", "cost_details", "recommendations",
-                "npv", "irr", "annual_elec_bill", "annual_heat_bill"):
-        assert key in fin, f"financial.{key} 누락"
+# 응답 계약(키·타입·관계)은 tests/test_response_contract.py 로 옮겼다.
+# 이 파일은 **수치 골든**만 담당한다 — 두 관심사를 한 파일에 두면 계약을 고칠 때
+# 골든 값을 건드릴 위험이 생긴다.
