@@ -26,7 +26,7 @@ from src.energyplus.outputs import (  # noqa: E402
     FALLBACK_PTHP_HEATING_COP,
     J_TO_KWH,
     MONTHLY_HOURS,
-    VENT_ENERGY_PER_M3,
+    VENT_SPECIFIC_FAN_POWER_KW_PER_M3S,
     parse_outputs,
     ventilation_energy_kwh,
 )
@@ -233,8 +233,8 @@ def test_ventilation_energy_includes_fan_and_uses_same_factor():
     # 열 이름이 (Hourly) 이므로 4행이라도 시간별이다 — 730 배가 붙으면 안 된다
     assert s.resolution is TimeResolution.HOURLY
     vent = ventilation_energy_kwh(s, np)
-    # 1.2 kg/s ÷ 1.2 = 1 m³ → ×0.8 kWh/m³ + 팬 0.5
-    assert vent == pytest.approx(np.array([1.0 * VENT_ENERGY_PER_M3 + 0.5] * N))
+    # 1.2 kg/s ÷ 1.2 kg/m³ = 1 m³/s → ×0.8 kW/(m³/s) = 0.8 kW → ×1h + 팬 0.5
+    assert vent == pytest.approx(np.array([1.0 * VENT_SPECIFIC_FAN_POWER_KW_PER_M3S + 0.5] * N))
 
 
 def test_hourly_ventilation_has_no_monthly_multiplier():
@@ -248,4 +248,44 @@ def test_hourly_ventilation_has_no_monthly_multiplier():
         "A:Zone Air System Sensible Cooling Energy [J](Hourly)": [0.0] * n})
     s = parse_outputs(df, [ZONE], np_mod=np, hvac_mode="pthp")
     assert s.resolution is TimeResolution.HOURLY
-    assert ventilation_energy_kwh(s, np) == pytest.approx(np.full(n, VENT_ENERGY_PER_M3))
+    assert ventilation_energy_kwh(s, np) == pytest.approx(np.full(n, VENT_SPECIFIC_FAN_POWER_KW_PER_M3S))
+
+
+# ── 환기 계수의 단위 계약 ────────────────────────────────
+# ⚠️ 상수 이름이 예전엔 `VENT_ENERGY_PER_M3`, 주석이 "kWh/m³" 였다. 그 이름대로
+# 읽으면 "질량유량이 순간값이니 초 환산 3600 이 빠졌다"는 결론이 나오는데,
+# 실제로 곱하면 환기 에너지가 **3,600배**가 된다. 이 시험이 그것을 막는다.
+
+def test_ventilation_coefficient_is_specific_fan_power_not_energy_per_volume():
+    """0.8 kWh/m³ 는 물리적으로 불가능하다.
+
+    공기 1 m³(1.2 kg)를 ΔT 만큼 처리하는 데 드는 열은 1.2 × 1.005 × ΔT kJ 다.
+    0.8 kWh/m³ = 2,880 kJ/m³ 이 되려면 ΔT ≈ 2,388 K 여야 한다.
+    반면 0.8 kW/(m³/s) 는 비팬동력(SFP)의 정상 범위다(고효율 0.8~1.2).
+    """
+    kj_per_m3 = VENT_SPECIFIC_FAN_POWER_KW_PER_M3S * 3600
+    implied_delta_t = kj_per_m3 / (1.2 * 1.005)
+    assert implied_delta_t > 1000, (
+        f"kWh/m³ 로 해석하면 ΔT={implied_delta_t:.0f}K — 불가능한 값이다")
+    assert 0.5 <= VENT_SPECIFIC_FAN_POWER_KW_PER_M3S <= 3.0, "SFP 정상 범위를 벗어났다"
+
+
+def test_hourly_ventilation_energy_is_not_scaled_by_seconds():
+    """⚠️ 시간별 1시간 구간에 곱할 것은 **1시간**이지 3,600초가 아니다."""
+    n = 4
+    df = _df(**{
+        "A:Zone Mechanical Ventilation Mass Flow Rate [kg/s](Hourly)": [1.2] * n,
+        "A:Zone Air System Sensible Heating Energy [J](Hourly)": [0.0] * n,
+        "A:Zone Air System Sensible Cooling Energy [J](Hourly)": [0.0] * n,
+    })
+    s = parse_outputs(df, [ZONE], np_mod=np, hvac_mode="pthp")
+    vent = ventilation_energy_kwh(s, np)
+    # 1 m³/s × 0.8 kW/(m³/s) × 1h = 0.8 kWh
+    assert vent == pytest.approx(np.full(n, 0.8))
+    assert vent[0] < 10, "3,600 을 곱하면 시간당 2,880 kWh 라는 값이 나온다"
+
+
+def test_ventilation_uses_the_same_coefficient_as_peak_sizing():
+    """⚠️ 피크(설비 용량·기본요금)와 사용량이 다른 SFP 를 쓰면 어긋난다."""
+    from src.domain import sizing
+    assert sizing._VENT_SFP_KW_PER_M3S == VENT_SPECIFIC_FAN_POWER_KW_PER_M3S

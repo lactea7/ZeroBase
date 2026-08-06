@@ -26,8 +26,12 @@ MAX_HVAC_KW_PER_M2 = 0.10
 HVAC_SIZING_PERCENTILE = 99
 
 # 환기 팬 전력 환산 — 질량유량(kg/s) → 전력(W)
+#
+# ⚠️ 여기는 **순간 유량 → 순간 전력**이다. 시간 환산(3600)을 넣으면 안 된다.
+# 에너지로 바꾸는 건 `energyplus/outputs.ventilation_energy_kwh` 쪽이고,
+# 같은 SFP 상수를 쓴다. 두 곳의 값이 갈라지면 피크와 사용량이 어긋난다.
 _AIR_DENSITY = 1.2
-_VENT_POWER_PER_M3 = 0.8
+_VENT_SFP_KW_PER_M3S = 0.8       # 비팬동력 [kW/(m³/s)] — kWh/m³ 가 아니다
 
 
 def peak_electric_kw(*, base_demand_w: Sequence[float],
@@ -36,7 +40,7 @@ def peak_electric_kw(*, base_demand_w: Sequence[float],
                      ventilation_kg_s: Sequence[float],
                      floor_area_m2: float, np_mod) -> float:
     """계약전력 산정용 피크(kW). 기본요금이 여기에 곱해진다."""
-    vent_w = np_mod.array(ventilation_kg_s) / _AIR_DENSITY * _VENT_POWER_PER_M3 * 1000.0
+    vent_w = np_mod.array(ventilation_kg_s) / _AIR_DENSITY * _VENT_SFP_KW_PER_M3S * 1000.0
     series = (np_mod.array(base_demand_w) + np_mod.array(cooling_rate_w)
               + np_mod.array(heating_rate_w) + vent_w) / 1000.0
     peak = float(series.max()) * DIVERSITY_FACTOR if len(series) else 0.0

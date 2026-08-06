@@ -40,8 +40,19 @@ FALLBACK_PTHP_HEATING_COP = 3.5
 FALLBACK_PTHP_COOLING_COP = 4.2
 FALLBACK_DX_COOLING_COP = 3.3
 
-# 외기 처리 에너지 (kWh/m³). 환기 체적을 에너지로 바꾸는 계수.
-VENT_ENERGY_PER_M3 = 0.8
+# 비팬동력(SFP) — 체적유량 1 m³/s 를 보내는 데 드는 전력 [kW/(m³/s)].
+#
+# ⚠️ 예전 이름은 "VENT_ENERGY_PER_M3", 주석은 "kWh/m³" 였다. **둘 다 틀렸다.**
+# 0.8 kWh/m³ 이 성립하려면 공기를 ΔT=2,388 K 처리해야 한다(1.2 kg/m³ × 1.005
+# kJ/kg·K). 물리적으로 불가능한 값이다.
+#
+# 0.8 kW/(m³/s) 는 SFP 의 정상 범위다 — 고효율 0.8~1.2, 구형 1.5~2.5.
+# 이 해석에서 아래 산식은 차원이 맞는다:
+#     kg/s ÷ 1.2 kg/m³ = m³/s  →  × 0.8 kW/(m³/s) = kW  →  × 시간(h) = kWh
+#
+# 이름을 kWh/m³ 로 읽고 "초 환산 3600 이 빠졌다"고 곱하면 환기 에너지가
+# **3,600배**로 뛴다. 이름을 단위까지 적어 두는 이유다.
+VENT_SPECIFIC_FAN_POWER_KW_PER_M3S = 0.8
 AIR_DENSITY_KG_M3 = 1.2
 MONTHLY_HOURS = 730.0             # 월별 CSV 일 때 시간 환산
 
@@ -282,12 +293,15 @@ def parse_outputs(df, zones: List[dict], *, np_mod,
 
 
 def ventilation_energy_kwh(series: EnergyTimeSeries, np_mod):
-    """환기 처리 에너지 + 팬 전력.
+    """환기 송풍 전력량(kWh) + 팬 전력.
+
+    `평균 체적유량(m³/s) × SFP[kW/(m³/s)] × 구간 시간(h)` 이다.
+    질량유량은 **순간값**이므로 구간 시간을 곱해야 에너지가 된다.
 
     ⚠️ 요구량과 소비량이 **반드시 같은 계수를 거쳐야 한다.** 예전에는 요구량 쪽에만
     이 계수가 빠져 체적(m³)이 kWh 합계에 그대로 섞여 들어갔다.
     """
-    multiplier = 1.0 if series.resolution is TimeResolution.HOURLY else MONTHLY_HOURS
-    flow = np_mod.array(series.ventilation_kg_s)
-    volume_m3 = (flow / AIR_DENSITY_KG_M3) * multiplier
-    return volume_m3 * VENT_ENERGY_PER_M3 + np_mod.array(series.fan_kwh)
+    hours_per_step = 1.0 if series.resolution is TimeResolution.HOURLY else MONTHLY_HOURS
+    flow_m3_s = np_mod.array(series.ventilation_kg_s) / AIR_DENSITY_KG_M3
+    fan_kw = flow_m3_s * VENT_SPECIFIC_FAN_POWER_KW_PER_M3S
+    return fan_kw * hours_per_step + np_mod.array(series.fan_kwh)
