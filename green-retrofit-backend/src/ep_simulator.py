@@ -848,8 +848,10 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         # ⚠️ 예전엔 경고만 찍고 없는 default.epw 로 계속 갔다. EnergyPlus 실행
         # 단계에서 뒤늦게 실패하는데, 그때 나오는 오류는 원인을 가리키지 않는다.
         # 기상 없이 나온 숫자는 어차피 무의미하므로 조립 전에 멈춘다.
+        # 경로는 로그에만 — 오류 메시지는 프런트/MCP 로 그대로 나간다.
+        print(f"🚨 기상(.epw) 파일 없음 — 탐색 경로: {db_dir}")
         raise FileNotFoundError(
-            f"기상(.epw) 파일을 찾을 수 없습니다: {db_dir} (요청 지역 {location_key})")
+            f"기상(.epw) 파일을 찾을 수 없습니다 (요청 지역 {location_key})")
     if _choice.reason == "forced":
         print(f"🌤️ [벤치마크] 기상 강제 지정: {os.path.basename(weather_file_abs)}")
     else:

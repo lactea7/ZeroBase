@@ -58,6 +58,7 @@ def evaluate_alternatives(payload: Dict[str, Any], result_data: Dict[str, Any],
             # 열모델 불변 — 시뮬레이션상 에너지 변화가 없다.
             # (LED 조명 효과 등 미모델 항목은 performance_note 로 따로 고지한다)
             rec["impact"] = _unsimulated_impact(rec, years)
+            rec["impact_status"] = "not_applicable"
             continue
 
         variant["_variantOf"] = rec_type
@@ -67,18 +68,25 @@ def evaluate_alternatives(payload: Dict[str, Any], result_data: Dict[str, Any],
 
         try:
             vres = simulate_fn(variant, os.path.join(temp_dir, f"alt_{rec_type}"))
+            _require_usable(vres)
         except Exception as e:
             # 대안 평가 실패가 본 결과를 막으면 안 된다 — 정성 주석은 유지한다.
-            # ⚠️ impact 를 안 붙이면 소비자가 "평가 전"과 "평가 실패"를 구별 못 한다.
+            #
+            # ⚠️ 실패를 `impact` 에 실으면 안 된다. 소비자(ResultDashboard·pdfReport)가
+            # `impact.simulated` 만 보고 분기하므로, `simulated: False` 인 impact 는
+            # **"열모델을 바꾸지 않아 공사비만 변동합니다"** 로 표시된다 — 거짓이다.
+            # 실패는 별도 키에 싣는다. 그래야 표시는 예전처럼 정성 주석만 나가고
+            # 실패 사실은 응답에 남는다.
             log(f"⚠️ [대안 평가] '{rec_type}' 재시뮬레이션 실패 → 정량 영향 생략: {e}")
-            rec["impact"] = {**_unsimulated_impact(rec, years),
-                             "status": "failed", "error": str(e)}
+            rec["impact_status"] = "failed"
+            rec["impact_error"] = str(e)
             continue
 
         rec["impact"] = _simulated_impact(
-            rec, vres, base_summary=base_summary, base_bill=base_bill,
+            vres, base_summary=base_summary, base_bill=base_bill,
             base_capital=base_capital, years=years,
             discount_rate=discount_rate, utility_inflation=utility_inflation)
+        rec["impact_status"] = "ok"
         # 순효과가 음수면 '비권장' — 시스템이 손해로 판명한 대안을 그대로 제안하면
         # 사용자가 적용 → 반대 대안 제안 → 재적용의 핑퐁에 빠진다.
         rec["advisable"] = rec["impact"]["net_effect"] >= 0
@@ -88,6 +96,26 @@ def evaluate_alternatives(payload: Dict[str, Any], result_data: Dict[str, Any],
             f"운영비 {imp['annual_bill_delta']:+,}원/년, "
             f"{years}년 순효과 {imp['net_effect']:+,}원"
             f"{'' if rec['advisable'] else ' → 비권장(장기 손해)'}")
+
+
+#: 대안 결과로 인정하려면 이 값들이 실제로 있어야 한다.
+REQUIRED_SUMMARY_KEYS = ("consume_per_m2",)
+REQUIRED_FINANCIAL_KEYS = ("total_energy_bill", "capital_cost")
+
+
+def _require_usable(vres: Dict[str, Any]) -> None:
+    """시뮬레이션 결과가 비교 가능한지 확인한다.
+
+    ⚠️ 빈 결과를 그대로 받으면 없는 값이 0 으로 읽혀 **기준값 전체를 절감한
+    것처럼** 계산된다(운영비 1천만원 → delta −1천만원). 실패로 다루는 게 맞다.
+    """
+    summary = vres.get("summary") or {}
+    financial = vres.get("financial") or {}
+    missing = ([f"summary.{k}" for k in REQUIRED_SUMMARY_KEYS if summary.get(k) is None]
+               + [f"financial.{k}" for k in REQUIRED_FINANCIAL_KEYS
+                  if financial.get(k) is None])
+    if missing:
+        raise ValueError(f"대안 시뮬레이션 결과에 값이 없다: {', '.join(missing)}")
 
 
 def _unsimulated_impact(rec: Dict[str, Any], years: int) -> Dict[str, Any]:
@@ -101,7 +129,7 @@ def _unsimulated_impact(rec: Dict[str, Any], years: int) -> Dict[str, Any]:
     }
 
 
-def _simulated_impact(rec: Dict[str, Any], vres: Dict[str, Any], *,
+def _simulated_impact(vres: Dict[str, Any], *,
                       base_summary: Dict[str, Any], base_bill: float,
                       base_capital: float, years: int,
                       discount_rate: float, utility_inflation: float) -> Dict[str, Any]:

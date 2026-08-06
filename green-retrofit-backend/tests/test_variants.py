@@ -124,9 +124,15 @@ def test_override_without_a_real_construction_is_not_simulatable(c_ref):
 
 
 def test_shared_construction_takes_the_last_thickness():
-    """⚠️ `insulationOverrides` 키가 면이 아니라 **구성**이다. 같은 구성을 공유하는
-    면들의 두께가 다르면 마지막 값이 전부에 적용된다. 구조적 한계이며 여기서
-    고정해 둔다 — 소리 없이 바뀌면 안 된다."""
+    """⚠️ **알려진 결함을 고정한 시험이다 — 이게 옳은 동작이라는 뜻이 아니다.**
+
+    `insulationOverrides` 키가 면이 아니라 **구성**이라, 같은 구성을 공유하는
+    면들의 두께가 다르면 마지막 값이 전부에 적용된다. 프런트는 면별 `uValue` 를
+    계산하므로 "대안 효과 예고"와 "실제 적용 결과"가 달라진다.
+
+    고칠 때 이 시험은 **삭제하고** 면별 U 값을 검사하는 시험으로 바꿔야 한다.
+    그때까지는 변경 감지기로 둔다.
+    """
     payload = _payload([{"id": "S1", "constructionRef": "C1"},
                         {"id": "S2", "constructionRef": "C1"}],
                        constructions=[_construction("C1", 0.030)],

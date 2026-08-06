@@ -187,33 +187,49 @@ def test_a_failed_alternative_does_not_block_the_others():
     assert recs[1]["impact"]["simulated"] is True
 
 
-def test_failure_is_recorded_not_left_blank():
-    """⚠️ impact 를 안 붙이면 소비자가 '평가 전'과 '평가 실패'를 구별 못 한다."""
+def test_failure_never_produces_an_impact_block():
+    """⚠️ 소비자(ResultDashboard·pdfReport)는 `impact.simulated` 만 보고 분기한다.
+    실패를 `simulated: False` 인 impact 로 실으면 화면에
+    **"에너지 영향 없음 — 열모델을 바꾸지 않아 공사비만 변동합니다"** 가 나간다.
+    거짓이다 — 열모델은 바뀌는데 평가에 실패한 것이다."""
     def boom(variant, temp_dir):
         raise RuntimeError("EnergyPlus 실패")
 
     recs = [{"type": "window", "title": "창호", "saved_cost": 0}]
     _run(_result(recs), boom)
-    imp = recs[0]["impact"]
-    assert imp["status"] == "failed"
-    assert imp["simulated"] is False
-    assert "EnergyPlus 실패" in imp["error"]
+    assert "impact" not in recs[0]
+    assert recs[0]["impact_status"] == "failed"
+    assert "EnergyPlus 실패" in recs[0]["impact_error"]
 
 
-def test_unsimulatable_and_failed_are_distinguishable():
+def test_the_three_outcomes_are_distinguishable():
     def boom(variant, temp_dir):
         raise RuntimeError("실패")
 
     recs = [{"type": "led", "title": "LED", "saved_cost": 0},
             {"type": "window", "title": "창호", "saved_cost": 0}]
     _run(_result(recs), boom)
-    assert recs[0]["impact"]["status"] == "not_applicable"
-    assert recs[1]["impact"]["status"] == "failed"
+    assert recs[0]["impact_status"] == "not_applicable"
+    assert recs[1]["impact_status"] == "failed"
 
 
-@pytest.mark.parametrize("bad", [{}, {"summary": {}, "financial": {}}])
-def test_empty_simulator_result_does_not_crash(bad):
-    """시뮬레이터가 빈 결과를 줘도 응답 조립이 죽으면 안 된다."""
+def test_successful_evaluation_is_marked_ok():
+    recs = [{"type": "window", "title": "창호", "saved_cost": 0}]
+    _run(_result(recs), _sim(bill=9_000_000, capital=99_000_000))
+    assert recs[0]["impact_status"] == "ok"
+
+
+@pytest.mark.parametrize("bad", [
+    {},
+    {"summary": {}, "financial": {}},
+    {"summary": {"consume_per_m2": 200.0}, "financial": {}},              # 요금 없음
+    {"summary": {}, "financial": {"total_energy_bill": 9_000_000,
+                                  "capital_cost": 99_000_000}},          # 소요량 없음
+])
+def test_incomplete_simulator_result_is_a_failure_not_a_saving(bad):
+    """⚠️ 빈 결과를 받으면 없는 값이 0 으로 읽혀 **기준값 전체를 절감한 것처럼**
+    계산된다(운영비 1천만원 → delta −1천만원). 실패로 다뤄야 한다."""
     recs = [{"type": "window", "title": "창호", "saved_cost": 0}]
     _run(_result(recs), lambda v, d: bad)
-    assert recs[0]["impact"]["annual_bill_delta"] == -10_000_000
+    assert "impact" not in recs[0]
+    assert recs[0]["impact_status"] == "failed"
