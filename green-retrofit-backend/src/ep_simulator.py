@@ -66,8 +66,9 @@ def load_databases(db_dir):
             
     return glazing_db
 
-# 요금·효율 상수는 cost_analyzer.LCCAnalyzer가 단일 소스다.
-# (과거 이곳에 값이 다른 복제본이 있었으나 사용처가 없는 죽은 코드였음 — 재정의 금지)
+# 요금 상수는 economics/tariffs.py, 설비 효율은 energyplus/outputs.py 가 단일 소스다.
+# 1차에너지·CO2 계수는 domain/energy_metrics.py 가 소유한다.
+# (과거 이곳과 LCCAnalyzer 양쪽에 복제본이 있었다 — 어디에도 재정의 금지)
 
 def calculate_surface_area(vertices):
     if len(vertices) < 3: 

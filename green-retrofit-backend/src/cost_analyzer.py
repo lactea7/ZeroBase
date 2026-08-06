@@ -1,8 +1,4 @@
 # src/cost_analyzer.py
-import os
-import re
-import statistics
-
 try:
     import pandas as pd
 except ImportError:
@@ -12,6 +8,7 @@ except ImportError:
 # (ep_simulator도 import: 계단실 등엔 WindowAC를 설치하지 않아 냉방부하 0 → 사이징 실패 방지)
 from src.domain.models import BaselineSource, TariffResult
 from src.economics import tariffs as _tariffs
+from src.economics.cashflow import irr
 from src.economics.cost_db import CostDatabase
 
 NON_HABITABLE_KEYWORDS = [
@@ -52,16 +49,9 @@ class LCCAnalyzer:
     #    1.6 → 기존이 60% 더 비쌈 ≈ 절감률 37.5%
     BASELINE_RUNNING_COST_MULTIPLIER = 1.6
 
-    # ── 에너지원별 1차에너지 환산계수 / CO2 배출계수 ──
-    # 전기는 발전·송배전 손실로 계수가 높고, 열(난방·급탕)은 낮다.
-    # ⚠️ 열원이 가스가 아닌 지역난방이면 PRIMARY_FACTOR_HEAT=0.728로 조정.
-    PRIMARY_FACTOR_ELEC = 2.75   # 전력 1차에너지 환산계수 (건축물 에너지효율등급 기준)
-    PRIMARY_FACTOR_HEAT = 1.10   # 연료(가스) 기준 (지역난방 0.728)
-    CO2_FACTOR_ELEC = 0.466      # 전력 배출계수 (kgCO2/kWh)
-    # 환기 외기 처리 에너지 원단위 (kWh per m³). 요구량·소요량 양쪽에 동일하게 적용해야
-    # 차원이 맞는다. 이 계수가 req 에서 빠져 있어 체적(m³)이 kWh 합계에 더해지고 있었다.
-    VENT_ENERGY_PER_M3 = 0.8
-    CO2_FACTOR_HEAT = 0.232      # 가스(LNG) 연소 배출계수 (kgCO2/kWh)
+    # ⚠️ 1차에너지·CO2 계수는 domain/energy_metrics.py 가, 환기 변환 계수는
+    # energyplus/outputs.py 가 소유한다. 여기 별칭을 두면 두 번째 접근 경로가
+    # 영구화되므로 두지 않는다.
 
     # LED 조명: 단가는 '개당(EA)' 기준이므로 면적은 등기구 개수로 환산해 적용한다.
     LED_FIXTURE_AREA_M2 = 10.0   # 등기구 1개가 담당하는 바닥면적 (㎡/개)
@@ -439,35 +429,6 @@ class LCCAnalyzer:
 
             # 단순 IRR (내부수익률) 계산기 (Bisection method)
             # 상한을 5.0(500%)까지 넓혀 인위적으로 100%에 고정되지 않게 한다.
-            def calculate_irr(cash_flows, max_iter=200):
-                """이분법 IRR. **해가 없으면 None** 을 돌려준다.
-
-                ⚠️ 예전엔 부호 변화를 확인하지 않고 항상 숫자를 반환했다. 그래서
-                절대 회수되지 않는 현금흐름(전부 음수)에는 탐색 하한 −0.99 를,
-                투자가 없는 흐름(전부 양수)에는 상한 5.0 을 **진짜 IRR 처럼**
-                내보냈다 — 화면에는 "-99%" 나 "500%" 로 표시된다.
-                """
-                low, high = -0.99, 5.0
-
-                def npv_at(rate):
-                    return sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
-
-                npv_low, npv_high = npv_at(low), npv_at(high)
-                if npv_low * npv_high > 0:
-                    return None          # 구간 양 끝의 부호가 같다 → 근이 없다
-
-                rate = (low + high) / 2
-                for _ in range(max_iter):
-                    rate = (low + high) / 2
-                    npv_test = npv_at(rate)
-                    if abs(npv_test) < 1e-5:
-                        return rate
-                    if (npv_test > 0) == (npv_low > 0):
-                        low, npv_low = rate, npv_test
-                    else:
-                        high = rate
-                return rate
-                
             # 현금흐름 배열 (Year 0 = -초기투자비, Year 1~N = 기존 노후 건물 대비 절감액)
             # ⚠️ 기준 건물 운영비 = 리모델링 후 운영비 × 배수 (단일·투명 가정).
             #    프론트 LCC 차트와 동일한 모델을 사용해 NPV/IRR과 차트가 일관되게 한다.
@@ -545,7 +506,7 @@ class LCCAnalyzer:
                 return sum(cf / ((1 + dr) ** t) for t, cf in enumerate(flows))
 
             cash_flows = _build_cash_flows(utility_inflation)
-            _irr_rate = calculate_irr(cash_flows)
+            _irr_rate = irr(cash_flows)
             irr_val = None if _irr_rate is None else _irr_rate * 100
 
             # 비현실적으로 높은 IRR은 (초기투자비 대비 절감액 과다) 가정 민감도 경고
