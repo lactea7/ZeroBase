@@ -8,6 +8,7 @@ except ImportError:
 # (ep_simulator도 import: 계단실 등엔 WindowAC를 설치하지 않아 냉방부하 0 → 사이징 실패 방지)
 from src.domain.models import BaselineSource, TariffResult
 from src.economics import tariffs as _tariffs
+from src.economics.baseline import resolve_baseline, savings_pct
 from src.economics.capital_cost import estimate_capital_cost
 from src.economics.cashflow import irr
 from src.economics.cost_db import CostDatabase
@@ -43,12 +44,7 @@ class LCCAnalyzer:
     HEAT_SOURCE_DB = _tariffs.HEAT_SOURCE_DB
     DEFAULT_HEAT_SOURCE = _tariffs.DEFAULT_HEAT_SOURCE
 
-    # ── 비교 기준이 되는 '기존 노후 건물' 운영비 추정 ──
-    # ⚠️ 실측 데이터가 없으므로 단일·투명·보수적 가정을 쓴다.
-    #    기존 건물 운영비 = 리모델링 후 운영비 × 배수. (절감률 = (배수-1)/배수)
-    #    NPV/IRR/절감액은 전적으로 이 가정 대비 차이이므로 UI에 '추정 기준'으로 표기한다.
-    #    1.6 → 기존이 60% 더 비쌈 ≈ 절감률 37.5%
-    BASELINE_RUNNING_COST_MULTIPLIER = 1.6
+    # 기준선 가정은 economics/baseline.py 가 소유한다.
 
     # ⚠️ 1차에너지·CO2 계수는 domain/energy_metrics.py 가, 환기 변환 계수는
     # energyplus/outputs.py 가 소유한다. 여기 별칭을 두면 두 번째 접근 경로가
@@ -311,38 +307,23 @@ class LCCAnalyzer:
             #    프론트 LCC 차트와 동일한 모델을 사용해 NPV/IRR과 차트가 일관되게 한다.
             retrofit_running_cost = annual_elec_bill + annual_heat_bill
 
-            # ── 기준 건물(리모델링 전) 연간 운영비 산정 ──
-            # 우선순위: ① 실측 요금 → ② 실측 사용량(공식 단가 환산)
-            #          → ③ 개선 전 건물 물리 시뮬레이션(전/후 비교) → ④ 1.6배 추정(fallback)
-            #   어떤 기준을 썼는지 baseline_source로 내려보내 UI가 명시 고지한다.
-            act_elec_bill = kwargs.get("actual_elec_bill")
-            act_heat_bill = kwargs.get("actual_heat_bill")
-            act_elec_kwh  = kwargs.get("actual_elec_kwh")
-            act_heat_kwh  = kwargs.get("actual_heat_kwh")
-            sim_base_elec = kwargs.get("sim_base_elec_bill")
-            sim_base_heat = kwargs.get("sim_base_heat_bill")
-            avg_elec_rate = (self.ELEC_RATE_SUMMER + self.ELEC_RATE_WINTER + self.ELEC_RATE_SPRING) / 3.0
-
-            if act_elec_bill or act_heat_bill:
-                base_running_cost = (act_elec_bill or 0.0) + (act_heat_bill or 0.0)
-                baseline_source = "actual_bill"          # 실측(요금)
-            elif act_elec_kwh or act_heat_kwh:
-                base_running_cost = (act_elec_kwh or 0.0) * avg_elec_rate + (act_heat_kwh or 0.0) * heat_src["rate"]
-                baseline_source = "actual_usage"         # 실측(사용량 환산)
-            elif (sim_base_elec or 0) > 0 or (sim_base_heat or 0) > 0:
-                base_running_cost = (sim_base_elec or 0.0) + (sim_base_heat or 0.0)
-                baseline_source = "simulated"            # 개선 전 건물 시뮬레이션(전/후 비교)
-            elif kwargs.get("sim_base_same"):
-                # 개선 전후 모델이 동일 (편집 없음) → 절감 0이 정직한 답.
-                # ×1.6 추정으로 가짜 절감이 표시되는 것을 막는다.
-                base_running_cost = retrofit_running_cost
-                baseline_source = "simulated"
-                cost_warnings.append(
-                    "개선 전후 모델이 동일합니다 — 창호·단열·설비 등을 편집하지 않아 절감액이 0으로 계산됩니다"
-                )
-            else:
-                base_running_cost = retrofit_running_cost * self.BASELINE_RUNNING_COST_MULTIPLIER
-                baseline_source = "estimate"             # 추정(1.6배)
+            # 기준선 산정은 economics/baseline.py 로 옮겼다.
+            _baseline = resolve_baseline(
+                retrofit_running_cost=retrofit_running_cost,
+                actual_elec_bill=kwargs.get("actual_elec_bill"),
+                actual_heat_bill=kwargs.get("actual_heat_bill"),
+                actual_elec_kwh=kwargs.get("actual_elec_kwh"),
+                actual_heat_kwh=kwargs.get("actual_heat_kwh"),
+                sim_base_elec_bill=kwargs.get("sim_base_elec_bill"),
+                sim_base_heat_bill=kwargs.get("sim_base_heat_bill"),
+                sim_base_same=bool(kwargs.get("sim_base_same")),
+                avg_elec_rate=(self.ELEC_RATE_SUMMER + self.ELEC_RATE_WINTER
+                               + self.ELEC_RATE_SPRING) / 3.0,
+                heat_rate=heat_src["rate"],
+            )
+            base_running_cost = _baseline.running_cost_won
+            baseline_source = _baseline.source.value
+            cost_warnings.extend(_baseline.warnings)
 
             # ── 요금 계약 생성 ──
             # 정의만 해두고 안 쓰면 계약이 아니다. 실제 경로에서 만들어
@@ -355,11 +336,6 @@ class LCCAnalyzer:
                 baseline_source=BaselineSource(baseline_source),
             )
 
-            if baseline_source != "estimate" and base_running_cost <= retrofit_running_cost:
-                cost_warnings.append(
-                    "기존 건물 운영비(실측 또는 개선 전 시뮬레이션)가 리모델링 후 운영비보다 낮거나 같습니다 — "
-                    "절감액이 음수가 될 수 있으니 입력값 또는 개선 항목을 확인하세요"
-                )
 
             def _build_cash_flows(ui):
                 """요금상승률 ui 가정의 연차별 순절감액 현금흐름 (민감도 재계산에도 사용)."""
@@ -458,8 +434,8 @@ class LCCAnalyzer:
                 "baseline_assumptions": {
                     "source": baseline_source,                       # actual_bill | actual_usage | estimate
                     "base_running_cost": int(base_running_cost),      # 적용된 기존 건물 연간 운영비
-                    "running_cost_multiplier": self.BASELINE_RUNNING_COST_MULTIPLIER,
-                    "savings_pct": round((1 - retrofit_running_cost / base_running_cost) * 100) if base_running_cost > 0 else 0
+                    "running_cost_multiplier": _baseline.multiplier,
+                    "savings_pct": savings_pct(base_running_cost, retrofit_running_cost)
                 },
                 # 수치가 전제하는 추정 가정 — UI 고지용. 정밀해 보이는 숫자에 대한 과신 방지.
                 "estimate_notes": [
@@ -493,7 +469,7 @@ class LCCAnalyzer:
                                  if baseline_source in ("actual_bill", "actual_usage") else
                                  "업로드하신 원본 건물(개선 전)을 별도 시뮬레이션한 운영비를 기준으로 절감액을 계산했습니다."
                                  if baseline_source == "simulated" else
-                                 f"실측 요금 미입력 시 개선 후 운영비의 {self.BASELINE_RUNNING_COST_MULTIPLIER}배를 기존 건물로 가정합니다. 실측 요금을 입력하면 정확도가 올라갑니다.")
+                                 f"실측 요금 미입력 시 개선 후 운영비의 {_baseline.multiplier}배를 기존 건물로 가정합니다. 실측 요금을 입력하면 정확도가 올라갑니다.")
                     },
                     {
                         "label": "NPV·IRR",
