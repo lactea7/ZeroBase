@@ -69,8 +69,15 @@ def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
       ① 사용자가 이미 등급을 지정한 면(`constructionOverrides`) → `from_tiers` 에 걸리면 교체
       ② 지정이 없는 면 → 원 구성의 단열층 열전도율을 `bare_matches` 로 판정
 
-    `insulationOverrides` 는 시뮬 진입부에서 `constructionRef` 기준으로 U 값을
-    재계산하는 데 쓴다 — 면 단위 override 만으로는 구성 자체가 안 바뀐다.
+    ⚠️ **양쪽 다 `constructionRef` 가 `materials.constructions` 에 있어야 한다.**
+    IDF 조립부의 기본 모드는 면의 `uValue` 만 보므로, `constructionOverrides`
+    항목(`{insulationId, tier, thickness}`)만으로는 **열모델이 안 바뀐다.**
+    실제로 U 값을 바꾸는 건 `insulationOverrides[c_ref]` 경로뿐이고, 그건
+    구성이 실재할 때만 동작한다(`ep_simulator` 의 `constr_map.get(c_ref)`).
+
+    이 확인을 빼면 EnergyPlus 를 2.5분 돌리고 `simulated: True, delta 0.0` 이
+    나온다 — "효과 없음"과 구별되지 않는다. `constructionIdRef` 가 아예 없는
+    gbXML 이 실제로 있다(회의실.xml: 1,230면 전부).
     """
     surfaces = copy.deepcopy(payload.get("surfaces", []))
     constructions = {c.get("id"): c
@@ -82,11 +89,13 @@ def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
     for s in surfaces:
         s_id = s.get("id")
         c_ref = s.get("constructionRef") or s.get("constructionId")
+        if c_ref not in constructions:
+            continue
         existing = overrides.get(s_id)
 
         if existing and existing.get("tier") in from_tiers:
             thickness = existing.get("thickness", DEFAULT_THICKNESS_MM)
-        elif not existing and c_ref in constructions:
+        elif not existing:
             layer = next((l for l in constructions[c_ref].get("layers", [])
                           if l.get("isInsulation")), None)
             if not layer or not bare_matches(layer.get("conductivity")):
@@ -96,9 +105,10 @@ def _swap_insulation(payload: Dict[str, Any], *, from_tiers, to_tier: str,
             continue
 
         overrides[s_id] = {"insulationId": to_id, "tier": to_tier, "thickness": thickness}
-        if c_ref:
-            insul_overrides[c_ref] = {"tier": to_tier, "thickness": thickness,
-                                      "conductivity": to_k}
+        # ⚠️ 같은 구성을 공유하는 면들의 두께가 다르면 **마지막 값이 전부에 적용된다.**
+        # 키가 면이 아니라 구성이라 구조적으로 그렇다. 아래 시험이 이 동작을 고정한다.
+        insul_overrides[c_ref] = {"tier": to_tier, "thickness": thickness,
+                                  "conductivity": to_k}
         changed += 1
 
     if not changed:

@@ -89,6 +89,7 @@ def test_insulation_downgrade_uses_product_conductivity_not_tier_default():
     """⚠️ tier 대표값(0.055)이 아니라 **실제 제품 물성**(0.036)을 써야
     프런트가 적용하는 값과 일치한다."""
     payload = _payload([{"id": "S1", "constructionRef": "C1"}],
+                       constructions=[_construction("C1", 0.030)],
                        overrides={"S1": {"tier": "premium", "thickness": 150}})
     v = build_variant_payload(payload, "insulation")
     assert v["constructionOverrides"]["S1"] == {
@@ -99,9 +100,42 @@ def test_insulation_downgrade_uses_product_conductivity_not_tier_default():
 def test_insulation_downgrade_preserves_thickness():
     """등급만 낮추고 두께는 그대로 — 두께까지 바꾸면 어느 쪽 효과인지 알 수 없다."""
     payload = _payload([{"id": "S1", "constructionRef": "C1"}],
+                       constructions=[_construction("C1", 0.030)],
                        overrides={"S1": {"tier": "high", "thickness": 220}})
     v = build_variant_payload(payload, "insulation")
     assert v["insulationOverrides"]["C1"]["thickness"] == 220
+
+
+# ── 열모델이 실제로 바뀌는지 ────────────────────────────
+# ⚠️ IDF 조립부의 기본 모드는 면의 `uValue` 만 본다. `constructionOverrides` 항목
+# 만으로는 **U 값이 안 바뀐다** — 실제로 바꾸는 건 `insulationOverrides[c_ref]` 뿐이고
+# 그건 구성이 `materials.constructions` 에 실재할 때만 동작한다.
+# 이걸 확인하지 않으면 2.5분 재시뮬레이션 후 `simulated: True, delta 0.0` 이 나온다.
+
+@pytest.mark.parametrize("c_ref", [None, "존재하지-않는-구성"])
+def test_override_without_a_real_construction_is_not_simulatable(c_ref):
+    """⚠️ `constructionIdRef` 가 아예 없는 gbXML 이 실제로 있다
+    (회의실.xml: Surface 1,230개 전부). 그 모델에서 단열 대안은 열모델을
+    못 바꾸므로 재시뮬레이션을 돌리면 안 된다."""
+    payload = _payload([{"id": "S1", "constructionRef": c_ref}],
+                       overrides={"S1": {"tier": "premium", "thickness": 150}})
+    assert build_variant_payload(payload, "insulation") is None
+    assert build_variant_payload(payload, "insulation_upgrade") is None
+
+
+def test_shared_construction_takes_the_last_thickness():
+    """⚠️ `insulationOverrides` 키가 면이 아니라 **구성**이다. 같은 구성을 공유하는
+    면들의 두께가 다르면 마지막 값이 전부에 적용된다. 구조적 한계이며 여기서
+    고정해 둔다 — 소리 없이 바뀌면 안 된다."""
+    payload = _payload([{"id": "S1", "constructionRef": "C1"},
+                        {"id": "S2", "constructionRef": "C1"}],
+                       constructions=[_construction("C1", 0.030)],
+                       overrides={"S1": {"tier": "premium", "thickness": 150},
+                                  "S2": {"tier": "premium", "thickness": 250}})
+    v = build_variant_payload(payload, "insulation")
+    assert v["constructionOverrides"]["S1"]["thickness"] == 150
+    assert v["constructionOverrides"]["S2"]["thickness"] == 250
+    assert v["insulationOverrides"]["C1"]["thickness"] == 250   # 마지막 면의 두께
 
 
 def test_insulation_downgrade_detects_good_insulation_without_override():
@@ -153,6 +187,8 @@ def test_existing_overrides_of_other_surfaces_survive():
     """대상이 아닌 면의 사용자 지정을 지우면 그 면이 기본 사양으로 되돌아간다."""
     payload = _payload([{"id": "S1", "constructionRef": "C1"},
                         {"id": "S2", "constructionRef": "C2"}],
+                       constructions=[_construction("C1", 0.030),
+                                      _construction("C2", 0.030)],
                        overrides={"S1": {"tier": "premium", "thickness": 150},
                                   "S2": {"tier": "basic", "thickness": 50}})
     v = build_variant_payload(payload, "insulation")

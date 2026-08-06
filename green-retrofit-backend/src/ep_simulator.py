@@ -9,7 +9,7 @@ import sys
 import re
 
 from src.energyplus.weather import select_weather
-from src.simulation.variants import build_variant_payload, net_effect, payback_years
+from src.simulation.alternatives import evaluate_alternatives
 from src.idf_builder import IdfBuilder
 
 try:
@@ -419,83 +419,6 @@ def build_window_geometries(surface: dict, wall_verts: list) -> list:
         if wv:
             result.append(wv)
     return result
-
-
-def _evaluate_alternatives(payload: dict, result_data: dict, temp_dir: str, stage_fn):
-    """추천 대안별 정량 영향(kWh/㎡·운영비·LCC 순효과) 산출.
-
-    열모델이 바뀌는 대안(창호·단열 하향, 지열 해제)은 EnergyPlus를 실제로 재실행해
-    소요량과 요금 변화를 계산하고, 비용만 바뀌는 대안은 에너지 delta 0으로 표기한다.
-    각 recommendation에 impact 블록을 붙인다 (financial과 result.financial은 동일 객체
-    이므로 여기서의 변형이 응답 양쪽에 반영된다).
-    """
-    fin = result_data.get("financial", {})
-    recs = fin.get("recommendations") or []
-    if not recs:
-        return
-    base_summary = result_data.get("summary", {})
-    base_bill = fin.get("total_energy_bill") or 0
-    base_capital = fin.get("capital_cost") or 0
-    lccp = fin.get("lcc_parameters", {})
-    dr = (lccp.get("discount_rate") or 5.0) / 100.0
-    ui = (lccp.get("utility_inflation") or 4.0) / 100.0
-    years = int(lccp.get("lifecycle_years") or 20)
-
-    def _net_effect(saved_cost, bill_delta):
-        return net_effect(saved_cost, bill_delta, discount_rate=dr,
-                          utility_inflation=ui, years=years)
-
-    for rec in recs:
-        variant = build_variant_payload(payload, rec.get("type", ""))
-        if variant is None:
-            # 열모델 불변 — 시뮬레이션상 에너지 변화 없음 (LED 조명 효과 등은 미모델 → performance_note로 고지)
-            rec["impact"] = {
-                "simulated": False,
-                "delta_kwh_m2": 0.0,
-                "annual_bill_delta": 0,
-                "net_effect": int(rec.get("saved_cost", 0)),
-                "lifecycle_years": years,
-            }
-            continue
-
-        variant["_variantOf"] = rec["type"]
-        variant.pop("baselineModel", None)  # 대안 평가에 전-시뮬 불필요 (기준은 현재 개선안)
-        stage_fn(f"alt:{rec['type']}")
-        print(f"🔀 [대안 평가] '{rec['title']}' 적용 모델 재시뮬레이션 시작...")
-        try:
-            vres = generate_idf_and_simulate(
-                variant, os.path.join(temp_dir, f"alt_{rec['type']}"))
-        except Exception as e:
-            # 대안 평가 실패가 본 결과를 막으면 안 됨 — 정량 영향만 생략하고 정성 주석 유지
-            print(f"⚠️ [대안 평가] '{rec['type']}' 재시뮬레이션 실패 → 정량 영향 생략: {e}")
-            continue
-
-        v_sum = vres.get("summary", {})
-        v_fin = vres.get("financial", {})
-        bill_delta = int((v_fin.get("total_energy_bill") or 0) - base_bill)
-        capital_delta = int((v_fin.get("capital_cost") or 0) - base_capital)
-        rec["impact"] = {
-            "payback_years": payback_years(capital_delta, bill_delta),
-            "simulated": True,
-            "consume_per_m2": v_sum.get("consume_per_m2"),
-            "delta_kwh_m2": round((v_sum.get("consume_per_m2") or 0)
-                                  - (base_summary.get("consume_per_m2") or 0), 1),
-            "co2_delta": round((v_sum.get("co2_per_m2") or 0)
-                               - (base_summary.get("co2_per_m2") or 0), 2),
-            "annual_bill_delta": bill_delta,
-            "capital_delta": capital_delta,
-            # 순효과는 자재 단가 차액(saved_cost)이 아닌 '실제 총공사비 변화' 기준.
-            # 예: 창호 하향 → 열손실 증가 → 피크부하·설비 용량 증가 → 설비비 상승까지
-            # 재시뮬레이션이 잡아내므로, saved_cost보다 -capital_delta가 정직한 절감액이다.
-            "net_effect": _net_effect(-capital_delta, bill_delta),
-            "lifecycle_years": years,
-        }
-        # 순효과가 음수면 '비권장' — 시스템이 손해로 판명한 대안을 그대로 제안하면
-        # 사용자가 적용 → 반대 대안 제안 → 재적용의 핑퐁에 빠진다. 예산 제약 시에만 고려하도록 명시.
-        rec["advisable"] = rec["impact"]["net_effect"] >= 0
-        print(f"✅ [대안 평가] '{rec['title']}': ΔkWh/㎡ {rec['impact']['delta_kwh_m2']:+.1f}, "
-              f"운영비 {bill_delta:+,}원/년, {years}년 순효과 {rec['impact']['net_effect']:+,}원"
-              f"{'' if rec['advisable'] else ' → 비권장(장기 손해)'}")
 
 
 # 침기 모델 식별자. 모델을 바꾸면 반드시 올린다 — 저장된 과거 결과가 어느 모델로
@@ -922,8 +845,12 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         fallback_path=os.path.join(temp_dir_abs, "default.epw"))
     weather_file_abs = _choice.path
     if _choice.is_missing:
-        print("🚨 치명적 경고: .epw 날씨 파일을 찾을 수 없습니다!")
-    elif _choice.reason == "forced":
+        # ⚠️ 예전엔 경고만 찍고 없는 default.epw 로 계속 갔다. EnergyPlus 실행
+        # 단계에서 뒤늦게 실패하는데, 그때 나오는 오류는 원인을 가리키지 않는다.
+        # 기상 없이 나온 숫자는 어차피 무의미하므로 조립 전에 멈춘다.
+        raise FileNotFoundError(
+            f"기상(.epw) 파일을 찾을 수 없습니다: {db_dir} (요청 지역 {location_key})")
+    if _choice.reason == "forced":
         print(f"🌤️ [벤치마크] 기상 강제 지정: {os.path.basename(weather_file_abs)}")
     else:
         print(f"🌤️ 엔진 기상 데이터 세팅 완료: {os.path.basename(weather_file_abs)} "
@@ -1699,7 +1626,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         # ── 대안별 정량 평가: 추천 대안을 실제 적용해 재시뮬레이션 → kWh/㎡·운영비 변화 산출 ──
         # 재귀 방지: 대안 평가로 생성된 변형 실행(_variantOf)은 자기 대안을 다시 평가하지 않는다.
         if not payload.get("_variantOf"):
-            _evaluate_alternatives(payload, result_data, temp_dir, _stage)
+            evaluate_alternatives(payload, result_data, temp_dir, _stage,
+                                  simulate_fn=generate_idf_and_simulate)
 
         return result_data
 
