@@ -86,19 +86,17 @@ export const buildCashFlowData = (res) => {
 
   // 고급 재무 지표
   const npv = f.npv || 0;
-  const irr = f.irr || 0;
 
-  // payback 추산 (수익이 0을 돌파하는 시점)
-  let paybackYears = capitalCost / annualSavings;
-  let exactPayback = data.findIndex(d => d['누적 순이익 (ROI)'] >= 0);
-  if (exactPayback > 0) {
-    // 선형 보간으로 소수점 연도 추정
-    const prev = data[exactPayback - 1]['누적 순이익 (ROI)'];
-    const curr = data[exactPayback]['누적 순이익 (ROI)'];
-    paybackYears = (exactPayback - 1) + Math.abs(prev) / (curr - prev);
-  } else {
-    paybackYears = 0;
-  }
+  // ⚠️ IRR 은 **null 일 수 있다** — 현금흐름이 부호를 바꾸지 않으면 IRR 이 존재하지
+  // 않는다(회수 불가 또는 투자 없음). 예전엔 `f.irr || 0` 으로 0 을 넣어 "IRR 0%"로
+  // 표시했는데, "정의되지 않음"과 "0%"는 전혀 다른 뜻이다.
+  const irr = f.irr ?? null;
+
+  // ⚠️ 회수기간은 **백엔드 값을 그대로 쓴다.** 여기서 다시 계산하면 할인율·
+  // 요금상승률·유지비·10년차 LED 교체·15년차 HVAC 교체가 빠져 백엔드 NPV/IRR 과
+  // 다른 답이 나온다(차트와 지표가 서로 어긋난다).
+  // null = 분석기간 내 미회수. 예전엔 0 을 넣어 '즉시 회수'처럼 보였다.
+  const paybackYears = f.simple_payback_years ?? null;
 
   return { data, annualSavings, paybackYears, npv, irr, params, baselineAssumptions: f.baseline_assumptions };
 };

@@ -364,7 +364,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
         ? (overBudget ? `목표 예산 ${won(overAmt)} (${overPct}%) 초과` : '목표 예산 이내')
         : '', overBudget)}
     ${stat('연간 에너지 요금', won(fin.total_energy_bill ?? ((fin.annual_elec_bill || 0) + (fin.annual_heat_bill || 0))), '', `전기 ${won(fin.annual_elec_bill)} · 열 ${won(fin.annual_heat_bill)}`)}
-    ${stat('투자 회수기간', lccAnalysis.paybackYears ? num(lccAnalysis.paybackYears) : '—', '년', `NPV ${won(fin.npv)} · IRR ${num(fin.irr)}%`)}
+    ${stat('투자 회수기간', lccAnalysis.paybackYears ? num(lccAnalysis.paybackYears) : '분석기간 내 미회수', '년', `NPV ${won(fin.npv)} · IRR ${fin.irr == null ? '—' : num(fin.irr) + '%'}`)}
   </div>
 
   ${monthly.length ? `

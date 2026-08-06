@@ -274,3 +274,15 @@ def test_override_within_same_tier_keeps_price(analyzer, base_kwargs):
                     if d["surfaceId"] == target)["price"]
 
     assert price_for(30, 1.5) == price_for(300, 0.15)
+
+
+# ── 회수기간 (응답) ──────────────────────────────────────
+
+def test_response_carries_simple_payback(analyzer, base_kwargs):
+    """⚠️ 회수기간을 백엔드가 내려보내야 프런트가 다시 계산하지 않는다.
+    프런트 계산은 할인율·요금상승·유지비·10년 LED/15년 HVAC 교체를 무시해
+    백엔드 NPV/IRR 과 다른 답을 낸다."""
+    fin = _calc(analyzer, base_kwargs)["financial"]
+    assert "simple_payback_years" in fin
+    value = fin["simple_payback_years"]
+    assert value is None or value > 0, "0 은 '즉시 회수'를 뜻한다 — 미회수는 None 이다"

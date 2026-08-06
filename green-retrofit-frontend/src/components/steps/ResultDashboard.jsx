@@ -729,7 +729,9 @@ export default function ResultDashboard({
                       },
                       {
                         label: '내부수익률 (IRR)',
-                        val: lccAnalysis.irr.toFixed(1),
+                        // null = IRR 이 정의되지 않음(회수 불가 또는 투자 없음).
+                        // 0.0% 로 표시하면 '수익률 0'으로 오해된다.
+                        val: lccAnalysis.irr == null ? '-' : lccAnalysis.irr.toFixed(1),
                         unit: '%',
                         isRawString: true,
                         layoutId: 'lcc-irr',
@@ -742,7 +744,8 @@ export default function ResultDashboard({
                       },
                       {
                         label: '투자 회수 기간',
-                        val: lccAnalysis.paybackYears > 0 ? lccAnalysis.paybackYears.toFixed(1) : '-',
+                        // null = 분석기간 내 미회수
+                        val: lccAnalysis.paybackYears ? lccAnalysis.paybackYears.toFixed(1) : '-',
                         unit: '년',
                         isRawString: true,
                         layoutId: 'lcc-payback',
@@ -1047,7 +1050,9 @@ export default function ResultDashboard({
                             strokeDasharray="3 3"
                           />
 
-                          {/* 투자 회수 기점 라인 표시 */}
+                          {/* 투자 회수 기점 라인 — 회수되지 않으면 그리지 않는다
+                              (0년차에 선을 그으면 '즉시 회수'로 오해된다) */}
+                          {lccAnalysis.paybackYears ? (
                           <ReferenceLine
                             x={`${Math.ceil(lccAnalysis.paybackYears)}년차`}
                             stroke="#F59E0B"
@@ -1061,6 +1066,7 @@ export default function ResultDashboard({
                               fontWeight: 'black',
                             }}
                           />
+                          ) : null}
 
                           <Line
                             type="monotone"

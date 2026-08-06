@@ -10,7 +10,7 @@ from src.domain.models import BaselineSource, TariffResult
 from src.economics import tariffs as _tariffs
 from src.economics.baseline import resolve_baseline, savings_pct
 from src.economics.capital_cost import estimate_capital_cost
-from src.economics.cashflow import irr
+from src.economics.cashflow import irr, simple_payback_years
 from src.economics.cost_db import CostDatabase
 from src.economics.recommendations import build_recommendations
 
@@ -362,6 +362,9 @@ class LCCAnalyzer:
 
             cash_flows = _build_cash_flows(utility_inflation)
             _irr_rate = irr(cash_flows)
+            # ⚠️ 회수기간은 **백엔드가 산출한다.** 프런트가 자체 계산하면 할인율·
+            # 요금상승·유지비·10년 LED/15년 HVAC 교체가 빠져 다른 답이 나온다.
+            payback_years = simple_payback_years(cash_flows)
             irr_val = None if _irr_rate is None else _irr_rate * 100
 
             # 비현실적으로 높은 IRR은 (초기투자비 대비 절감액 과다) 가정 민감도 경고
@@ -426,6 +429,9 @@ class LCCAnalyzer:
                     "lifecycle_years": years
                 },
                 "npv": int(npv_real),
+                # None = 분석기간 내 미회수. **0 으로 바꾸면 '즉시 회수'가 된다.**
+                "simple_payback_years": (None if payback_years is None
+                                         else round(payback_years, 1)),
                 "npv_sensitivity": npv_sensitivity,
                 "hvac_capacity_kw": round(hvac_capacity_kw, 1),  # 공사비 산정 기준 용량 (UI 각주용)
                 "total_lcc": int(lcc_pv),
