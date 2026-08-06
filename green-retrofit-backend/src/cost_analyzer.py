@@ -889,13 +889,32 @@ class LCCAnalyzer:
             # 단순 IRR (내부수익률) 계산기 (Bisection method)
             # 상한을 5.0(500%)까지 넓혀 인위적으로 100%에 고정되지 않게 한다.
             def calculate_irr(cash_flows, max_iter=200):
+                """이분법 IRR. **해가 없으면 None** 을 돌려준다.
+
+                ⚠️ 예전엔 부호 변화를 확인하지 않고 항상 숫자를 반환했다. 그래서
+                절대 회수되지 않는 현금흐름(전부 음수)에는 탐색 하한 −0.99 를,
+                투자가 없는 흐름(전부 양수)에는 상한 5.0 을 **진짜 IRR 처럼**
+                내보냈다 — 화면에는 "-99%" 나 "500%" 로 표시된다.
+                """
                 low, high = -0.99, 5.0
+
+                def npv_at(rate):
+                    return sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
+
+                npv_low, npv_high = npv_at(low), npv_at(high)
+                if npv_low * npv_high > 0:
+                    return None          # 구간 양 끝의 부호가 같다 → 근이 없다
+
+                rate = (low + high) / 2
                 for _ in range(max_iter):
                     rate = (low + high) / 2
-                    npv_test = sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
-                    if abs(npv_test) < 1e-5: return rate
-                    if npv_test > 0: low = rate
-                    else: high = rate
+                    npv_test = npv_at(rate)
+                    if abs(npv_test) < 1e-5:
+                        return rate
+                    if (npv_test > 0) == (npv_low > 0):
+                        low, npv_low = rate, npv_test
+                    else:
+                        high = rate
                 return rate
                 
             # 현금흐름 배열 (Year 0 = -초기투자비, Year 1~N = 기존 노후 건물 대비 절감액)
@@ -975,10 +994,11 @@ class LCCAnalyzer:
                 return sum(cf / ((1 + dr) ** t) for t, cf in enumerate(flows))
 
             cash_flows = _build_cash_flows(utility_inflation)
-            irr_val = calculate_irr(cash_flows) * 100
+            _irr_rate = calculate_irr(cash_flows)
+            irr_val = None if _irr_rate is None else _irr_rate * 100
 
             # 비현실적으로 높은 IRR은 (초기투자비 대비 절감액 과다) 가정 민감도 경고
-            if irr_val > 100:
+            if irr_val is not None and irr_val > 100:
                 cost_warnings.append(
                     f"IRR이 {irr_val:.0f}%로 비정상적으로 높습니다 — 초기투자비가 작거나 기준 건물 가정이 절감액을 과대평가했을 수 있어 참고용으로만 보세요"
                 )
@@ -1042,7 +1062,7 @@ class LCCAnalyzer:
                 "npv_sensitivity": npv_sensitivity,
                 "hvac_capacity_kw": round(hvac_capacity_kw, 1),  # 공사비 산정 기준 용량 (UI 각주용)
                 "total_lcc": int(lcc_pv),
-                "irr": round(irr_val, 2),
+                "irr": None if irr_val is None else round(irr_val, 2),
                 "cost_warnings": cost_warnings,
                 "heat_source": heat_src["label"],   # 적용된 난방 열원 (UI 표기용)
                 # NPV/IRR/절감액이 비교한 '기존 건물' 기준 (UI 명시 고지용)
