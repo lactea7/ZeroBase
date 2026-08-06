@@ -168,6 +168,10 @@ def build_payload(case: str) -> dict:
             "suppressAutoLoads": True,
             "constantSetpoints": True,
             "forceIdealLoads": True,
+            # ⚠️ ASHRAE 140 은 **차양 없음**을 사양으로 못 박는다. 600 vs 610 의
+            # 유일한 차이가 외부 차양이므로, 내부 블라인드가 붙으면 그 델타가
+            # 오염되고 참조값과 비교 자체가 성립하지 않는다.
+            "noInteriorBlind": True,
             "idealNoOutdoorAir": True,
             "idealNoHumidityControl": True,
             "otherEquipment": [

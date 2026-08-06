@@ -1364,6 +1364,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
     skipped_count = 0
     zone_to_zone_count = 0
+    windows_by_zone = {}      # 내부 블라인드 제어를 존 단위로 걸기 위해 모은다
     air_boundary_count = 0
     ground_promoted = 0
     # 자기참조로 걷어낸 최하층 바닥을 지면 경계로 되살릴지. 기본 off.
@@ -1468,6 +1469,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                     # 첫 창은 기존 명명 유지 (AFN·surfaceAirflow 계약 호환)
                     wname = f"Win_{s['id']}" if wi == 0 else f"Win_{s['id']}_{wi + 1}"
                     idf.add_window(wname, f"WinConst_{s['id']}", s['id'], wv)
+                    windows_by_zone.setdefault(z_id, []).append(wname)
 
             # AirflowNetwork Surface 및 개구부(Window) 등록
             if obc == "Outdoors" and s.get("zone") in valid_afn_zones:
@@ -1480,6 +1482,26 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                         win_id, "WindowOpening", "", 1.0,
                         "NoVent", "", 0.0, 0.0, 100.0, 0.0, 300000.0, "AlwaysOn"
                     ])
+
+    # ── 내부 블라인드 (일사 제어) ──
+    # ⚠️ 차양이 전혀 없으면 결과가 통째로 왜곡된다. 실측(용호동): 순 일사취득
+    # 235 kWh/㎡·년 이 겨울 난방을 상쇄하고 여름 냉방을 밀어 올려, 서울 사무소인데
+    # 난방 10.6 / 냉방 54.1 kWh/㎡ 가 나왔다. 실제 사무실은 해가 강하면 내린다.
+    #
+    # ASHRAE 140 은 **차양 없음**을 사양으로 못 박는다(600 vs 610 의 차이가 바로
+    # 외부 차양이다). 벤치마크에서는 절대 걸면 안 된다 — `noInteriorBlind` 로 끈다.
+    _blind_off = bench.get("noInteriorBlind") or project_data.get("noInteriorBlind")
+    if windows_by_zone and not _blind_off:
+        # 설정값은 결과에 크게 영향을 준다 — 낮출수록 자주 내려 난방↑·냉방↓ 다.
+        # 실측 자료가 있으면 프로젝트별로 덮어쓸 수 있게 열어 둔다.
+        _sp = float(project_data.get("blindSolarSetpointWm2")
+                    or IdfBuilder.BLIND_SOLAR_SETPOINT_W_M2)
+        idf.add_interior_blind()
+        for _z, _wins in windows_by_zone.items():
+            idf.add_window_shading_control(_z, _wins, setpoint_w_m2=_sp)
+        print(f"🪟 내부 블라인드 적용: {len(windows_by_zone)}개 존 "
+              f"{sum(len(w) for w in windows_by_zone.values())}개 창 "
+              f"(창면일사 {_sp:.0f} W/㎡ 초과 시 하강)")
 
     if skipped_count > 0:
         print(f"⏭️ Zone 미소속 Surface {skipped_count}개 제외 (차양/지형면)")

@@ -285,6 +285,68 @@ class IdfBuilder:
         
         return self.add("FenestrationSurface:Detailed", fields)
 
+    # ── 내부 블라인드(일사 제어) ─────────────────────────────
+    # ⚠️ 차양이 전혀 없으면 **결과가 통째로 왜곡된다.** 실측(용호동): 창 268㎡ ·
+    # SHGC 0.76 · 차양 0 → 순 일사취득 235 kWh/㎡·년. 그 열이 겨울 난방을 상쇄하고
+    # 여름 냉방을 밀어 올려, 서울 사무소인데 난방 10.6 / 냉방 54.1 kWh/㎡ 가 됐다.
+    # 실제 사무실은 눈부심 때문에 해가 강하면 블라인드를 내린다.
+    #
+    # 값은 일반 알루미늄 베네시안 블라인드(25mm 슬랫, 밝은색)다.
+    # ASHRAE 90.1 Appendix G / EnergyPlus 예제의 대표 물성 범위 안에 있다.
+    BLIND_NAME = "InteriorBlind_Default"
+    #: 창면 일사가 이 값을 넘으면 내린다 (W/㎡). 낮을수록 자주 내린다.
+    BLIND_SOLAR_SETPOINT_W_M2 = 200.0
+
+    def add_interior_blind(self, name: str = None):
+        """일반 알루미늄 베네시안 블라인드 재료. 창마다가 아니라 **하나만** 만든다."""
+        return self.add("WindowMaterial:Blind", [
+            name or self.BLIND_NAME,
+            "Horizontal",
+            0.025,      # 슬랫 폭 (m)
+            0.01875,    # 슬랫 간격 (m)
+            0.001,      # 슬랫 두께 (m)
+            45.0,       # 슬랫 각도 (°)
+            221.0,      # 슬랫 열전도율 (W/m·K) — 알루미늄
+            0.0,        # 슬랫 직달 일사 투과율 (불투명)
+            0.65, 0.65,             # 앞/뒤 직달 일사 반사율
+            0.0, 0.65, 0.65,        # 확산 일사 투과율 / 앞·뒤 반사율
+            0.0, 0.70, 0.70,        # 직달 가시광 투과율 / 앞·뒤 반사율
+            0.0, 0.70, 0.70,        # 확산 가시광 투과율 / 앞·뒤 반사율
+            0.0, 0.90, 0.90,        # 적외 투과율 / 앞·뒤 방사율
+            0.05,       # 유리-블라인드 간격 (m)
+            0.5,        # 상단 개방 배율
+            0.5, 0.5, 0.5,          # 하단·좌·우 개방 배율
+            0.0, 180.0,             # 슬랫 각도 최소·최대 (°)
+        ])
+
+    def add_window_shading_control(self, zone_id: str, window_ids: list,
+                                   setpoint_w_m2: float = None,
+                                   blind_name: str = None):
+        """존의 창들에 내부 블라인드 자동 제어를 건다.
+
+        `OnIfHighSolarOnWindow` — 창면 입사 일사가 설정값을 넘으면 내린다.
+        재실 여부와 무관한 것이 실제와 가깝다(퇴근 후에도 내려둔 채로 둔다).
+        """
+        if not window_ids:
+            return self
+        fields = {
+            "Name": f"ShadeCtl_{zone_id}",
+            "Zone Name": zone_id,
+            "Shading Control Sequence Number": 1,
+            "Shading Type": "InteriorBlind",
+            "Shading Control Type": "OnIfHighSolarOnWindow",
+            "Setpoint": setpoint_w_m2 if setpoint_w_m2 is not None
+                        else self.BLIND_SOLAR_SETPOINT_W_M2,
+            "Shading Control Is Scheduled": "No",
+            "Glare Control Is Active": "No",
+            "Shading Device Material Name": blind_name or self.BLIND_NAME,
+            "Type of Slat Angle Control for Blinds": "FixedSlatAngle",
+            "Multiple Surface Control Type": "Sequential",
+        }
+        for i, wid in enumerate(window_ids, start=1):
+            fields[f"Fenestration Surface {i} Name"] = wid
+        return self._emit_by_idd("WindowShadingControl", fields)
+
     def add_people(self, name: str, zone: str, schedule: str, density: float):
         """People 객체 추가"""
         return self.add("People", [
