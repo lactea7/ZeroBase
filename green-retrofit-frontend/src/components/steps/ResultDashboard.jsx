@@ -631,7 +631,16 @@ export default function ResultDashboard({
                                   </div>
                                 ) : (
                                   <>
-                                    {rec.impact && (
+                                    {/* 정량 평가가 없는 이유는 두 가지고, 뜻이 전혀 다르다.
+                                        · not_applicable — 열모델을 안 바꾸는 대안이라 애초에 돌리지 않았다
+                                        · failed — 열모델은 바뀌는데 재시뮬레이션이 실패했다
+                                        예전엔 둘 다 "에너지 영향 없음"으로 나가 실패가 거짓 안내가 됐다. */}
+                                    {rec.impact_status === 'failed' ? (
+                                      <p className={`text-[11px] leading-relaxed z-10 flex items-start gap-1 ${isDarkMode ? 'text-amber-400/90' : 'text-amber-600'}`}>
+                                        <span className="shrink-0">⚠</span>
+                                        <span>정량 영향을 산출하지 못했습니다 — 이 대안의 재시뮬레이션이 실패해 에너지·운영비 변화를 알 수 없습니다</span>
+                                      </p>
+                                    ) : rec.impact && (
                                       <p className={`text-[11px] z-10 ${theme.textSub} opacity-70`}>
                                         에너지 영향 없음 — 이 대안은 열모델을 바꾸지 않아 공사비만 변동합니다
                                       </p>

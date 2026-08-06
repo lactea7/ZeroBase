@@ -409,9 +409,14 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
         const imp = r.impact;
         // 재시뮬레이션 산출 정량 영향이 있으면 수치를, 없으면 정성 주석을 병기
         const isUp = r.direction === 'upgrade';
+        // 정량 평가가 없는 이유는 두 가지고 뜻이 다르다 — 실패를 "영향 없음"으로
+        // 적으면 보고서가 거짓 근거를 싣게 된다.
+        const noImpactNote = r.impact_status === 'failed'
+          ? '↳ 정량 영향 산출 실패(재시뮬레이션 오류) — 에너지·운영비 변화 미확인'
+          : (imp ? '↳ 에너지 영향 없음(열모델 불변)' : '');
         const sub = imp?.simulated
           ? `↳ 에너지 ${imp.delta_kwh_m2 > 0 ? '+' : ''}${imp.delta_kwh_m2} kWh/㎡·년 · 운영비 ${imp.annual_bill_delta > 0 ? '+' : ''}${won(imp.annual_bill_delta)}/년 · 실공사비 ${imp.capital_delta > 0 ? '+' : ''}${won(imp.capital_delta)}${imp.payback_years ? ` · 회수 ${imp.payback_years}년` : ''} · ${imp.lifecycle_years}년 순효과 <b style="color:${imp.net_effect >= 0 ? 'var(--accent)' : '#b91c1c'}">${imp.net_effect >= 0 ? '+' : ''}${won(imp.net_effect)}</b> (EnergyPlus 재시뮬레이션 산출)`
-          : [imp ? '↳ 에너지 영향 없음(열모델 불변)' : '', r.performance_note ? esc(r.performance_note) : '']
+          : [noImpactNote, r.performance_note ? esc(r.performance_note) : '']
               .filter(Boolean).join(' · ');
         const advise = r.advisable === false ? ` <span style="color:#b91c1c; font-weight:700">(비권장 — 장기 손해, 예산 제약 시에만)</span>` : '';
         const head = (isUp
