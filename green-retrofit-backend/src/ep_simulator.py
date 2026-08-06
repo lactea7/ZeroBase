@@ -1228,11 +1228,28 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             heat_sch_text = sched["heating"]
             cool_sch_text = sched["cooling"]
 
+        # ⚠️ **설비 가용 스케줄에 재실률 스케줄(op_sch)을 쓰면 안 된다.**
+        #
+        # EnergyPlus 의 Availability Schedule 은 값이 0 이면 **장비를 완전히 끈다.**
+        # 아키타입 재실률(Op_office 등)은 평일 00~06시, 주말 19~06시가 0.0 이므로
+        # 하루 중 가장 추운 시간대에 난방기가 통째로 정지했다. 그런데 서모스탯
+        # 스케줄은 그 시간에 16℃ 셋백을 요구한다 — 모델이 표방한 셋백을 스스로
+        # 실행하지 못하는 모순이었다.
+        #
+        # 실측(용호동, 0.5 ACH): 겨울 01~06시 난방 **정확히 0.0 kWh**, 실온이
+        # 셋백 설정 16℃ 아래인 15.3℃ 까지 떨어진 뒤 07시에 몰아서 회복했다.
+        # 냉방은 야간 설정이 30℃ 라 어차피 안 돌아 손해가 없다 — **난방만 편향되게
+        # 깎였다.** 서울 사무소에서 난방이 냉방의 1/6 로 나오던 원인이다.
+        #
+        # 제어는 서모스탯 스케줄이 한다(셋백 + 냉방기간 5~10월 마스크). 설비는
+        # 상시 가용이어야 그 지시를 따를 수 있다.
+        hvac_avail_sch = "AlwaysOn"
+
         if z.get("isConditioned", True):
             if use_pthp:
                 idf.add_zone_sizing(z_id)
                 idf.add_pthp(z_id, cooling_cop=pthp_ccop, heating_cop=pthp_hcop,
-                             op_schedule=op_sch)
+                             op_schedule=hvac_avail_sch)
                 equipment_log.append({
                     "zone": z['id'],
                     "heating": f"{'지열 ' if is_geothermal else ''}히트펌프 난방 · COP {pthp_hcop}",
@@ -1242,7 +1259,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             elif use_fuel_system:
                 idf.add_zone_sizing(z_id)
                 idf.add_unit_heater(z_id, fuel_type=fuel_type, efficiency=fuel_eff,
-                                    op_schedule=op_sch)
+                                    op_schedule=hvac_avail_sch)
                 # 냉방기 설치: 사용자 오버라이드 > 자동(비거주 제외).
                 # 용량 기본은 면적 기반 명시값(150W/㎡, 최소 600W — 냉방부하 0존의
                 # autosize=0 Fatal 방지), 평형 입력 시 실기기 용량 사용.
@@ -1250,7 +1267,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                 if plan["installed"]:
                     idf.add_window_ac(z_id, cooling_cop=window_ac_cop,
                                       cooling_capacity_w=plan["capacity_w"],
-                                      op_schedule=op_sch)
+                                      op_schedule=hvac_avail_sch)
                 equipment_log.append({
                     "zone": z['id'],
                     "heating": f"{fuel_label} 난방기 (효율 {fuel_eff})",
@@ -1259,7 +1276,7 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                     "source": plan["source"],
                 })
             else:
-                idf.add_ideal_hvac(z_id, op_sch)
+                idf.add_ideal_hvac(z_id, hvac_avail_sch)
                 equipment_log.append({
                     "zone": z['id'],
                     "heating": "이상부하(간이 모델)", "cooling": "이상부하(간이 모델)",
