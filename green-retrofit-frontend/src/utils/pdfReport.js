@@ -114,6 +114,10 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   const base = res?.baseline;
   const eq = res?.hvacEquipment;
   const recs = fin.recommendations || [];
+  // ⚠️ 지면 상한. 넘치면 **조용히 버리지 않고** '외 N건'으로 알린다 —
+  // 예전엔 .sheet 의 overflow:hidden 이 넘친 내용을 소리 없이 잘라냈다.
+  const MAX_INS_ROWS = 8;
+  const MAX_WARN_ROWS = 6;
   const notes = fin.estimate_notes || [];
   const warns = fin.cost_warnings || [];
   const cd = fin.cost_details || {};
@@ -189,9 +193,11 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
     font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { size: A4; margin: 0; }
-  /* 297mm 정확값은 인쇄 px 반올림으로 하단이 잘림 → 296mm로 안전 확보 */
-  .sheet { width: 210mm; height: 296mm; page-break-after: always;
-    display: flex; flex-direction: column; overflow: hidden; background: #fff;
+  /* 297mm 정확값은 인쇄 px 반올림으로 하단이 잘림 → 296mm로 안전 확보.
+     ⚠️ height + overflow:hidden 이면 내용이 넘칠 때 **조용히 잘린다**(하단 유실).
+     min-height 로 바꿔 넘치면 다음 장으로 흘려보낸다 — 잘리는 것보다 낫다. */
+  .sheet { width: 210mm; min-height: 296mm; page-break-after: always;
+    display: flex; flex-direction: column; background: #fff;
     padding: 0 15mm; }
   .sheet:last-child { page-break-after: auto; }
 
@@ -267,7 +273,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   .recs .item .amt { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
 
   /* ── 2페이지 섹션 ── */
-  .section { margin-top: 18px; }
+  .section { margin-top: 18px; break-inside: avoid; page-break-inside: avoid; }
   .section-h { display: flex; align-items: baseline; gap: 9px; padding-bottom: 6px;
     border-bottom: 2px solid var(--ink); margin-bottom: 8px; }
   .section-no { font-size: 9px; font-weight: 800; color: var(--accent);
@@ -296,9 +302,11 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   .chip.user { background: #fff; border: 1px solid var(--accent); color: var(--accent); }
 
   /* ── 가정·유의 ── */
-  .assump { background: var(--soft); border-radius: 12px; padding: 14px 16px 12px;
+  .assump { break-inside: avoid; page-break-inside: avoid;
+    background: var(--soft); border-radius: 12px; padding: 14px 16px 12px;
     margin-top: 18px; }
   .assump .t { font-size: 10.5px; font-weight: 800; margin-bottom: 7px; }
+  .note-item { break-inside: avoid; }
   .note-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 22px; font-size: 8.2px;
     color: var(--ink-2); }
   .note-grid b { color: var(--ink); font-weight: 700; }
@@ -307,7 +315,9 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
   .warn-item::before { content: "◦ "; color: var(--ink-3); }
 
   /* ── 푸터 ── */
-  .foot { margin-top: auto; border-top: 1px solid var(--hairline); padding: 10px 0 14px;
+  table { break-inside: auto; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  .foot { margin-top: auto; break-inside: avoid; border-top: 1px solid var(--hairline); padding: 10px 0 14px;
     display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
     font-size: 7.5px; color: var(--ink-3); line-height: 1.55; }
   .foot b { color: var(--ink-2); font-weight: 700; }
@@ -418,7 +428,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
       <b>기상</b> 한국 TMYx(2009–2023) · <b>요금</b> KEPCO(2026)·KDHC(2024) ·
       <b>단가</b> 친환경건설자재 DB 중앙값 — 결과는 추정치이며 실제 견적·요금과 차이가 날 수 있습니다.
     </div>
-    <div class="pageno">1 / 2</div>
+    <div class="pageno">요약</div>
   </div>
 </section>
 
@@ -485,7 +495,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
     ${insGroups.length ? `
     <table>
       <tr><th>등급</th><th style="text-align:right">시공 면적</th><th style="text-align:right">단가</th><th style="text-align:right">비용</th><th style="text-align:right">부위 수</th></tr>
-      ${insGroups.map((g) => `
+      ${insGroups.slice(0, MAX_INS_ROWS).map((g) => `
       <tr>
         <td>${esc(g.tier)}</td>
         <td class="n" style="text-align:right">${g.area.toFixed(1)} ㎡</td>
@@ -493,6 +503,8 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
         <td class="n" style="text-align:right">${won(g.cost)}</td>
         <td class="n" style="text-align:right">${g.count}</td>
       </tr>`).join('')}
+      ${insGroups.length > MAX_INS_ROWS ? `<tr><td colspan="5" style="color:var(--ink-3)">
+        · 외 ${insGroups.length - MAX_INS_ROWS}개 등급은 지면 관계로 생략했습니다 (합계에는 포함)</td></tr>` : ''}
     </table>` : row('산정 방식', '단열층 미검출 — 벽면적 × DB 폴백 단가 적용')}
   </div>
 
@@ -507,7 +519,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
     <div class="note-grid">
       ${notes.map((n) => `<div class="note-item"><b>${esc(n.label)}</b> — ${esc(n.note)}</div>`).join('')}
     </div>
-    ${warns.length ? `<div style="margin-top:6px">${warns.map((w) => `<div class="warn-item">${esc(w)}</div>`).join('')}</div>` : ''}
+    ${warns.length ? `<div style="margin-top:6px">${warns.slice(0, MAX_WARN_ROWS).map((w) => `<div class="warn-item">${esc(w)}</div>`).join('')}${warns.length > MAX_WARN_ROWS ? `<div class="warn-item">· 외 ${warns.length - MAX_WARN_ROWS}건 — 화면의 경고 목록에서 전체를 확인하세요</div>` : ''}</div>` : ''}
     ${sens.length ? `
     <div style="margin-top:8px; border-top:1px solid var(--hairline); padding-top:7px">
       <div style="font-size:8.2px; font-weight:700; margin-bottom:2px">NPV 민감도 — 기본 ${won(fin.npv)} (${lcc.lifecycle_years ?? 20}년, 재시뮬레이션 없이 가정만 변경)</div>
@@ -517,7 +529,7 @@ export function buildReportHtml({ res, projectData = {}, lccAnalysis = {}, zones
 
   <div class="foot">
     <div><b>ZeroBase</b> — gbXML 기반 그린 리트로핏 시뮬레이션 · 생성일 ${today} · 본 리포트의 수치는 물리 시뮬레이션 기반 추정치입니다.</div>
-    <div class="pageno">2 / 2</div>
+    <div class="pageno">산정 근거</div>
   </div>
 </section>
 
