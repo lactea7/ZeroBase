@@ -1,0 +1,423 @@
+{
+ "financial": {
+  "annual_elec_bill": 11032473,
+  "annual_heat_bill": 18383548,
+  "baseline_assumptions": {
+   "base_running_cost": 47065635,
+   "running_cost_multiplier": 1.6,
+   "savings_pct": 38,
+   "source": "estimate"
+  },
+  "capital_cost": 247931532,
+  "cost_details": {
+   "hvac": 175633358,
+   "insulation": 12840300,
+   "led": 8333082,
+   "window": 51124790
+  },
+  "cost_warnings": [
+   "이상부하 모드: 요구량을 설비 효율로 나눠 소비량을 산출"
+  ],
+  "csv_db_loaded": {
+   "eco_loaded": true,
+   "items": 35416,
+   "nara_loaded": true
+  },
+  "cumulative_lcc_30y": [
+   280594904,
+   312913602,
+   344891547,
+   376532612,
+   407840623,
+   438819353,
+   469472533,
+   499803844,
+   529816922,
+   562265433,
+   591652769,
+   620732508,
+   649508107,
+   677982981,
+   771971108,
+   799854606,
+   827447370,
+   854752649,
+   881773652,
+   910782492
+  ],
+  "estimate_notes": [
+   {
+    "label": "공사비 단가",
+    "note": "친환경건설자재 DB의 등급별 중앙값 단가입니다. 브랜드·시공 조건에 따라 실제 견적과 차이가 날 수 있습니다."
+   },
+   {
+    "label": "설비(HVAC) 비용",
+    "note": "시뮬레이션 피크부하로 추정한 용량 117kW × 시스템 단가(kW당 1,500,000원)입니다. 실측 견적이 아닌 추정치입니다."
+   },
+   {
+    "label": "LED 공사비",
+    "note": "바닥면적 약 10㎡당 등기구 1개로 환산한 추정 수량 기준입니다."
+   },
+   {
+    "label": "에너지 요금",
+    "note": "2026년 KEPCO 일반용·지역난방 요금표 기준이며, 실제 계약 종별에 따라 달라질 수 있습니다. 주거 건물의 세대별 주택용 누진제는 반영되지 않습니다."
+   },
+   {
+    "label": "냉방기간",
+    "note": "냉방은 5월 1일~10월 31일에만 가동하는 것으로 가정합니다. 동절기에는 일사·내부발열로 실내온도가 올라도 냉방을 돌리지 않습니다(실제 운영 관행 반영)."
+   },
+   {
+    "label": "기존 건물 기준선",
+    "note": "실측 요금 미입력 시 개선 후 운영비의 1.6배를 기존 건물로 가정합니다. 실측 요금을 입력하면 정확도가 올라갑니다."
+   },
+   {
+    "label": "NPV·IRR",
+    "note": "할인율 5.0%, 물가상승 3.0%, 요금상승 4.0%, 분석기간 20년 가정의 결과입니다."
+   }
+  ],
+  "heat_source": "지역난방",
+  "hvac_capacity_kw": 117.1,
+  "insulation_details": 359,
+  "irr": 1.93,
+  "lcc_parameters": {
+   "discount_rate": 5.0,
+   "inflation_rate": 3.0,
+   "lifecycle_years": 20,
+   "utility_inflation": 4.0
+  },
+  "mapped_window_name": "일반 복층유리 (친환경DB 66건 평균단가)",
+  "npv": -58158941,
+  "npv_sensitivity": [
+   {
+    "base": -58158941,
+    "base_label": "5.0%",
+    "high": -85326654,
+    "high_label": "7.0%",
+    "low": -23045129,
+    "low_label": "3.0%",
+    "param": "할인율"
+   },
+   {
+    "base": -58158941,
+    "base_label": "4.0%",
+    "high": -24900505,
+    "high_label": "5.0%",
+    "low": -87667348,
+    "low_label": "3.0%",
+    "param": "요금상승률"
+   }
+  ],
+  "recommendations": [
+   {
+    "direction": null,
+    "type": "hvac_scope"
+   },
+   {
+    "direction": null,
+    "type": "led"
+   },
+   {
+    "direction": "upgrade",
+    "type": "hvac_upgrade"
+   },
+   {
+    "direction": "upgrade",
+    "type": "window_upgrade"
+   },
+   {
+    "direction": "upgrade",
+    "type": "insulation_upgrade"
+   }
+  ],
+  "simple_payback_years": 13.2,
+  "target_budget": 0,
+  "total_energy_bill": 29416022,
+  "total_lcc": 910782492,
+  "window_details": {
+   "area_m2": 301.6,
+   "shgc": 0.6,
+   "u_value": 2.74,
+   "unit_price": 169500
+  }
+ },
+ "matrix": {
+  "cooling": {
+   "co2": 8.99,
+   "con": 19.3,
+   "gradePrimary": 53.1,
+   "primary": 53.1,
+   "req": 53.9
+  },
+  "equipment": {
+   "co2": 6.9,
+   "con": 14.8,
+   "gradePrimary": 0.0,
+   "primary": 40.7,
+   "req": 14.8
+  },
+  "heating": {
+   "co2": 28.58,
+   "con": 142.9,
+   "gradePrimary": 104.0,
+   "primary": 104.0,
+   "req": 135.8
+  },
+  "hotwater": {
+   "co2": 3.92,
+   "con": 19.6,
+   "gradePrimary": 14.3,
+   "primary": 14.3,
+   "req": 17.8
+  },
+  "lighting": {
+   "co2": 10.25,
+   "con": 22.0,
+   "gradePrimary": 60.5,
+   "primary": 60.5,
+   "req": 22.0
+  },
+  "renewable": {
+   "co2": 0.0,
+   "con": -0.0,
+   "gradePrimary": 0.0,
+   "primary": -0.0,
+   "req": -0.0
+  },
+  "ventilation": {
+   "co2": 1.21,
+   "con": 2.6,
+   "gradePrimary": 7.2,
+   "primary": 7.2,
+   "req": 2.6
+  }
+ },
+ "monthly": [
+  {
+   "cooling": 0.0,
+   "equipment": 1.3,
+   "heating": 44.9,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "1월"
+  },
+  {
+   "cooling": 0.0,
+   "equipment": 1.1,
+   "heating": 29.1,
+   "hotwater": 1.5,
+   "lighting": 1.7,
+   "name": "2월"
+  },
+  {
+   "cooling": 0.0,
+   "equipment": 1.3,
+   "heating": 14.5,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "3월"
+  },
+  {
+   "cooling": 0.0,
+   "equipment": 1.2,
+   "heating": 6.6,
+   "hotwater": 1.6,
+   "lighting": 1.8,
+   "name": "4월"
+  },
+  {
+   "cooling": 0.3,
+   "equipment": 1.3,
+   "heating": 0.0,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "5월"
+  },
+  {
+   "cooling": 3.1,
+   "equipment": 1.2,
+   "heating": 0.0,
+   "hotwater": 1.6,
+   "lighting": 1.8,
+   "name": "6월"
+  },
+  {
+   "cooling": 6.4,
+   "equipment": 1.3,
+   "heating": 0.0,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "7월"
+  },
+  {
+   "cooling": 7.1,
+   "equipment": 1.3,
+   "heating": 0.0,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "8월"
+  },
+  {
+   "cooling": 2.3,
+   "equipment": 1.2,
+   "heating": 0.0,
+   "hotwater": 1.6,
+   "lighting": 1.8,
+   "name": "9월"
+  },
+  {
+   "cooling": 0.1,
+   "equipment": 1.3,
+   "heating": 0.9,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "10월"
+  },
+  {
+   "cooling": 0.0,
+   "equipment": 1.2,
+   "heating": 12.5,
+   "hotwater": 1.6,
+   "lighting": 1.8,
+   "name": "11월"
+  },
+  {
+   "cooling": 0.0,
+   "equipment": 1.3,
+   "heating": 34.4,
+   "hotwater": 1.7,
+   "lighting": 1.9,
+   "name": "12월"
+  }
+ ],
+ "summary": {
+  "co2_per_m2": 59.85,
+  "consume_per_m2": 221.20000000000002,
+  "demand_per_m2": 246.9,
+  "independence": 0.0,
+  "primary_per_m2": 239.0
+ },
+ "surfaceAirflow": {
+  "su-b-as-101-e-f-1034": {
+   "inflow": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "outflow": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "su-b-as-102-e-f-1045": {
+   "inflow": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "outflow": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "surfaceThermal": {
+  "su-b-as-101-e-f-1034": {
+   "radiation": [
+    22.54,
+    28.52,
+    37.49,
+    42.77,
+    48.61,
+    48.95,
+    37.14,
+    32.43,
+    36.25,
+    30.58,
+    21.82,
+    19.29
+   ],
+   "temperature": [
+    -0.09,
+    2.93,
+    9.43,
+    13.4,
+    21.14,
+    25.75,
+    27.15,
+    27.23,
+    23.99,
+    16.21,
+    9.05,
+    1.0
+   ]
+  },
+  "su-b-as-102-e-f-1045": {
+   "radiation": [
+    22.54,
+    28.52,
+    37.49,
+    42.77,
+    48.61,
+    48.95,
+    37.14,
+    32.43,
+    36.25,
+    30.58,
+    21.82,
+    19.29
+   ],
+   "temperature": [
+    -0.09,
+    2.93,
+    9.43,
+    13.4,
+    21.14,
+    25.75,
+    27.15,
+    27.23,
+    23.99,
+    16.21,
+    9.05,
+    1.0
+   ]
+  }
+ }
+}

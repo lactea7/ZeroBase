@@ -6,7 +6,7 @@ except ImportError:
 
 # 비거주 구역 판별 키워드 — LED 공사 면적 축소·설비(냉방기) 설치 제외 등에 공용.
 # (ep_simulator도 import: 계단실 등엔 WindowAC를 설치하지 않아 냉방부하 0 → 사이징 실패 방지)
-from src.domain.models import BaselineSource, TariffResult
+from src.domain.models import BaselineSource, CashflowResult, TariffResult
 from src.economics import tariffs as _tariffs
 from src.economics.baseline import resolve_baseline, savings_pct
 from src.economics.capital_cost import estimate_capital_cost
@@ -338,6 +338,20 @@ class LCCAnalyzer:
             # 할인율 ±2%p, 요금상승률 ±1%p 가정만 바꿔 재할인 (결과 견고성 판단용)
             dr_lo, dr_hi = max(discount_rate - 0.02, 0.0), discount_rate + 0.02
             ui_lo, ui_hi = max(utility_inflation - 0.01, 0.0), utility_inflation + 0.01
+            # ── 현금흐름 계약 생성 ──
+            # TariffResult·CapitalCostResult 와 마찬가지로 실제 경로에서 만든다.
+            # 정의만 해두고 안 쓰면 계약이 아니다.
+            cashflow = CashflowResult(
+                npv_won=float(npv_real),
+                irr_pct=irr_val,
+                simple_payback_years=payback_years,
+                yearly_net_won=tuple(cash_flows),
+                analysis_years=years,
+                discount_rate=discount_rate,
+                inflation_rate=inflation_rate,
+                utility_inflation=utility_inflation,
+            )
+
             npv_sensitivity = [
                 {
                     "param": "할인율",
@@ -379,19 +393,19 @@ class LCCAnalyzer:
                 "csv_db_loaded": self.cost_db["status"],
                 "cumulative_lcc_30y": cumulative_lcc_30y,
                 "lcc_parameters": {
-                    "discount_rate": discount_rate * 100,
-                    "inflation_rate": inflation_rate * 100,
-                    "utility_inflation": utility_inflation * 100,
-                    "lifecycle_years": years
+                    "discount_rate": cashflow.discount_rate * 100,
+                    "inflation_rate": cashflow.inflation_rate * 100,
+                    "utility_inflation": cashflow.utility_inflation * 100,
+                    "lifecycle_years": cashflow.analysis_years,
                 },
-                "npv": int(npv_real),
+                "npv": int(cashflow.npv_won),
                 # None = 분석기간 내 미회수. **0 으로 바꾸면 '즉시 회수'가 된다.**
-                "simple_payback_years": (None if payback_years is None
-                                         else round(payback_years, 1)),
+                "simple_payback_years": (None if cashflow.simple_payback_years is None
+                                         else round(cashflow.simple_payback_years, 1)),
                 "npv_sensitivity": npv_sensitivity,
                 "hvac_capacity_kw": round(hvac_capacity_kw, 1),  # 공사비 산정 기준 용량 (UI 각주용)
                 "total_lcc": int(lcc_pv),
-                "irr": None if irr_val is None else round(irr_val, 2),
+                "irr": (None if cashflow.irr_pct is None else round(cashflow.irr_pct, 2)),
                 "cost_warnings": cost_warnings,
                 "heat_source": heat_src["label"],   # 적용된 난방 열원 (UI 표기용)
                 # NPV/IRR/절감액이 비교한 '기존 건물' 기준 (UI 명시 고지용)
