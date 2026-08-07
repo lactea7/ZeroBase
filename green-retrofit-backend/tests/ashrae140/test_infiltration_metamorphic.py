@@ -151,15 +151,16 @@ def test_air_change_rate_is_independent_of_surface_subdivision(split_results):
 
 # ── AFN opt-in 경로 ────────────────────────────────────────
 #
-# AFN 은 제거하지 않고 opt-in 으로 남겼는데, **계수 정규화는 아직 구현되지 않았다.**
-# 즉 형상 의존성이 그대로 살아 있다. 이걸 시험 없이 두면 나중에 "AFN 도 고쳐졌겠지"
-# 하고 오해하게 되므로, 결함이 남아 있다는 사실 자체를 xfail(strict) 로 고정한다.
-# 계수를 면적·둘레 기준으로 정규화하면 이 시험이 XPASS 로 바뀌어 알려준다.
+# 예전에는 이 시험이 xfail(strict) 였다 — 모든 Outdoors 표면이 같은 `WallCrack`
+# (계수 0.01)을 factor 1.0 으로 공유해서 총 누기가 표면 **개수**에 비례했다.
+#
+# 이제 균열 계수를 **㎡ 당**으로 정의하고 표면마다 면적을 곱한 컴포넌트를 만든다
+# (`IdfBuilder.add_surface_crack`). 총 누기 = Σ(계수/㎡ × 면적) 이라 분할과 무관하다.
+#
+# ⚠️ 면적을 `AirflowNetwork:MultiZone:Surface` 의 crack factor 에 넣을 수는 없다 —
+# EnergyPlus 가 그 필드를 **1.0 이하로 제한**한다(1㎡ 넘는 면은 Fatal).
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True,
-                   reason="AFN crack 계수가 면적·둘레로 정규화되지 않아 표면 개수에 비례한다 "
-                          "(미구현). 기본 경로가 아니므로 opt-in 사용자에게만 영향.")
 def test_afn_load_is_independent_of_surface_subdivision(afn_split_results):
     values = {n: afn_split_results[n]["heating"] for n in SPLITS}
     spread = max(values.values()) - min(values.values())

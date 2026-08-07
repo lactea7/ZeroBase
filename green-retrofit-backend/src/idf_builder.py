@@ -86,6 +86,26 @@ class IdfObject:
         return "\n".join(lines) + "\n"
 
 
+# ── AirflowNetwork 외피 균열 (침기) ───────────────────────
+#
+# ⚠️ 예전에는 계수 0.01 이 **표면 하나당** 붙고 crack factor 가 전부 1.0 이었다.
+# 그러면 총 누기가 외피 기밀성이 아니라 **표면 개수**에 좌우된다. gbXML 은 벽
+# 하나를 여러 폴리곤으로 내보내는 경우가 흔해서, 같은 건물이라도 도면 작성 방식에
+# 따라 침기율이 달라졌다. 실측(ASHRAE 140 케이스 600, 북벽만 분할):
+#     분할 1개 → 난방 6.4972 MWh / 8개 → 8.6720 MWh (**+33.5%**)
+#
+# 이제 계수를 **㎡ 당**으로 정의하고 crack factor 에 표면 면적을 넣는다.
+# 총 누기 = Σ(계수 × 면적) = 계수 × 총 외피면적 — 분할해도 합이 같다.
+#
+# 값의 근거: 외피 누기 q50 = 5 m³/(h·㎡) (보통 수준의 기존 건물) 을 멱함수
+# Q = C·ΔP^n 로 환산한다.
+#     C = (5/3600 m³/s·㎡) × 1.2 kg/m³ / 50^0.65 = 1.31e-4 kg/(s·㎡·Pa^0.65)
+WALL_CRACK_Q50_M3_H_M2 = 5.0      # 50 Pa 가압 시 단위 외피면적당 누기 (m³/h·㎡)
+WALL_CRACK_EXPONENT = 0.65        # 균열 유동지수 (일반 외피)
+WALL_CRACK_COEFFICIENT_PER_M2 = round(
+    (WALL_CRACK_Q50_M3_H_M2 / 3600.0) * 1.2 / (50.0 ** WALL_CRACK_EXPONENT), 8)
+
+
 class IdfBuilder:
     """EnergyPlus IDF 빌더 (imugi의 IDF 클래스 패턴 차용)
     
@@ -346,6 +366,24 @@ class IdfBuilder:
         for i, wid in enumerate(window_ids, start=1):
             fields[f"Fenestration Surface {i} Name"] = wid
         return self._emit_by_idd("WindowShadingControl", fields)
+
+    def add_surface_crack(self, surface_id: str, area_m2: float) -> str:
+        """표면 면적에 비례하는 균열 컴포넌트를 만들고 이름을 돌려준다.
+
+        ⚠️ 면적을 `AirflowNetwork:MultiZone:Surface` 의 crack factor 에 넣을 수는
+        **없다** — EnergyPlus 가 그 필드를 1.0 이하로 제한한다(1㎡ 넘는 면은
+        Fatal). 그래서 면적을 **계수 쪽**에 곱해 표면마다 컴포넌트를 만든다.
+
+        총 누기 = Σ(계수/㎡ × 면적) = 계수/㎡ × 총 외피면적 이므로, 같은 벽을
+        몇 개 폴리곤으로 쪼개든 합이 같다.
+        """
+        name = f"Crack_{surface_id}"
+        self.add("AirflowNetwork:MultiZone:Surface:Crack", [
+            name,
+            round(WALL_CRACK_COEFFICIENT_PER_M2 * max(area_m2, 0.0), 10),
+            WALL_CRACK_EXPONENT,
+        ])
+        return name
 
     def add_people(self, name: str, zone: str, schedule: str, density: float):
         """People 객체 추가"""
@@ -863,8 +901,11 @@ class IdfBuilder:
         self.add("AirflowNetwork:MultiZone:ReferenceCrackConditions", [
             "RefCrackCond", 20.0, 101325, 0.0
         ])
+        # 표면별 균열은 `add_surface_crack()` 이 면적을 곱해 따로 만든다.
+        # 공용 `WallCrack` 은 면적을 모르는 호출자를 위한 폴백으로만 남긴다
+        # (표준 외피면 1㎡ 상당).
         self.add("AirflowNetwork:MultiZone:Surface:Crack", [
-            "WallCrack", 0.01, 0.65
+            "WallCrack", WALL_CRACK_COEFFICIENT_PER_M2, WALL_CRACK_EXPONENT
         ])
         self.add("AirflowNetwork:MultiZone:Component:SimpleOpening", [
             "WindowOpening", 0.001, 0.65, 0.3, 0.6

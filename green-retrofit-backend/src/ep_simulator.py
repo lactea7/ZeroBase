@@ -1373,8 +1373,13 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
 
             # AirflowNetwork Surface 및 개구부(Window) 등록
             if obc == "Outdoors" and s.get("zone") in valid_afn_zones:
+                # ⚠️ 균열 계수를 **표면 면적에 비례**시킨다. 예전엔 모든 면이
+                # 같은 `WallCrack`(계수 0.01) 을 factor 1.0 으로 공유해서, 총 누기가
+                # 외피 기밀성이 아니라 **표면 개수**에 좌우됐다 — 같은 벽을 8개
+                # 폴리곤으로 쪼개면 난방이 +33.5% 뛰었다.
+                _crack = idf.add_surface_crack(s['id'], calculate_surface_area(verts))
                 idf.add("AirflowNetwork:MultiZone:Surface", [
-                    s['id'], "WallCrack", "", 1.0
+                    s['id'], _crack, "", 1.0
                 ])
                 if ep_type == "Wall" and wwr > 0:
                     win_id = f"Win_{s['id']}"
