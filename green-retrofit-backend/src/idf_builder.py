@@ -6,6 +6,7 @@
 import os
 import math
 import re
+import shutil
 
 # ---------------------------------------------------------------------------- #
 #                    IDD 필드 순서 인덱스 (dict→positional 평탄화)               #
@@ -23,17 +24,28 @@ _IDD_PATHS = [
 _IDD_INDEX_CACHE = None  # {obj_type_lower: {"fields": [names...], "min": int}}
 
 
+def _idd_candidates():
+    """Energy+.idd 후보 경로를 우선순위대로 낸다.
+
+    ⚠️ 예전에는 하드코딩 경로 3개뿐이라, 표준 위치가 아닌 곳에 설치하면
+    (CI 의 `/opt/EnergyPlus` 등) IDD 를 못 찾고 `_emit_by_idd` 가 RuntimeError 로
+    죽었다. **IDD 는 `energyplus` 실행파일 옆에 있으므로** 그것을 1순위로 쓴다.
+    """
+    exe = shutil.which("energyplus")
+    if exe:
+        yield os.path.join(os.path.dirname(os.path.realpath(exe)), "Energy+.idd")
+    env = os.environ.get("ENERGYPLUS_IDD")
+    if env:
+        yield env
+    yield from _IDD_PATHS
+
+
 def _get_idd_index():
     """Energy+.idd를 1회 파싱해 {객체타입(소문자): {fields:[필드명...], min:최소필드수}} 반환."""
     global _IDD_INDEX_CACHE
     if _IDD_INDEX_CACHE is not None:
         return _IDD_INDEX_CACHE
-    idd_path = next((p for p in _IDD_PATHS if os.path.exists(p)), None)
-    if idd_path is None:
-        # 환경변수 폴백
-        env = os.environ.get("ENERGYPLUS_IDD")
-        if env and os.path.exists(env):
-            idd_path = env
+    idd_path = next((p for p in _idd_candidates() if os.path.exists(p)), None)
     index = {}
     if idd_path is None:
         _IDD_INDEX_CACHE = index

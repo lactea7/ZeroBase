@@ -1,0 +1,43 @@
+# PR 필수 관문 — 빠른 시험만. EnergyPlus 가 필요한 시험은 energyplus.yml 로 분리한다.
+#
+# ⚠️ 여기에 느린 시험을 넣지 말 것. 관문이 느려지면 사람들이 우회한다.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: green-retrofit-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: green-retrofit-frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+
+  backend-fast:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: green-retrofit-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # ⚠️ `-m "not slow"` 는 EnergyPlus 실행이 필요한 118개를 뺀다.
+      # 골든 IDF·응답 계약·도메인 계산은 전부 여기 포함된다(EnergyPlus 없이 돈다).
+      - run: pytest -q -m "not slow"

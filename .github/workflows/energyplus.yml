@@ -1,0 +1,68 @@
+# EnergyPlus 가 필요한 시험 — **PR 관문이 아니다.**
+#
+# Tier B(우리 payload → 파이프라인)가 번역을 검증하므로 우선순위가 높다.
+# Tier A(stock IDF → 엔진)는 우리 코드를 타지 않아 모든 PR 에 걸 효용이 작다.
+#
+# ⚠️ EnergyPlus 버전은 참조값을 만든 것과 **같아야 한다**(25.2.0). 버전이 다르면
+# ASHRAE 140 참조 범위 비교가 성립하지 않는다.
+name: EnergyPlus
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 18 * * 0'      # 주 1회 (일요일 03:00 KST)
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: '실행할 계층'
+        type: choice
+        options: [tier-b, all]
+        default: tier-b
+
+env:
+  EP_VERSION: 25.2.0
+  EP_SHA: cf7368216c
+
+jobs:
+  simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: green-retrofit-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: EnergyPlus 캐시
+        id: ep-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/EnergyPlus
+          key: energyplus-${{ env.EP_VERSION }}-${{ runner.os }}
+
+      - name: EnergyPlus 설치
+        if: steps.ep-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://github.com/NREL/EnergyPlus/releases/download/v${EP_VERSION}/EnergyPlus-${EP_VERSION}-${EP_SHA}-Linux-Ubuntu24.04-x86_64.tar.gz"
+          curl -fsSL "$url" -o /tmp/ep.tar.gz
+          sudo mkdir -p /opt/EnergyPlus
+          sudo tar -xzf /tmp/ep.tar.gz -C /opt/EnergyPlus --strip-components=1
+
+      - run: echo "/opt/EnergyPlus" >> "$GITHUB_PATH"
+      - run: energyplus --version
+
+      # Tier B — 우리 payload 가 IDF 로 옳게 번역되는지. 느린 시험 중 우선순위 1위.
+      - name: Tier B + 침기 metamorphic
+        run: pytest -q tests/ashrae140/test_tier_b_pipeline.py tests/ashrae140/test_infiltration_metamorphic.py
+
+      # Tier A — stock IDF 로 엔진 자체를 확인. 애플리케이션 코드를 타지 않는다.
+      - name: Tier A (엔진)
+        if: github.event_name == 'schedule' || inputs.tier == 'all'
+        run: pytest -q tests/ashrae140/test_tier_a_engine.py
