@@ -1396,17 +1396,19 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     # ASHRAE 140 은 **차양 없음**을 사양으로 못 박는다(600 vs 610 의 차이가 바로
     # 외부 차양이다). 벤치마크에서는 절대 걸면 안 된다 — `noInteriorBlind` 로 끈다.
     _blind_off = bench.get("noInteriorBlind") or project_data.get("noInteriorBlind")
+    _blind_setpoint_used = None
     if windows_by_zone and not _blind_off:
         # 설정값은 결과에 크게 영향을 준다 — 낮출수록 자주 내려 난방↑·냉방↓ 다.
         # 실측 자료가 있으면 프로젝트별로 덮어쓸 수 있게 열어 둔다.
-        _sp = float(project_data.get("blindSolarSetpointWm2")
-                    or IdfBuilder.BLIND_SOLAR_SETPOINT_W_M2)
+        _blind_setpoint_used = float(project_data.get("blindSolarSetpointWm2")
+                                     or IdfBuilder.BLIND_SOLAR_SETPOINT_W_M2)
         idf.add_interior_blind()
         for _z, _wins in windows_by_zone.items():
-            idf.add_window_shading_control(_z, _wins, setpoint_w_m2=_sp)
+            idf.add_window_shading_control(_z, _wins,
+                                           setpoint_w_m2=_blind_setpoint_used)
         print(f"🪟 내부 블라인드 적용: {len(windows_by_zone)}개 존 "
               f"{sum(len(w) for w in windows_by_zone.values())}개 창 "
-              f"(창면일사 {_sp:.0f} W/㎡ 초과 시 하강)")
+              f"(창면일사 {_blind_setpoint_used:.0f} W/㎡ 초과 시 하강)")
 
     if skipped_count > 0:
         print(f"⏭️ Zone 미소속 Surface {skipped_count}개 제외 (차양/지형면)")
@@ -1537,6 +1539,17 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             "note": ("자기참조로 기록된 최하층 바닥의 경계조건입니다. "
                      "지면 접촉으로 바꾸면 지면 열손실이 반영됩니다."),
             "confidence": "medium",
+        }, {
+            "key": "interior_blind",
+            "label": "내부 블라인드(일사 제어)",
+            "value": (f"창면일사 {_blind_setpoint_used:.0f} W/㎡ 초과 시 하강"
+                      if _blind_setpoint_used else "적용 안 함"),
+            # ⚠️ gbXML 은 블라인드 유무를 담지 않는다. 있다고 **가정**하는 것이므로
+            # 반드시 드러내야 한다 — 결과에 크게 영향을 준다.
+            "note": ("gbXML 에는 차양 정보가 없어 일반 사무실 수준의 내부 블라인드를 "
+                     "가정했습니다. 문헌의 하강 문턱값은 50~377 W/㎡ 로 폭이 넓습니다. "
+                     "차양이 실제로 없다면 난방이 줄고 냉방이 늘어납니다."),
+            "confidence": "low",
         }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
                                     building_ach, use_afn,
                                     measured=_measure_infiltration(temp_dir_abs, zones,

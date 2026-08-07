@@ -96,3 +96,21 @@ def test_zone_and_windows_land_in_the_right_fields():
     assert f[1] == "Zone_A", "존 이름이 2번 필드가 아니다"
     assert f[3] == "InteriorBlind"
     assert "W1" in f and "W2" in f
+
+
+# ── 가정의 노출 ──────────────────────────────────────────
+# ⚠️ gbXML 은 블라인드 유무를 담지 않는다. **있다고 가정**하는 것이고 결과에
+# 크게 영향을 주므로(난방 10.6 → 19.0 kWh/㎡) 응답에 드러나야 한다.
+
+def test_setpoint_default_is_within_the_literature_range():
+    """문헌 문턱값은 50~377 W/㎡ 다. 그 밖이면 근거 없는 값이다."""
+    assert 50 <= IdfBuilder.BLIND_SOLAR_SETPOINT_W_M2 <= 377
+
+
+def test_blind_assumption_is_reported_in_the_response():
+    """사용자가 '차양 가정'을 볼 수 없으면 결과를 검증할 수 없다."""
+    import re
+    src = open(os.path.join(BACKEND, "src", "ep_simulator.py"), encoding="utf-8").read()
+    m = re.search(r'"key":\s*"interior_blind".*?"confidence":\s*"(\w+)"', src, re.S)
+    assert m, "assumptions 에 interior_blind 항목이 없다"
+    assert m.group(1) == "low", "측정값이 아니라 가정이므로 confidence 는 low 여야 한다"

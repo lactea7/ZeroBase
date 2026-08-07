@@ -33,16 +33,33 @@ def record(monkeypatch):
     import ep_simulator
 
     def _run(payload, tmp_path):
-        surfaces, windows = [], []
+        surfaces, windows, errors = [], [], []
 
-        def fake_surface(self, sid, ep_type, constr, zone, boundary, sun, wind,
-                         verts, adj=""):
-            surfaces.append(SurfaceCall(sid, ep_type, constr, zone, boundary,
-                                        sun, wind, verts, adj))
+        # ⚠️ **시그니처가 실제 호출과 정확히 같아야 한다.** 인접면 경로는
+        # `adj_surface_id=` 를 키워드로 넘기는데 예전 fake 는 `adj=` 였다.
+        # TypeError 가 나면 `generate_idf_and_simulate` 가 그것을 자체적으로
+        # `RuntimeError("EnergyPlus 시뮬레이션 실패")` 로 바꿔 던지므로 **타입으로는
+        # 구분할 수 없다.** 그래서 fake 안에서 난 오류를 따로 모아 검사한다.
+        # (예전엔 이걸 안 해서 인접면 시험이 빈 리스트로 통과하고 있었다)
+        def _guard(fn):
+            def wrapper(*args, **kwargs):
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as e:      # noqa: BLE001 - 아래에서 반드시 다시 올린다
+                    errors.append(f"{fn.__name__}: {e!r}")
+                    raise
+            return wrapper
+
+        @_guard
+        def fake_surface(self, surface_id, ep_type, construction, zone_id,
+                         boundary, sun, wind, vertices, adj_surface_id=""):
+            surfaces.append(SurfaceCall(surface_id, ep_type, construction, zone_id,
+                                        boundary, sun, wind, vertices, adj_surface_id))
             return self
 
-        def fake_window(self, wid, constr, parent, verts):
-            windows.append(WindowCall(wid, constr, parent, verts))
+        @_guard
+        def fake_window(self, window_id, construction, parent_surface, vertices):
+            windows.append(WindowCall(window_id, construction, parent_surface, vertices))
             return self
 
         def stop(self, weather_file, out_dir):
@@ -54,7 +71,9 @@ def record(monkeypatch):
         try:
             ep_simulator.generate_idf_and_simulate(payload, str(tmp_path))
         except Exception:
-            pass
+            pass    # EnergyPlus 실행은 일부러 막았다 — 조립까지만 본다
+
+        assert not errors, f"기록용 fake 가 실제 호출과 맞지 않는다: {errors}"
         return surfaces, windows
 
     return _run
@@ -184,10 +203,14 @@ def test_interzone_surfaces_are_paired_both_ways(record, tmp_path):
          "vertices": NORTH_WALL, "uValue": 2.0, "area": 12.0},
     ], zones=zones), tmp_path)
     paired = [s for s in surfaces if s.boundary == "Surface"]
-    if paired:
-        for s in paired:
-            assert s.adj, f"{s.id} 의 상대 면이 비어 있다"
-            assert s.adj != s.id, "자기 자신을 상대로 지정했다"
+    # ⚠️ `if paired:` 로 감싸면 빈 목록에서 통과한다 — 개수를 못 박는다.
+    assert len(paired) == 2, f"인접면 쌍이 2개가 아니다: {[s.id for s in paired]}"
+    a, b = paired
+    assert a.adj == b.id and b.adj == a.id, "서로를 가리키지 않는다"
+    assert {a.zone, b.zone} == {"Z1", "Z2"}, "쌍이 서로 다른 존에 붙어야 한다"
+    for s in paired:
+        assert s.adj != s.id, "자기 자신을 상대로 지정했다"
+        assert s.sun == "NoSun" and s.wind == "NoWind"
 
 
 def test_every_surface_belongs_to_a_declared_zone(record, tmp_path):
