@@ -1536,9 +1536,15 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             "key": "ground_contact",
             "label": "최하층 바닥 경계",
             "value": ("지면 접촉" if promote_ground_floors else "단열 경계"),
+            # ⚠️ 지면 접촉으로 바꿔도 열손실이 늘지 않을 수 있다. 지중온도를
+            # 설정온도−2K 로 두므로 겨울 야간에는 바닥이 **열원**이 된다.
+            # 용호동 실측: 지면 승격 시 난방 19.01 → 18.41, 냉방 51.29 → 49.86
+            # (양쪽 −3%). 실제 토양 거동을 검증한 값이 아니므로 신뢰도는 낮다.
+            # 정식으로는 Slab / Site:GroundDomain:Slab(Kiva) 계열이 필요하다.
             "note": ("자기참조로 기록된 최하층 바닥의 경계조건입니다. "
-                     "지면 접촉으로 바꾸면 지면 열손실이 반영됩니다."),
-            "confidence": "medium",
+                     "지중온도를 실내 설정온도보다 2K 낮게 가정하므로, 지면 접촉으로 "
+                     "바꿔도 겨울 야간에는 바닥이 열원이 되어 난방이 줄 수 있습니다."),
+            "confidence": "low",
         }, {
             "key": "interior_blind",
             "label": "내부 블라인드(일사 제어)",

@@ -21,6 +21,10 @@ SurfaceCall = namedtuple("SurfaceCall",
                          "id type construction zone boundary sun wind verts adj")
 WindowCall = namedtuple("WindowCall", "id construction parent verts")
 
+
+class AssemblyComplete(Exception):
+    """지오메트리 조립이 끝났다는 신호. **이 예외만** 기대한다."""
+
 # 4x5 바닥의 남향 외벽 (z 0~3)
 SOUTH_WALL = [(0, 0, 3), (0, 0, 0), (4, 0, 0), (4, 0, 3)]
 NORTH_WALL = [(4, 5, 3), (4, 5, 0), (0, 5, 0), (0, 5, 3)]
@@ -33,47 +37,35 @@ def record(monkeypatch):
     import ep_simulator
 
     def _run(payload, tmp_path):
-        surfaces, windows, errors = [], [], []
+        surfaces, windows = [], []
 
         # ⚠️ **시그니처가 실제 호출과 정확히 같아야 한다.** 인접면 경로는
         # `adj_surface_id=` 를 키워드로 넘기는데 예전 fake 는 `adj=` 였다.
-        # TypeError 가 나면 `generate_idf_and_simulate` 가 그것을 자체적으로
-        # `RuntimeError("EnergyPlus 시뮬레이션 실패")` 로 바꿔 던지므로 **타입으로는
-        # 구분할 수 없다.** 그래서 fake 안에서 난 오류를 따로 모아 검사한다.
-        # (예전엔 이걸 안 해서 인접면 시험이 빈 리스트로 통과하고 있었다)
-        def _guard(fn):
-            def wrapper(*args, **kwargs):
-                try:
-                    return fn(*args, **kwargs)
-                except Exception as e:      # noqa: BLE001 - 아래에서 반드시 다시 올린다
-                    errors.append(f"{fn.__name__}: {e!r}")
-                    raise
-            return wrapper
-
-        @_guard
+        # 그때는 fixture 가 `except Exception` 으로 조립 오류를 전부 삼켜서
+        # **인접면 시험이 빈 리스트로 통과**했다.
         def fake_surface(self, surface_id, ep_type, construction, zone_id,
                          boundary, sun, wind, vertices, adj_surface_id=""):
             surfaces.append(SurfaceCall(surface_id, ep_type, construction, zone_id,
                                         boundary, sun, wind, vertices, adj_surface_id))
             return self
 
-        @_guard
         def fake_window(self, window_id, construction, parent_surface, vertices):
             windows.append(WindowCall(window_id, construction, parent_surface, vertices))
             return self
 
-        def stop(self, weather_file, out_dir):
-            raise RuntimeError("stop-after-assembly")
+        # 지오메트리·블라인드 emit 직후, EnergyPlus 실행 훨씬 전에 멈춘다.
+        # ⚠️ 여기서 **이 예외만** 기대한다(`pytest.raises`). 넓은 except 로 감싸면
+        # fake 시그니처 불일치 같은 조립 오류가 조용히 묻혀 시험이 빈 결과로 통과한다.
+        def stop_after_geometry(self):
+            raise AssemblyComplete
 
         monkeypatch.setattr(ep_simulator.IdfBuilder, "add_surface", fake_surface)
         monkeypatch.setattr(ep_simulator.IdfBuilder, "add_window", fake_window)
-        monkeypatch.setattr(ep_simulator.IdfBuilder, "run", stop)
-        try:
-            ep_simulator.generate_idf_and_simulate(payload, str(tmp_path))
-        except Exception:
-            pass    # EnergyPlus 실행은 일부러 막았다 — 조립까지만 본다
+        monkeypatch.setattr(ep_simulator.IdfBuilder, "finalize_hvac",
+                            stop_after_geometry)
 
-        assert not errors, f"기록용 fake 가 실제 호출과 맞지 않는다: {errors}"
+        with pytest.raises(AssemblyComplete):
+            ep_simulator.generate_idf_and_simulate(payload, str(tmp_path))
         return surfaces, windows
 
     return _run
@@ -228,5 +220,127 @@ def test_each_surface_gets_its_own_construction(record, tmp_path):
         _wall("S1", SOUTH_WALL, uValue=0.3),
         _wall("S2", NORTH_WALL, uValue=1.2),
     ]), tmp_path)
+    assert len(surfaces) == 2, '면이 기록되지 않았다 — 빈 결과로 통과하면 안 된다'
     constructions = [s.construction for s in surfaces]
     assert len(set(constructions)) == len(constructions)
+
+
+# ── 인접면 미러 형상 ─────────────────────────────────────
+# ⚠️ EnergyPlus 는 짝이 되는 두 면의 정점이 **서로 역순**이어야 법선이 마주 본다.
+# 같은 순서로 만들면 두 면이 등을 돌려 열이 엉뚱하게 흐른다.
+
+def test_mirror_vertices_are_exactly_reversed(record, tmp_path):
+    zones = [{"id": "Z1", "floor": 1, "height": 3.0, "area": 20.0,
+              "activityId": None, "isConditioned": True},
+             {"id": "Z2", "floor": 1, "height": 3.0, "area": 20.0,
+              "activityId": None, "isConditioned": True}]
+    surfaces, _w = record(_payload([
+        {"id": "P1", "type": "InteriorWall", "zone": "Z1", "adjacentZone": "Z2",
+         "vertices": NORTH_WALL, "uValue": 2.0, "area": 12.0},
+    ], zones=zones), tmp_path)
+    a, b = [s for s in surfaces if s.boundary == "Surface"]
+    assert [tuple(v) for v in b.verts] == [tuple(v) for v in reversed(a.verts)]
+
+
+def test_mirror_pair_shares_one_construction(record, tmp_path):
+    """구성이 다르면 같은 벽이 양쪽에서 다른 U 값을 갖는다."""
+    zones = [{"id": "Z1", "floor": 1, "height": 3.0, "area": 20.0,
+              "activityId": None, "isConditioned": True},
+             {"id": "Z2", "floor": 1, "height": 3.0, "area": 20.0,
+              "activityId": None, "isConditioned": True}]
+    surfaces, _w = record(_payload([
+        {"id": "P1", "type": "InteriorWall", "zone": "Z1", "adjacentZone": "Z2",
+         "vertices": NORTH_WALL, "uValue": 2.0, "area": 12.0},
+    ], zones=zones), tmp_path)
+    a, b = [s for s in surfaces if s.boundary == "Surface"]
+    assert a.construction == b.construction
+
+
+# ── 지면 승격 (opt-in) ───────────────────────────────────
+# ⚠️ 세 조건(selfAdjacent · 바닥 · z≈0)이 **전부** 맞아야 한다. 하나라도 느슨하면
+# 지하층·필로티·외기노출 바닥이 지면 접촉으로 오분류돼 열손실이 통째로 달라진다.
+
+def _ground_boundary(record, tmp_path, surface, promote=True):
+    surfaces, _w = record(
+        _payload([surface], project={"promoteGroundFloors": promote}), tmp_path)
+    return next(s for s in surfaces if s.id == surface["id"]).boundary
+
+
+def test_ground_promotion_applies_when_all_conditions_hold(record, tmp_path):
+    assert _ground_boundary(record, tmp_path, {
+        "id": "F1", "type": "InteriorFloor", "zone": "Z1", "vertices": FLOOR,
+        "uValue": 0.5, "area": 20.0, "selfAdjacent": True}) == "Ground"
+
+
+def test_ground_promotion_is_off_by_default(record, tmp_path):
+    """기본값이 켜져 있으면 오분류가 조용히 퍼진다."""
+    assert _ground_boundary(record, tmp_path, {
+        "id": "F1", "type": "InteriorFloor", "zone": "Z1", "vertices": FLOOR,
+        "uValue": 0.5, "area": 20.0, "selfAdjacent": True},
+        promote=False) == "Adiabatic"
+
+
+@pytest.mark.parametrize("surface,why", [
+    ({"id": "F1", "type": "InteriorFloor", "zone": "Z1", "vertices": FLOOR,
+      "uValue": 0.5, "area": 20.0}, "selfAdjacent 아님"),
+    ({"id": "F1", "type": "InteriorWall", "zone": "Z1", "vertices": SOUTH_WALL,
+      "uValue": 0.5, "area": 12.0, "selfAdjacent": True}, "바닥 아님"),
+    ({"id": "F1", "type": "InteriorFloor", "zone": "Z1",
+      "vertices": [(0, 0, 3), (0, 5, 3), (4, 5, 3), (4, 0, 3)],
+      "uValue": 0.5, "area": 20.0, "selfAdjacent": True}, "z≠0 (상층 바닥·필로티)"),
+])
+def test_ground_promotion_needs_every_condition(record, tmp_path, surface, why):
+    assert _ground_boundary(record, tmp_path, surface) != "Ground", why
+
+
+# ── 실측 opening 여러 개 ─────────────────────────────────
+
+def _opening(x0, x1, z0=0.8, z1=2.2):
+    return {"id": f"op_{x0}", "type": "FixedWindow",
+            "vertices": [(x0, 0, z1), (x0, 0, z0), (x1, 0, z0), (x1, 0, z1)]}
+
+
+# 벽 4×3=12㎡ 에 1.0×1.4 창 2개 = 2.8㎡ → 실측 WWR 23.3%.
+# ⚠️ `wwr` 이 실측보다 1.5%p 넘게 크면 "확대"로 보고 합성 창 1개로 폴백한다
+# (실형상 확대는 벽을 벗어나 E+ Severe 를 유발한다). 실측값을 그대로 준다.
+MEASURED_WWR = 23
+
+
+def test_multiple_openings_are_all_preserved(record, tmp_path):
+    """⚠️ 실좌표가 있으면 개수·위치·모양을 보존해야 한다 — 하나로 합치면
+    일사 분포가 달라진다."""
+    wall = _wall("S1", SOUTH_WALL, wwr=MEASURED_WWR)
+    wall["openings"] = [_opening(0.3, 1.3), _opening(2.3, 3.3)]
+    _s, windows = record(_payload([wall]), tmp_path)
+    assert len(windows) == 2
+
+
+def test_second_window_gets_a_suffixed_name(record, tmp_path):
+    """첫 창만 `Win_{면id}` 를 유지한다(AFN·surfaceAirflow 계약).
+    나머지는 겹치지 않는 이름이어야 EnergyPlus 가 중복으로 죽지 않는다."""
+    wall = _wall("S1", SOUTH_WALL, wwr=MEASURED_WWR)
+    wall["openings"] = [_opening(0.3, 1.3), _opening(2.3, 3.3)]
+    _s, windows = record(_payload([wall]), tmp_path)
+    assert [w.id for w in windows] == ["Win_S1", "Win_S1_2"]
+
+
+def test_air_openings_are_not_windows(record, tmp_path):
+    """Air 개구부는 개방 경계이지 유리가 아니다 — 창으로 만들면 없던 일사가 생긴다."""
+    wall = _wall("S1", SOUTH_WALL, wwr=MEASURED_WWR)
+    wall["openings"] = [{**_opening(0.3, 1.3), "type": "Air"}]
+    _s, windows = record(_payload([wall]), tmp_path)
+    # 실좌표가 전부 Air 면 합성 창 폴백으로 1개만 생긴다
+    assert len(windows) == 1
+    assert windows[0].id == "Win_S1"
+
+
+def test_enlarging_wwr_falls_back_to_a_synthetic_window(record, tmp_path):
+    """⚠️ 실형상을 그대로 키우면 창이 벽을 벗어나 EnergyPlus 가 Severe 로 죽는다.
+    실측보다 큰 WWR 을 요구하면 벽 중앙 합성 창 1개로 물러선다."""
+    wall = _wall("S1", SOUTH_WALL, wwr=MEASURED_WWR + 40)
+    wall["openings"] = [_opening(0.3, 1.3), _opening(2.3, 3.3)]
+    _s, windows = record(_payload([wall]), tmp_path)
+    assert len(windows) == 1
+    wall_x = [p[0] for p in SOUTH_WALL]
+    for p in windows[0].verts:
+        assert min(wall_x) - 1e-6 <= p[0] <= max(wall_x) + 1e-6
