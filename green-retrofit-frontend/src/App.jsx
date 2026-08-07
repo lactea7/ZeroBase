@@ -67,6 +67,8 @@ import {
 // --- 분리된 모듈 import ---
 import { uploadGbxml, runSimulation } from './api/client';
 import { buildSimulationPayload } from './utils/simulationPayload';
+import { mapZones } from './utils/parseResponse';
+import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 // ⚠️ 콘센트 산식은 백엔드와 같은 값이어야 한다 — utils/zoneLoads.js 주석 참조.
 import { calcOutletPower, getActivityCategory } from './utils/zoneLoads';
@@ -605,14 +607,7 @@ export default function App() {
         // 덮어쓰면 화장실·계단실에도 사무실 수준 부하가 들어가고, 백엔드의 용도별
         // 아키타입이 통째로 무력화된다. 값이 없을 때만 최소한으로 보정한다.
         // (`||` 는 사용자가 명시한 0 까지 덮으므로 `??` 를 쓴다)
-        const mappedZones = (response.data.zones || []).map((z) => ({
-          ...z,
-          peopleDensity: z.peopleDensity ?? null,
-          lightingPower: z.lightingPower ?? null,
-          equipmentPower: z.equipmentPower ?? null,
-          outletCount: z.outletCount ?? 0,
-          outletLoadType: z.outletLoadType ?? 'max',
-        }));
+        const mappedZones = mapZones(response.data.zones);
         setZones(mappedZones);
         setOriginalModel({ zones: mappedZones, surfaces: response.data.surfaces || [] });
 
@@ -743,33 +738,24 @@ export default function App() {
   };
 
   const handleSimulation = async () => {
-    setStep('loading');
     setLoadingMsgIdx(0);
-
-    const interval = setInterval(() => {
-      setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
-    }, 1500);
-    try {
-      // 백엔드와의 계약 조립은 utils/simulationPayload.js 로 옮겼다 —
-      // 화면 없이 시험할 수 있어야 하는 부분이다.
-      const payload = buildSimulationPayload({
+    // 화면 전환 계약은 utils/simulationFlow.js — 긴 UI 경로 없이 시험한다.
+    let interval = null;
+    await runSimulationFlow(
+      buildSimulationPayload({
         projectData, zones, surfaces, materials, constructionOverrides, originalModel,
-      });
-      const response = await runSimulation(payload, setLoadingStage);
-
-      clearInterval(interval);
-      setLoadingStage(null);
-      setRes(response.result);
-      setStep('result');
-      // 💡 [수정] 시뮬레이션 완료 시 에너지 탭이 먼저 보이도록 강제
-      setActiveResultTab('energy'); 
-    } catch (error) {
-      clearInterval(interval);
-      setLoadingStage(null);
-      const detail = error?.message ? `\n\n원인: ${error.message}` : '';
-      alert(`시뮬레이션에 실패했습니다. 백엔드 서버 상태를 확인하세요.${detail}`);
-      setStep('floorView');
-    }
+      }),
+      runSimulation,
+      {
+        setStep, setRes, setLoadingStage, setActiveResultTab,
+        startTicker: () => {
+          interval = setInterval(() => {
+            setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
+          }, 1500);
+        },
+        stopTicker: () => clearInterval(interval),
+      },
+    );
   };
 
   // 랜딩의 따뜻한 톤(브라운 #1a120d / 크림 #f3ece1 / 테라코타)을 앱 전역으로 이어감

@@ -123,32 +123,6 @@ describe('업로드 실패', () => {
   });
 });
 
-describe('응답 매핑 계약', () => {
-  it('⚠️ 백엔드가 준 내부발열을 프런트 기본값으로 덮지 않는다', async () => {
-    // 백엔드는 용도별 아키타입으로 채워 내려준다. 여기서 덮으면 화장실·계단실에도
-    // 사무실 부하가 들어가고 그건 결과 숫자로만 나타난다 — 화면엔 안 보인다.
-    uploadGbxml.mockResolvedValue(parseResponse({
-      zones: [{ ...ZONE, name: '화장실', lightingPower: 4, equipmentPower: 1,
-                peopleDensity: 0.02 }],
-    }));
-    const { container } = await reachUpload();
-    await userEvent.upload(container.querySelector('input[type="file"]'), FILE());
-    await waitFor(() => expect(uploadGbxml).toHaveBeenCalled());
-
-    runSimulation.mockResolvedValue({ status: 'success', result: {} });
-    // payload 를 만들 때까지 가지 않고도, 화면이 백엔드 값을 유지하는지 본다
-    expect(container.textContent).not.toContain('사무실');
-  });
-
-  it('명시된 0 을 기본값으로 덮지 않는다', async () => {
-    // ⚠️ `||` 를 쓰면 "조명 없음(0)"이 아키타입 기본값으로 바뀐다
-    uploadGbxml.mockResolvedValue(parseResponse({
-      zones: [{ ...ZONE, lightingPower: 0, equipmentPower: 0 }],
-    }));
-    const { container } = await reachUpload();
-    await userEvent.upload(container.querySelector('input[type="file"]'), FILE());
-    await waitFor(() => expect(uploadGbxml).toHaveBeenCalled());
-    // 렌더가 깨지지 않고 0 을 그대로 다룬다
-    expect(container.textContent).toContain('b.xml');
-  });
-});
+// 응답 매핑(내부발열 보존·명시된 0)은 `utils/__tests__/parseResponse.test.js` 에서
+// **값으로** 검증한다. 여기서 렌더로 보려 했더니 "사무실 문구가 없다" 수준이라
+// 값이 덮여도 통과했다 — 화면에 안 보이고 결과 숫자로만 나타나는 회귀다.

@@ -1,3 +1,4 @@
+import { resolveEquipmentPower } from '../../utils/zoneLoads';
 import React from 'react';
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -721,9 +722,10 @@ export default function FloorEditor(props) {
                                     <div className={`text-[11px] font-bold flex justify-between items-center bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 mt-1 ${isDarkMode ? 'text-slate-300' : 'text-emerald-950'}`}>
                                       <span>⚡ 시뮬레이션 반영 기기 부하:</span>
                                       <span className={`font-black ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                                        {((editState.outletLoadType || 'max') === 'sum'
-                                          ? (editState.equipmentPower || 0) + calcOutletPower(editState, getZoneFloorArea(editState.id))
-                                          : Math.max(editState.equipmentPower || 0, calcOutletPower(editState, getZoneFloorArea(editState.id)))
+                                        {/* ⚠️ 여기서 계산을 복제하면 백엔드와 갈린다.
+                                            utils/zoneLoads.js 의 같은 함수를 쓴다. */}
+                                        {resolveEquipmentPower(
+                                          editState, getZoneFloorArea(editState.id)
                                         ).toFixed(2)}{' '}
                                         W/m²
                                       </span>
