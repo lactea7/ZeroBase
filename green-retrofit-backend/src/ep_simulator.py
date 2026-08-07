@@ -10,6 +10,7 @@ import re
 
 from src.energyplus.weather import select_weather
 from src.simulation import baseline as baseline_runner
+from src.simulation import hvac_plan
 from src.simulation.alternatives import evaluate_alternatives
 from src.idf_builder import IdfBuilder
 
@@ -969,51 +970,32 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     created_op_sch = set()
 
     # ── 실기기 HVAC 모드 선택 ──
-    # 전기 열원(2)/지열 → PTHP(히트펌프 실기기, 실소비+COP)
-    # 가스(1)/등유(4)/지역난방(11) → UnitHeater(연료 보일러 실기기) + WindowAC(개별 냉방 DX)
-    #   연료 소비가 Heating:<연료> 미터로 산출돼 COP 나눗셈 근사를 대체한다.
-    #   지역난방은 OtherFuel1 + 효율 0.95(열교환 손실)로 모델링.
-    # 매핑 불가한 열원만 이상부하 폴백.
-    FUEL_SYSTEMS = {
-        1:  ("NaturalGas", 0.87),   # 가스보일러 (콘덴싱 반영 평균 효율)
-        4:  ("FuelOilNo2", 0.83),   # 등유보일러
-        11: ("OtherFuel1", 0.95),   # 지역난방 (열교환 손실)
-    }
-    _heat_src_id = int(project_data.get("heatSource", 11))
-    use_pthp = bool(is_geothermal or _heat_src_id == 2)
-    fuel_type, fuel_eff = FUEL_SYSTEMS.get(_heat_src_id, (None, None)) if not use_pthp else (None, None)
-    use_fuel_system = fuel_type is not None
-    # ASHRAE 140 은 용량 무제한·효율 100% 의 이상부하를 요구한다. 실기기(PTHP/보일러)로는
-    # 사양을 표현할 수 없으므로 벤치마크에서는 열원 설정과 무관하게 이상부하를 강제한다.
-    if bench.get("forceIdealLoads"):
-        use_pthp = use_fuel_system = False
-        fuel_type = fuel_eff = None
-    hvac_mode = "pthp" if use_pthp else ("fuel" if use_fuel_system else "ideal")
-
-    # 사용자 입력 실기기(등급/연식) → COP·효율. 미입력이면 기존 기본값과 동일.
+    # 열원 매핑·이상부하 강제·COP 보정은 `simulation/hvac_plan.py` 로 옮겼다.
+    # 여기서 고른 모드가 소비량 산출 방식 자체를 바꾼다(미터 실측 vs COP 나눗셈).
     equip = resolve_hvac_equipment(project_data)
-    window_ac_cop = equip["cool_cop"]
-    if use_fuel_system:
-        fuel_eff = round(fuel_eff * equip["heat_factor"], 3)   # 보일러 연식 열화 반영
-    # 지열은 신설 전제(고정 COP), 일반 히트펌프는 등급/연식 반영
-    pthp_ccop, pthp_hcop = (5.0, 4.5) if is_geothermal else equip["pthp_cops"]
-    if equip["is_user_input"]:
+    plan = hvac_plan.resolve(project_data, equip,
+                             force_ideal_loads=bool(bench.get("forceIdealLoads")))
+    hvac_mode = plan.mode
+    use_pthp, use_fuel_system = plan.uses_pthp, plan.uses_fuel
+    fuel_type, fuel_eff = plan.fuel_type, plan.fuel_efficiency
+    window_ac_cop = plan.cooling_cop
+    pthp_ccop, pthp_hcop = plan.pthp_cooling_cop, plan.pthp_heating_cop
+    _heat_src_id = plan.heat_source_id
+    _mode_label = plan.describe()
+
+    if plan.is_user_input:
         print(f"🎛️ 실기기 입력: 냉방 {equip['cooling_grade']}(COP {window_ac_cop}), "
               f"난방 연식 {equip['heating_age']}(계수 {equip['heat_factor']})")
-    if hvac_mode in ("pthp", "fuel"):
+    if plan.needs_sizing:
         idf.enable_sizing()   # 실기기 autosize용 사이징 활성화(1회)
     if use_fuel_system:
         # 연료 미터 출력 (해당 연료만 — 없는 미터는 경고 유발)
         idf.add("Output:Meter", [f"Heating:{fuel_type}", "Hourly"])
-    _mode_label = {"pthp": "PTHP 실기기(전기/지열)",
-                   "fuel": f"연료 보일러+개별냉방 실기기({fuel_type}, 효율 {fuel_eff})",
-                   "ideal": "이상부하(폴백)"}[hvac_mode]
     print(f"🌀 HVAC 모드: {_mode_label} (heatSource={_heat_src_id}, geo={is_geothermal})")
 
     # 적용된 설비 내역 — 결과 화면 '설비 내역' 패널용 (입력값/자동 추정 구분)
     equipment_log = []
-    fuel_label = {"NaturalGas": "가스보일러", "FuelOilNo2": "등유보일러",
-                  "OtherFuel1": "지역난방"}.get(fuel_type, fuel_type or "")
+    fuel_label = plan.fuel_label
 
     custom_sch = project_data.get("customSchedule", {})
     use_custom = custom_sch.get("useCustom", False)
