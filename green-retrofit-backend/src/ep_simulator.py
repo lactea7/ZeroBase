@@ -9,6 +9,7 @@ import sys
 import re
 
 from src.energyplus.weather import select_weather
+from src.domain import zone_loads
 from src.simulation import baseline as baseline_runner
 from src.simulation import geometry
 # 순수 기하 함수는 geometry 로 옮겼다. 기존 import 경로 호환을 위해 재수출한다.
@@ -1031,45 +1032,27 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
 
         # 키가 있어도 값이 None 이면 '미지정'으로 보고 용도별 기본값을 쓴다.
         # z.get(k, default) 는 키가 존재하면 None 을 그대로 돌려주므로 방어가 필요하다.
-        def _load_or_default(key, fallback):
-            v = z.get(key)
-            return fallback if v is None else v
+        # 존 내부발열 — 사용자 입력 · 아키타입 기본값 · 콘센트 정리는
+        # `domain/zone_loads.py` 로 옮겼다.
+        _loads = zone_loads.resolve(
+            z, z_area, loads,
+            outlet_w_m2=calc_outlet_power_density(z, z_area),
+            suppress_auto=bool(bench.get("suppressAutoLoads")))
 
-        # 벤치마크는 내부발열을 사양대로 못박는다(케이스 600 = 순수 현열 200 W).
-        # 용도별 자동 추정(인원·조명·기기·급탕·콘센트)이 섞이면 표현 자체가 불가능하다.
-        suppress_auto = bool(bench.get("suppressAutoLoads"))
-        if suppress_auto:
-            ppl_dens = light_p = equip_p = 0.0
-            outlet_p = 0.0
-        else:
-            ppl_dens = _load_or_default("peopleDensity", loads["people"])
-            light_p = _load_or_default("lightingPower", loads["lighting"])
+        if _loads.has_outlets:
+            print(f"   Zone \"{z['id']}\" 콘센트 부하 계산: 개수={z.get('outletCount')}, "
+                  f"면적={z_area:.1f}m², 부하량={_loads.outlet_w_m2:.2f} W/m² "
+                  f"(방식={_loads.outlet_load_type}) → 최종 기기부하={_loads.equipment_w_m2:.2f} W/m²")
 
-            base_equip_p = _load_or_default("equipmentPower", loads["equipment"])
-            outlet_p = calc_outlet_power_density(z, z_area)
-            load_type = z.get("outletLoadType", "sum")
-            if load_type == "max":
-                equip_p = max(base_equip_p, outlet_p)
-            else:
-                equip_p = base_equip_p + outlet_p
-
-        if outlet_p > 0:
-            print(f"   Zone \"{z['id']}\" 콘센트 부하 계산: 개수={z.get('outletCount')}, 면적={z_area:.1f}m², 부하량={outlet_p:.2f} W/m² (방식={load_type}) → 최종 기기부하={equip_p:.2f} W/m²")
-        
-        if ppl_dens > 0:
-            idf.add_people(f"{z_id}_Ppl", z_id, op_sch, ppl_dens)
-            # 동적 급탕(DHW) — 용도별 1인당 온수사용량(L/인·일).
-            # peak_flow는 op 스케줄로 변조되므로, 일일 사용량이 맞도록 '하루 운영시간 적분'
-            # 으로 나눈다 (기존엔 /3600으로 1시간 가정 → 스케줄 적분만큼 ~10배 과다였음).
-            people_count = z_area * ppl_dens
-            if people_count > 0:
-                op_h = daily_op_hours(arch_key)
-                peak_dhw_flow = people_count * (loads["dhw_lpd"] / 1000.0) / (op_h * 3600.0)  # m3/s
+        if _loads.people_density > 0:
+            idf.add_people(f"{z_id}_Ppl", z_id, op_sch, _loads.people_density)
+            peak_dhw_flow = _loads.dhw_peak_flow_m3_s(z_area, daily_op_hours(arch_key))
+            if peak_dhw_flow > 0:
                 idf.add_dhw(f"{z_id}_DHW", z_id, op_sch, peak_dhw_flow)
-        if light_p > 0:
-            idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, light_p)
-        if equip_p > 0:
-            idf.add_equipment(f"{z_id}_Eqp", z_id, op_sch, equip_p)
+        if _loads.lighting_w_m2 > 0:
+            idf.add_lights(f"{z_id}_Lgt", z_id, op_sch, _loads.lighting_w_m2)
+        if _loads.equipment_w_m2 > 0:
+            idf.add_equipment(f"{z_id}_Eqp", z_id, op_sch, _loads.equipment_w_m2)
 
         # 벤치마크 고정 발열: OtherEquipment(연료 None)로 넣어 전력 소비에 섞이지 않게 한다.
         for i, oe in enumerate(bench.get("otherEquipment") or []):
