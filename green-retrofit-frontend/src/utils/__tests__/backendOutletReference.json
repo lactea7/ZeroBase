@@ -1,0 +1,231 @@
+{
+ "_주의": "백엔드에서 생성한 참조값이다. 손으로 고치지 말 것 — 값이 바뀌어야 한다면 백엔드 산식이 바뀐 것이고, 그때 재생성한다.",
+ "_생성": "green-retrofit-backend: calc_outlet_power_density + domain.zone_loads.resolve",
+ "cases": [
+  {
+   "activityId": 1105,
+   "label": "office",
+   "outletCount": 0,
+   "area": 100.0,
+   "outletWm2": 0.0,
+   "max": 12.0,
+   "sum": 12.0
+  },
+  {
+   "activityId": 1105,
+   "label": "office",
+   "outletCount": 10,
+   "area": 100.0,
+   "outletWm2": 5.25,
+   "max": 12.0,
+   "sum": 17.25
+  },
+  {
+   "activityId": 1105,
+   "label": "office",
+   "outletCount": 40,
+   "area": 100.0,
+   "outletWm2": 21.0,
+   "max": 21.0,
+   "sum": 33.0
+  },
+  {
+   "activityId": 1105,
+   "label": "office",
+   "outletCount": 200,
+   "area": 100.0,
+   "outletWm2": 25.0,
+   "max": 25.0,
+   "sum": 37.0
+  },
+  {
+   "activityId": 1105,
+   "label": "office",
+   "outletCount": 5,
+   "area": 20.0,
+   "outletWm2": 13.125,
+   "max": 13.125,
+   "sum": 25.125
+  },
+  {
+   "activityId": 1440,
+   "label": "residential",
+   "outletCount": 0,
+   "area": 100.0,
+   "outletWm2": 0.0,
+   "max": 12.0,
+   "sum": 12.0
+  },
+  {
+   "activityId": 1440,
+   "label": "residential",
+   "outletCount": 10,
+   "area": 100.0,
+   "outletWm2": 2.8,
+   "max": 12.0,
+   "sum": 14.8
+  },
+  {
+   "activityId": 1440,
+   "label": "residential",
+   "outletCount": 40,
+   "area": 100.0,
+   "outletWm2": 11.2,
+   "max": 12.0,
+   "sum": 23.2
+  },
+  {
+   "activityId": 1440,
+   "label": "residential",
+   "outletCount": 200,
+   "area": 100.0,
+   "outletWm2": 25.0,
+   "max": 25.0,
+   "sum": 37.0
+  },
+  {
+   "activityId": 1440,
+   "label": "residential",
+   "outletCount": 5,
+   "area": 20.0,
+   "outletWm2": 7.0,
+   "max": 12.0,
+   "sum": 19.0
+  },
+  {
+   "activityId": 1447,
+   "label": "lab",
+   "outletCount": 0,
+   "area": 100.0,
+   "outletWm2": 0.0,
+   "max": 12.0,
+   "sum": 12.0
+  },
+  {
+   "activityId": 1447,
+   "label": "lab",
+   "outletCount": 10,
+   "area": 100.0,
+   "outletWm2": 7.0,
+   "max": 12.0,
+   "sum": 19.0
+  },
+  {
+   "activityId": 1447,
+   "label": "lab",
+   "outletCount": 40,
+   "area": 100.0,
+   "outletWm2": 25.0,
+   "max": 25.0,
+   "sum": 37.0
+  },
+  {
+   "activityId": 1447,
+   "label": "lab",
+   "outletCount": 200,
+   "area": 100.0,
+   "outletWm2": 25.0,
+   "max": 25.0,
+   "sum": 37.0
+  },
+  {
+   "activityId": 1447,
+   "label": "lab",
+   "outletCount": 5,
+   "area": 20.0,
+   "outletWm2": 17.5,
+   "max": 17.5,
+   "sum": 29.5
+  },
+  {
+   "activityId": 1108,
+   "label": "restaurant",
+   "outletCount": 0,
+   "area": 100.0,
+   "outletWm2": 0.0,
+   "max": 12.0,
+   "sum": 12.0
+  },
+  {
+   "activityId": 1108,
+   "label": "restaurant",
+   "outletCount": 10,
+   "area": 100.0,
+   "outletWm2": 4.2,
+   "max": 12.0,
+   "sum": 16.2
+  },
+  {
+   "activityId": 1108,
+   "label": "restaurant",
+   "outletCount": 40,
+   "area": 100.0,
+   "outletWm2": 16.8,
+   "max": 16.8,
+   "sum": 28.8
+  },
+  {
+   "activityId": 1108,
+   "label": "restaurant",
+   "outletCount": 200,
+   "area": 100.0,
+   "outletWm2": 25.0,
+   "max": 25.0,
+   "sum": 37.0
+  },
+  {
+   "activityId": 1108,
+   "label": "restaurant",
+   "outletCount": 5,
+   "area": 20.0,
+   "outletWm2": 10.5,
+   "max": 12.0,
+   "sum": 22.5
+  },
+  {
+   "activityId": 9999,
+   "label": "default",
+   "outletCount": 0,
+   "area": 100.0,
+   "outletWm2": 0.0,
+   "max": 12.0,
+   "sum": 12.0
+  },
+  {
+   "activityId": 9999,
+   "label": "default",
+   "outletCount": 10,
+   "area": 100.0,
+   "outletWm2": 3.5,
+   "max": 12.0,
+   "sum": 15.5
+  },
+  {
+   "activityId": 9999,
+   "label": "default",
+   "outletCount": 40,
+   "area": 100.0,
+   "outletWm2": 14.0,
+   "max": 14.0,
+   "sum": 26.0
+  },
+  {
+   "activityId": 9999,
+   "label": "default",
+   "outletCount": 200,
+   "area": 100.0,
+   "outletWm2": 25.0,
+   "max": 25.0,
+   "sum": 37.0
+  },
+  {
+   "activityId": 9999,
+   "label": "default",
+   "outletCount": 5,
+   "area": 20.0,
+   "outletWm2": 8.75,
+   "max": 12.0,
+   "sum": 20.75
+  }
+ ]
+}

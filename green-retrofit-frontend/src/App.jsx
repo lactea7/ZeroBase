@@ -66,7 +66,10 @@ import {
 
 // --- 분리된 모듈 import ---
 import { uploadGbxml, runSimulation } from './api/client';
-import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS, OUTLET_W_PER_ACTIVITY } from './data/constants';
+import { buildSimulationPayload } from './utils/simulationPayload';
+import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
+// ⚠️ 콘센트 산식은 백엔드와 같은 값이어야 한다 — utils/zoneLoads.js 주석 참조.
+import { calcOutletPower, getActivityCategory } from './utils/zoneLoads';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
 import { STRUCTURAL_MATERIALS } from './data/structuralMaterials';
 import { HVAC_SYSTEMS, FUEL_TYPES, VENT_TYPES, COOLING_GRADES, HEATING_AGES } from './data/hvac';
@@ -376,15 +379,6 @@ export default function App() {
   // 가상 층 판별: floor 번호가 실제 층 수보다 크면 특수 공간(창고, 샤프트 등)
   const isVirtualFloor = (f) => realFloorCount > 0 && f > realFloorCount;
 
-  const getActivityCategory = (activityId) => {
-    const id = Number(activityId);
-    if ([1105,1106,1103,1113,1116,1119,1122].includes(id)) return 'office';
-    if ([1440,1441,1442,1443,1444,1114,1115,1107,1112,1120,1121,1445].includes(id)) return 'residential';
-    if ([1447,1448,1449,1104,1457,1458,1452].includes(id)) return 'lab';
-    if ([1108,1109,1117,1118].includes(id)) return 'restaurant';
-    return 'default';
-  };
-
   const calculateSurfaceArea = (vertices) => {
     if (!vertices || vertices.length < 3) return 0;
     let area = 0;
@@ -439,17 +433,6 @@ export default function App() {
     return areaSum >= 1.0 ? areaSum : 100.0;
   };
 
-  const calcOutletPower = (zone, floorArea) => {
-    const count = Number(zone?.outletCount || 0);
-    if (count <= 0) return 0;
-    const category = getActivityCategory(zone?.activityId);
-    const wPerOutlet = OUTLET_W_PER_ACTIVITY[category] ?? OUTLET_W_PER_ACTIVITY.default;
-    const DIVERSITY = 0.5;    // NREL/TP-7A40-54466 권장
-    const UTILIZATION = 0.7;  // IEC 60364-8-1 ku 평균
-    const area = floorArea > 0 ? floorArea : 1;
-    const density = (count * wPerOutlet * DIVERSITY * UTILIZATION) / area;
-    return Math.min(parseFloat(density.toFixed(2)), 25); // ASHRAE 90.1 상한 25 W/m²
-  };
 
   const getSampleVerts = (w, h, pos, rot) => {
     const pts = [
@@ -767,24 +750,11 @@ export default function App() {
       setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
     }, 1500);
     try {
-      // 선택된 모드의 실측 필드만 전송 (다른 모드의 잔여값이 우선순위를 뒤집지 않도록)
-      const _ba = projectData.baselineActual || {};
-      const baselineActual =
-        _ba.mode === 'usage'
-          ? { mode: 'usage', elecKwh: _ba.elecKwh, heatKwh: _ba.heatKwh }
-          : { mode: 'bill', elecBill: _ba.elecBill, heatBill: _ba.heatBill };
-      const payload = {
-        projectData: { ...projectData, baselineActual },
-        zones: zones,
-        surfaces: surfaces,
-        materials: materials,
-        constructionOverrides: constructionOverrides,
-        // 전/후 비교: 업로드 원본을 함께 보내 백엔드가 '개선 전' 건물을 별도 시뮬레이션
-        // (실측 요금 입력 시 백엔드가 전-시뮬을 생략하고 실측을 기준선으로 사용)
-        baselineModel: originalModel || {},
-        // lccParameters / hvacUpgradeActive는 projectData 안에 포함되어 함께 전송됨
-        // (백엔드는 projectData에서 읽음 — 최상위로 보내면 SimulationPayload에서 누락됨)
-      };
+      // 백엔드와의 계약 조립은 utils/simulationPayload.js 로 옮겼다 —
+      // 화면 없이 시험할 수 있어야 하는 부분이다.
+      const payload = buildSimulationPayload({
+        projectData, zones, surfaces, materials, constructionOverrides, originalModel,
+      });
       const response = await runSimulation(payload, setLoadingStage);
 
       clearInterval(interval);
