@@ -649,7 +649,10 @@ export default function App() {
       // 백엔드가 원인을 알려주면(400 detail 등) 그대로 보여준다 — "서버 응답 없음"으로 뭉개지 않기
       const detail = error?.response?.data?.detail;
       setUploadError(detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.');
-      setStep('upload');
+      // ⚠️ 여기서 `setStep('upload')` 를 하면 안 된다. 오류 화면은 `step === 'parsing'`
+      // 블록 **안에** 있어서, upload 로 넘기면 사용자가 **아무 안내도 못 받고**
+      // 업로드 화면으로 튕긴다. 왜 실패했는지 알 수 없으니 파일을 고칠 수도 없다.
+      // 오류 화면의 "다시 업로드 시도" 버튼이 upload 로 보내는 역할을 한다.
     }
   };
 
