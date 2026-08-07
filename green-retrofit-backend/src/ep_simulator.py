@@ -9,6 +9,7 @@ import sys
 import re
 
 from src.energyplus.weather import select_weather
+from src.simulation import baseline as baseline_runner
 from src.simulation.alternatives import evaluate_alternatives
 from src.idf_builder import IdfBuilder
 
@@ -649,53 +650,13 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                 pass   # 진행 표시 실패가 시뮬레이션을 막으면 안 됨
 
     # ── 전/후 비교: 업로드 원본(개선 전)을 별도 시뮬레이션해 물리 기반 기준선 산출 ──
-    # 실측 요금/사용량이 입력됐으면 그쪽이 더 정확한 기준선이므로 전-시뮬은 생략(시간 절약).
-    baseline_result = None
-    baseline_same = False
-    baseline_model = payload.get("baselineModel") or {}
-    _ba = project_data.get("baselineActual") or {}
+    # 판단 규칙(실측 우선 / 전후 동일 시 절감 0 / 그 외 1회 실행)은
+    # `simulation/baseline.py` 로 옮겼다 — 시뮬레이터 없이 시험할 수 있어야 한다.
+    baseline_result, _baseline_decision = baseline_runner.run(
+        payload, zones, surfaces, temp_dir,
+        simulate_fn=generate_idf_and_simulate, stage_fn=_stage)
+    baseline_same = _baseline_decision.savings_are_zero
 
-    def _is_pos(v):
-        try:
-            return float(v) > 0
-        except (TypeError, ValueError):
-            return False
-
-    has_actuals = any(_is_pos(_ba.get(k)) for k in ("elecBill", "heatBill", "elecKwh", "heatKwh"))
-
-    if baseline_model.get("zones") and baseline_model.get("surfaces") and not has_actuals:
-        # 편집이 전혀 없으면(전=후) 시뮬 1회 낭비 + '×1.6 추정 절감' 착시 대신
-        # '동일 모델 → 절감 0'으로 정직하게 처리
-        baseline_same = (
-            baseline_model["zones"] == zones
-            and baseline_model["surfaces"] == surfaces
-            and not payload.get("constructionOverrides")
-            and not project_data.get("pvCapacity")
-            and not project_data.get("geothermalApplied")
-            and not project_data.get("ledReductionActive")
-            and not project_data.get("hvacExcludeNonHabitable")
-            and not project_data.get("hvacUpgradeActive")
-        )
-        if baseline_same:
-            print("⏮️ [전/후 비교] 개선 전후 모델 동일 → 전-시뮬 생략 (절감 0으로 처리)")
-        else:
-            print("⏮️ [전/후 비교] 개선 전(업로드 원본) 건물 시뮬레이션 시작...")
-            _stage("baseline")
-            base_project = dict(project_data)
-            # 리모델링 요소 제거 — 기존 건물엔 PV·지열·LED 축소·설비 범위 조정이 없다
-            for k in ("pvCapacity", "geothermalApplied", "ledReductionActive",
-                      "hvacExcludeNonHabitable", "hvacUpgradeActive", "constructionOverrides"):
-                base_project.pop(k, None)
-            base_payload = {
-                "projectData": base_project,
-                "zones": baseline_model["zones"],
-                "surfaces": baseline_model["surfaces"],
-                "materials": payload.get("materials", {}),
-                "constructionOverrides": {},
-                "_variantOf": "baseline",  # 기준선 실행은 자기 대안 평가를 돌지 않는다
-            }
-            baseline_result = generate_idf_and_simulate(base_payload, os.path.join(temp_dir, "baseline"))
-            print("⏮️ [전/후 비교] 개선 전 시뮬레이션 완료 → 기준선으로 사용")
     _stage("retrofit")
     # ⚠️ 예전에 `insulationOverrides`(구성 단위) 재계산 블록이 여기 있었다.
     # 생산자는 `simulation/variants.py` 하나뿐이었는데, 키가 면이 아니라 구성이라
