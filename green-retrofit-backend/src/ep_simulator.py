@@ -10,6 +10,11 @@ import re
 
 from src.energyplus.weather import select_weather
 from src.simulation import baseline as baseline_runner
+from src.simulation import geometry
+# 순수 기하 함수는 geometry 로 옮겼다. 기존 import 경로 호환을 위해 재수출한다.
+from src.simulation.geometry import (  # noqa: F401
+    build_window_geometries, calculate_surface_area, get_scaled_window_vertices,
+)
 from src.simulation import hvac_plan
 from src.simulation.alternatives import evaluate_alternatives
 from src.idf_builder import IdfBuilder
@@ -73,20 +78,6 @@ def load_databases(db_dir):
 # 요금 상수는 economics/tariffs.py, 설비 효율은 energyplus/outputs.py 가 단일 소스다.
 # 1차에너지·CO2 계수는 domain/energy_metrics.py 가 소유한다.
 # (과거 이곳과 LCCAnalyzer 양쪽에 복제본이 있었다 — 어디에도 재정의 금지)
-
-def calculate_surface_area(vertices):
-    if len(vertices) < 3: 
-        return 0.0
-        
-    nx, ny, nz = 0.0, 0.0, 0.0
-    for i in range(len(vertices)):
-        v1 = vertices[i]
-        v2 = vertices[(i + 1) % len(vertices)]
-        nx += (v1[1] - v2[1]) * (v1[2] + v2[2])
-        ny += (v1[2] - v2[2]) * (v1[0] + v2[0])
-        nz += (v1[0] - v2[0]) * (v1[1] + v2[1])
-        
-    return math.sqrt(nx*nx + ny*ny + nz*nz) / 2.0
 
 def compute_zone_floor_areas(zones, surfaces):
     """존별 바닥면적을 한 번만 계산해 돌려준다. {zone_id: area}
@@ -176,102 +167,6 @@ def calc_outlet_power_density(zone, floor_area):
     outlet_load_w = outlet_count * w_per * diversity * utilization
     power_density = outlet_load_w / max(floor_area, 1.0)
     return min(power_density, 25.0)  # ASHRAE 90.1 상한
-
-def get_scaled_window_vertices(vertices, wwr):
-    """벽면 꼭짓점과 WWR로부터 창호 꼭짓점(최대 4개)을 생성합니다.
-    
-    EnergyPlus FenestrationSurface:Detailed는 최대 4개 꼭짓점만 허용하므로,
-    벽면이 5각형 이상이면 직사각형 근사로 창호를 생성합니다.
-    """
-    if not vertices or wwr <= 0: 
-        return []
-    
-    # 4개 이하면 기존 방식 (중심 축소)
-    if len(vertices) <= 4:
-        cx = sum(v[0] for v in vertices) / len(vertices)
-        cy = sum(v[1] for v in vertices) / len(vertices)
-        cz = sum(v[2] for v in vertices) / len(vertices)
-        scale = math.sqrt(wwr / 100.0)
-        
-        win_verts = []
-        for v in vertices:
-            wx = cx + (v[0] - cx) * scale
-            wy = cy + (v[1] - cy) * scale
-            wz = cz + (v[2] - cz) * scale
-            win_verts.append([wx, wy, wz])
-        return win_verts
-    
-    # 5개 이상 꼭짓점 → 벽 평면 위에 직사각형 창호를 근사 생성
-    # 벽의 법선벡터 계산
-    v0 = vertices[0]
-    v1 = vertices[1]
-    v2 = vertices[2]
-    
-    edge1 = [v1[i] - v0[i] for i in range(3)]
-    edge2 = [v2[i] - v0[i] for i in range(3)]
-    
-    # 법선 = edge1 x edge2
-    normal = [
-        edge1[1]*edge2[2] - edge1[2]*edge2[1],
-        edge1[2]*edge2[0] - edge1[0]*edge2[2],
-        edge1[0]*edge2[1] - edge1[1]*edge2[0]
-    ]
-    n_len = math.sqrt(sum(n*n for n in normal))
-    if n_len < 1e-10:
-        return []
-    normal = [n/n_len for n in normal]
-    
-    # 벽 평면의 로컬 좌표계 구성 (U, V축)
-    # U축: 첫 번째 edge 방향
-    u_len = math.sqrt(sum(e*e for e in edge1))
-    if u_len < 1e-10:
-        return []
-    u_axis = [e/u_len for e in edge1]
-    
-    # V축: normal x U
-    v_axis = [
-        normal[1]*u_axis[2] - normal[2]*u_axis[1],
-        normal[2]*u_axis[0] - normal[0]*u_axis[2],
-        normal[0]*u_axis[1] - normal[1]*u_axis[0]
-    ]
-    
-    # 모든 꼭짓점을 로컬 좌표로 변환
-    cx = sum(v[0] for v in vertices) / len(vertices)
-    cy = sum(v[1] for v in vertices) / len(vertices)
-    cz = sum(v[2] for v in vertices) / len(vertices)
-    
-    local_u = []
-    local_v = []
-    for v in vertices:
-        dx, dy, dz = v[0]-cx, v[1]-cy, v[2]-cz
-        local_u.append(dx*u_axis[0] + dy*u_axis[1] + dz*u_axis[2])
-        local_v.append(dx*v_axis[0] + dy*v_axis[1] + dz*v_axis[2])
-    
-    # 로컬 좌표 바운딩 박스
-    u_min, u_max = min(local_u), max(local_u)
-    v_min, v_max = min(local_v), max(local_v)
-    
-    # WWR 비율로 축소
-    scale = math.sqrt(wwr / 100.0)
-    half_w = (u_max - u_min) / 2 * scale
-    half_h = (v_max - v_min) / 2 * scale
-    
-    # 4개 직사각형 꼭짓점 (중심 기준)
-    corners = [
-        (-half_w, -half_h),
-        ( half_w, -half_h),
-        ( half_w,  half_h),
-        (-half_w,  half_h),
-    ]
-    
-    win_verts = []
-    for cu, cv in corners:
-        wx = cx + cu*u_axis[0] + cv*v_axis[0]
-        wy = cy + cu*u_axis[1] + cv*v_axis[1]
-        wz = cz + cu*u_axis[2] + cv*v_axis[2]
-        win_verts.append([wx, wy, wz])
-    
-    return win_verts
 
 def condense_daily_schedule(day_type_str: str, hourly_values: list) -> str:
     """24시간 배열을 EnergyPlus Schedule:Compact의 하루치 문자열로 압축"""
@@ -369,58 +264,6 @@ def zone_cooling_plan(zone: dict, default_capacity_w: float) -> dict:
         capacity_w = pyeong * PYEONG_TO_KW * 1000.0
         source = "user"
     return {"installed": installed, "capacity_w": capacity_w, "source": source}
-
-
-def build_window_geometries(surface: dict, wall_verts: list) -> list:
-    """벽면의 창 형상 목록 생성 — 실측 opening 우선.
-
-    규칙(정확도·안전성 순):
-    1) gbXML opening 실좌표가 있고 WWR 미수정 → 실형상 그대로 (위치·개수·모양 보존)
-    2) 실좌표가 있고 WWR을 원본보다 '축소' → 각 창을 자기 중심으로 축소 (벽 안 보장)
-    3) 실좌표가 없거나 WWR을 '확대' → 기존 합성 창(벽 중앙 √WWR) 폴백
-       (실형상 확대는 벽 경계를 벗어나 E+ Severe를 유발할 수 있어 폴백이 안전)
-    """
-    wwr = surface.get("wwr", 0)
-    if not wwr or wwr <= 0:
-        return []
-
-    openings = [op for op in (surface.get("openings") or [])
-                if (op.get("type") or "").lower() != "air"
-                and len(op.get("vertices", [])) >= 3]
-    if not openings:
-        wv = get_scaled_window_vertices(wall_verts, wwr)
-        return [wv] if wv else []
-
-    wall_area = calculate_surface_area(wall_verts)
-    orig_area = sum(calculate_surface_area(op["vertices"]) for op in openings)
-    if wall_area <= 0 or orig_area <= 0:
-        wv = get_scaled_window_vertices(wall_verts, wwr)
-        return [wv] if wv else []
-
-    orig_pct = orig_area / wall_area * 100.0
-    # 파서는 wwr=int(원본비율)로 저장 → 1.5%p 이내 차이는 '미수정'으로 간주
-    if wwr > orig_pct + 1.5:
-        wv = get_scaled_window_vertices(wall_verts, wwr)   # 확대 → 합성 폴백
-        return [wv] if wv else []
-
-    scale2 = 100.0 if abs(wwr - orig_pct) <= 1.5 else (wwr / orig_pct) * 100.0
-
-    result = []
-    for op in openings:
-        ov = op["vertices"]
-        if len(ov) <= 4:
-            # 중심 축소(scale²=wwr 인자). 100.0이면 원형 유지
-            wv = ov if scale2 >= 100.0 else get_scaled_window_vertices(ov, scale2)
-        else:
-            # E+는 창 꼭짓점 4개 제한 → 동일 면적의 직사각형 근사
-            bbox = get_scaled_window_vertices(ov, 100.0)
-            bbox_area = calculate_surface_area(bbox)
-            op_area = calculate_surface_area(ov)
-            eff = min((op_area * (scale2 / 100.0)) / bbox_area * 100.0, 100.0) if bbox_area > 0 else scale2
-            wv = get_scaled_window_vertices(ov, eff)
-        if wv:
-            result.append(wv)
-    return result
 
 
 # 침기 모델 식별자. 모델을 바꾸면 반드시 올린다 — 저장된 과거 결과가 어느 모델로
@@ -1260,164 +1103,43 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     if _shades:
         print(f"🌤️ 외부 차양 {len(_shades)}개 적용")
 
-    # 표면 지오메트리
+    # ── 표면 지오메트리 ──
+    # 경계조건·일사노출 판정, 인접면 짝짓기, 창 형상, AFN 균열은
+    # `simulation/geometry.py` 로 옮겼다. 판정 규칙은 `tests/test_geometry_decisions.py`
+    # 가 호출 단위로 고정한다 — 골든 IDF 문자열 비교만으로는 안 지켜진다.
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
-    skipped_count = 0
-    zone_to_zone_count = 0
-    windows_by_zone = {}      # 내부 블라인드 제어를 존 단위로 걸기 위해 모은다
-    air_boundary_count = 0
-    ground_promoted = 0
-    # 자기참조로 걷어낸 최하층 바닥을 지면 경계로 되살릴지. 기본 off.
     promote_ground_floors = bool(project_data.get("promoteGroundFloors"))
-    # 개방 경계(Air 표면)용 공유 AirBoundary construction (콘크리트 벽 대신 공기혼합)
-    idf.add_air_boundary_construction("AirBoundary_Const")
-
-    for s in surfaces:
-        z_id = s['zone'].replace(" ", "_")
-
-        # 💡 Zone이 "Unknown"이거나 유효한 Zone 목록에 없으면 IDF에서 제외
-        if z_id == "Unknown" or z_id not in valid_zone_ids:
-            skipped_count += 1
-            continue
-        
-        ep_type = "Wall"
-        t = s.get("type", "").lower()
-        if "roof" in t:
-            ep_type = "Roof"
-        elif "floor" in t or "slab" in t:
-            ep_type = "Floor"
-
-        verts = s.get('vertices', [])
-        adj_zone_raw = s.get("adjacentZone")
-        adj_zone_id = adj_zone_raw.replace(" ", "_") if adj_zone_raw else None
-
-        # =========================================================
-        # 💡 인접존 처리: Zone-to-Zone 양방향 Surface 쌍 생성
-        #
-        # gbXML은 공유면을 하나만 정의하지만, EnergyPlus는
-        # 각 Zone이 독립적으로 해당 면을 정의하고 서로 참조해야 함.
-        #
-        #  원본  su5        → Zone A, boundary=Surface, obj=su5_mirror
-        #  미러  su5_mirror → Zone B, boundary=Surface, obj=su5
-        #                    (정점 역순 = 법선 반전)
-        # =========================================================
-        if adj_zone_id and adj_zone_id in valid_zone_ids:
-            mirror_id = f"{s['id']}_mirror"
-            mirror_verts = list(reversed(verts))  # 법선벡터 반전
-
-            # Air(개방 경계)면은 콘크리트 벽 대신 AirBoundary(공기혼합+복사교환) 사용
-            is_air = "air" in t
-            const_name = "AirBoundary_Const" if is_air else f"Const_{s['id']}"
-            if is_air:
-                air_boundary_count += 1
-
-            # 원본: Zone A (gbXML에서 직접 연결된 Zone)
-            idf.add_surface(
-                s['id'], ep_type, const_name, z_id,
-                "Surface", "NoSun", "NoWind", verts,
-                adj_surface_id=mirror_id
-            )
-
-            # 미러: Zone B (인접 Zone) — 동일 Construction 재사용
-            idf.add_surface(
-                mirror_id, ep_type, const_name, adj_zone_id,
-                "Surface", "NoSun", "NoWind", mirror_verts,
-                adj_surface_id=s['id']
-            )
-            zone_to_zone_count += 1
-
-        else:
-            # 지면 접촉 승격(옵션): 자기참조로 걷어낸 최하층 바닥을 Ground 로 둔다.
-            # 익스포터가 SlabOnGrade 대신 자기참조 InteriorFloor 로 내보낸 경우를
-            # 되살리는 용도이며, 기본값은 꺼져 있다 — 지하층·필로티·외기노출 바닥을
-            # 오분류할 수 있어 사용자가 명시적으로 켜야 한다.
-            if promote_ground_floors and s.get("selfAdjacent") and "floor" in t \
-                    and s.get("vertices") and all(abs(p[2]) < 1e-6 for p in s["vertices"]):
-                idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
-                                "Ground", "NoSun", "NoWind", verts)
-                ground_promoted += 1
-                continue
-
-            # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직
-            # selfAdjacent: 파서가 자기참조 인접을 걷어낸 면. 타입에 'interior'가 없는
-            # Air 같은 면이 여기서 외기 노출(일사·풍압)로 빠지면 없던 외피가 생긴다.
-            if "interior" in t or adj_zone_raw or s.get("selfAdjacent"):
-                # adjacentZone이 있지만 유효하지 않은 Zone → Adiabatic fallback
-                obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
-            else:
-                obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
-
-            # 경계조건·노출 명시 지정. 예를 들어 ASHRAE 140 의 바닥은 Outdoors 이면서
-            # NoSun/NoWind 다(고단열 바닥으로 지면 결합을 무시하는 5.2절 관례).
-            # 자동 추정으로는 표현할 수 없어 표면별로 덮어쓸 수 있게 한다.
-            # gbXML 파서는 이 키들을 만들지 않으므로 기존 경로에는 영향이 없다.
-            if s.get("boundaryCondition"):
-                obc = s["boundaryCondition"]
-            if s.get("sunExposure"):
-                sun = s["sunExposure"]
-            if s.get("windExposure"):
-                wind = s["windExposure"]
-
-            idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
-                            obc, sun, wind, verts)
-
-            wwr = s.get("wwr", 0)
-            if ep_type == "Wall" and wwr > 0 and obc == "Outdoors":
-                # 실측 opening 형상 우선 (위치·개수·모양 보존 → 일사 계산 정확도)
-                win_list = build_window_geometries(s, verts)
-                for wi, wv in enumerate(win_list):
-                    # 첫 창은 기존 명명 유지 (AFN·surfaceAirflow 계약 호환)
-                    wname = f"Win_{s['id']}" if wi == 0 else f"Win_{s['id']}_{wi + 1}"
-                    idf.add_window(wname, f"WinConst_{s['id']}", s['id'], wv)
-                    windows_by_zone.setdefault(z_id, []).append(wname)
-
-            # AirflowNetwork Surface 및 개구부(Window) 등록
-            if obc == "Outdoors" and s.get("zone") in valid_afn_zones:
-                # ⚠️ 균열 계수를 **표면 면적에 비례**시킨다. 예전엔 모든 면이
-                # 같은 `WallCrack`(계수 0.01) 을 factor 1.0 으로 공유해서, 총 누기가
-                # 외피 기밀성이 아니라 **표면 개수**에 좌우됐다 — 같은 벽을 8개
-                # 폴리곤으로 쪼개면 난방이 +33.5% 뛰었다.
-                _crack = idf.add_surface_crack(s['id'], calculate_surface_area(verts))
-                idf.add("AirflowNetwork:MultiZone:Surface", [
-                    s['id'], _crack, "", 1.0
-                ])
-                if ep_type == "Wall" and wwr > 0:
-                    win_id = f"Win_{s['id']}"
-                    idf.add("AirflowNetwork:MultiZone:Surface", [
-                        win_id, "WindowOpening", "", 1.0,
-                        "NoVent", "", 0.0, 0.0, 100.0, 0.0, 300000.0, "AlwaysOn"
-                    ])
+    _geo = geometry.emit_surfaces(
+        idf, surfaces,
+        valid_zone_ids=valid_zone_ids, valid_afn_zones=valid_afn_zones,
+        promote_ground_floors=promote_ground_floors)
 
     # ── 내부 블라인드 (일사 제어) ──
-    # ⚠️ 차양이 전혀 없으면 결과가 통째로 왜곡된다. 실측(용호동): 순 일사취득
-    # 235 kWh/㎡·년 이 겨울 난방을 상쇄하고 여름 냉방을 밀어 올려, 서울 사무소인데
-    # 난방 10.6 / 냉방 54.1 kWh/㎡ 가 나왔다. 실제 사무실은 해가 강하면 내린다.
-    #
-    # ASHRAE 140 은 **차양 없음**을 사양으로 못 박는다(600 vs 610 의 차이가 바로
-    # 외부 차양이다). 벤치마크에서는 절대 걸면 안 된다 — `noInteriorBlind` 로 끈다.
-    _blind_off = bench.get("noInteriorBlind") or project_data.get("noInteriorBlind")
+    # ⚠️ ASHRAE 140 은 **차양 없음**을 사양으로 못 박는다(600 vs 610 의 차이가 바로
+    # 외부 차양이다). 벤치마크에서는 절대 걸면 안 된다.
     _blind_setpoint_used = None
-    if windows_by_zone and not _blind_off:
+    if not (bench.get("noInteriorBlind") or project_data.get("noInteriorBlind")):
         # 설정값은 결과에 크게 영향을 준다 — 낮출수록 자주 내려 난방↑·냉방↓ 다.
-        # 실측 자료가 있으면 프로젝트별로 덮어쓸 수 있게 열어 둔다.
         _blind_setpoint_used = float(project_data.get("blindSolarSetpointWm2")
                                      or IdfBuilder.BLIND_SOLAR_SETPOINT_W_M2)
-        idf.add_interior_blind()
-        for _z, _wins in windows_by_zone.items():
-            idf.add_window_shading_control(_z, _wins,
-                                           setpoint_w_m2=_blind_setpoint_used)
-        print(f"🪟 내부 블라인드 적용: {len(windows_by_zone)}개 존 "
-              f"{sum(len(w) for w in windows_by_zone.values())}개 창 "
-              f"(창면일사 {_blind_setpoint_used:.0f} W/㎡ 초과 시 하강)")
+        _blind_zones = geometry.emit_interior_blinds(
+            idf, _geo.windows_by_zone, _blind_setpoint_used)
+        if _blind_zones:
+            print(f"🪟 내부 블라인드 적용: {_blind_zones}개 존 "
+                  f"{sum(len(w) for w in _geo.windows_by_zone.values())}개 창 "
+                  f"(창면일사 {_blind_setpoint_used:.0f} W/㎡ 초과 시 하강)")
+        else:
+            _blind_setpoint_used = None      # 창이 없으면 가정 자체가 없다
 
-    if skipped_count > 0:
-        print(f"⏭️ Zone 미소속 Surface {skipped_count}개 제외 (차양/지형면)")
-    if zone_to_zone_count > 0:
-        print(f"🔗 Zone-to-Zone 경계 Surface {zone_to_zone_count}개 양방향 쌍 생성 완료")
-    if ground_promoted > 0:
-        print(f"🌍 최하층 자기참조 바닥 {ground_promoted}개를 Ground 경계로 승격")
+    if _geo.skipped:
+        print(f"⏭️ Zone 미소속 Surface {_geo.skipped}개 제외 (차양/지형면)")
+    if _geo.zone_to_zone:
+        print(f"🔗 Zone-to-Zone 경계 Surface {_geo.zone_to_zone}개 양방향 쌍 생성 완료")
+    if _geo.ground_promoted:
+        print(f"🌍 최하층 자기참조 바닥 {_geo.ground_promoted}개를 Ground 경계로 승격")
+    if _geo.air_boundary:
+        print(f"💨 개방 경계(Air) Surface {_geo.air_boundary}개를 AirBoundary 로 처리")
 
-    # 실기기 HVAC 누적분 일괄 emit (PTHP 존별 EquipmentConnections/List 등)
     idf.finalize_hvac()
 
     # 출력 변수
