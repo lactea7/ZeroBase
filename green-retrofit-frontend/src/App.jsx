@@ -504,7 +504,9 @@ export default function App() {
           lightingPower: 10.0,
           equipmentPower: 15.0,
           outletCount: 0,
-          outletLoadType: 'sum',
+          // ⚠️ 기본은 'max'. `equipmentPower` 와 콘센트 추정값은 같은 물리량의
+          // 다른 추정치라(ASHRAE 기기부하 정의 = 콘센트 부하) 더하면 이중계산이다.
+          outletLoadType: 'max',
         });
 
         const faces = [
@@ -626,7 +628,7 @@ export default function App() {
           lightingPower: z.lightingPower ?? null,
           equipmentPower: z.equipmentPower ?? null,
           outletCount: z.outletCount ?? 0,
-          outletLoadType: z.outletLoadType ?? 'sum',
+          outletLoadType: z.outletLoadType ?? 'max',
         }));
         setZones(mappedZones);
         setOriginalModel({ zones: mappedZones, surfaces: response.data.surfaces || [] });

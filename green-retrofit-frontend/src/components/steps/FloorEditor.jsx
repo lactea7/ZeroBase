@@ -676,7 +676,7 @@ export default function FloorEditor(props) {
                                     </div>
 
                                     <div className="flex items-center justify-between pt-1">
-                                      <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>부하 합산 방식:</span>
+                                      <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`} title="기기부하와 콘센트 추정값은 같은 부하를 두 방식으로 잰 값입니다. 기본은 큰 쪽만 씁니다.">콘센트 부하 반영:</span>
                                       <div className={`flex ${isDarkMode ? 'bg-black/30 border-white/5' : 'bg-slate-300/60 border-slate-300/80'} p-0.5 rounded-lg border`}>
                                         <button
                                           onClick={() =>
@@ -686,12 +686,12 @@ export default function FloorEditor(props) {
                                             }))
                                           }
                                           className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
-                                            (editState.outletLoadType || 'sum') === 'sum'
+                                            (editState.outletLoadType || 'max') === 'sum'
                                               ? 'bg-emerald-600 text-white shadow-sm'
                                               : `${isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-800'}`
                                           }`}
                                         >
-                                          합산 (Sum)
+                                          합산 (별도 공정부하)
                                         </button>
                                         <button
                                           onClick={() =>
@@ -701,20 +701,27 @@ export default function FloorEditor(props) {
                                             }))
                                           }
                                           className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
-                                            (editState.outletLoadType || 'sum') === 'max'
+                                            (editState.outletLoadType || 'max') === 'max'
                                               ? 'bg-emerald-600 text-white shadow-sm'
                                               : `${isDarkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-800'}`
                                           }`}
                                         >
-                                          최댓값 (Max)
+                                          큰 쪽만 (기본)
                                         </button>
                                       </div>
                                     </div>
 
+                                    {/* 기기부하 기본값(ASHRAE/DOE 통상값)의 정의가 곧 콘센트 부하다.
+                                        두 값을 더하면 같은 부하를 두 번 세는 것이라 기본은 '큰 쪽만'이다. */}
+                                    <p className={`text-[9px] leading-relaxed ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                                      {(editState.outletLoadType || 'max') === 'sum'
+                                        ? '기기 부하가 콘센트를 제외한 공정·특수기기만일 때 고르세요. 아니면 같은 부하를 두 번 세게 됩니다.'
+                                        : '기기 부하와 콘센트 추정값은 같은 부하를 두 방식으로 잰 값이라, 큰 쪽만 씁니다.'}
+                                    </p>
                                     <div className={`text-[11px] font-bold flex justify-between items-center bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 mt-1 ${isDarkMode ? 'text-slate-300' : 'text-emerald-950'}`}>
                                       <span>⚡ 시뮬레이션 반영 기기 부하:</span>
                                       <span className={`font-black ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                                        {((editState.outletLoadType || 'sum') === 'sum'
+                                        {((editState.outletLoadType || 'max') === 'sum'
                                           ? (editState.equipmentPower || 0) + calcOutletPower(editState, getZoneFloorArea(editState.id))
                                           : Math.max(editState.equipmentPower || 0, calcOutletPower(editState, getZoneFloorArea(editState.id)))
                                         ).toFixed(2)}{' '}

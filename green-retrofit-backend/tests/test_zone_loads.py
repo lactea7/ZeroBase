@@ -47,23 +47,34 @@ def test_explicit_zero_is_honoured(key, attr):
 
 
 # ── 콘센트 ───────────────────────────────────────────────
-# ⚠️ 기본이 `sum` 인데, 아키타입 기기부하가 이미 일반 콘센트를 포함한 값이라면
-# **이중계산**이다. 그 판단은 아직 안 끝났으므로 현재 동작을 값으로 고정한다.
+# ⚠️ `equipmentPower`(아키타입 사무실 12 W/㎡)와 콘센트 추정값은 **같은 물리량의
+# 서로 다른 추정치**다 — ASHRAE/DOE 의 기기부하 정의가 곧 콘센트(plug) 부하다.
+# 더하면 이중계산이다. 예전 기본값 `sum` 에서는 12 + 최대 25 = 37 W/㎡ 까지 갔다.
 
-def test_outlets_are_added_by_default():
+def test_outlets_do_not_double_count_by_default():
+    """⚠️ 기본은 큰 쪽만 — 더하면 같은 부하를 두 번 센다."""
     loads = _resolve({"outletCount": 20}, outlet_w_m2=8.0)
-    assert loads.equipment_w_m2 == 20.0        # 아키타입 12 + 콘센트 8
-    assert loads.outlet_load_type == "sum"
+    assert loads.equipment_w_m2 == 12.0        # max(12, 8) — 20 이 아니다
+    assert loads.outlet_load_type == "max"
 
 
-def test_max_mode_takes_the_larger_not_the_sum():
-    loads = _resolve({"outletLoadType": "max"}, outlet_w_m2=8.0)
-    assert loads.equipment_w_m2 == 12.0        # max(12, 8)
+def test_a_better_outlet_estimate_wins():
+    """콘센트를 실제로 센 값이 아키타입보다 크면 그쪽을 쓴다."""
+    loads = _resolve({"outletCount": 60}, outlet_w_m2=20.0)
+    assert loads.equipment_w_m2 == 20.0
 
 
-def test_max_mode_can_exceed_the_archetype():
-    loads = _resolve({"outletLoadType": "max"}, outlet_w_m2=30.0)
-    assert loads.equipment_w_m2 == 30.0
+def test_sum_is_available_when_the_user_asks_for_it():
+    """`equipmentPower` 가 콘센트를 **제외한** 공정·특수기기 부하일 때만이다."""
+    loads = _resolve({"outletLoadType": "sum"}, outlet_w_m2=8.0)
+    assert loads.equipment_w_m2 == 20.0        # 12 + 8
+
+
+@pytest.mark.parametrize("bad", [None, "", "알수없음"])
+def test_unknown_load_type_falls_back_to_the_safe_option(bad):
+    """⚠️ 오타나 빈 값이 이중계산 쪽으로 떨어지면 안 된다."""
+    loads = _resolve({"outletLoadType": bad}, outlet_w_m2=8.0)
+    assert loads.equipment_w_m2 == 12.0
 
 
 def test_outlet_component_is_reported_separately():
@@ -77,10 +88,11 @@ def test_no_outlet_input_means_no_outlet_component():
     assert _resolve().has_outlets is False
 
 
-def test_user_equipment_and_outlets_still_sum():
-    """⚠️ 사용자가 기기부하를 명시해도 콘센트가 더해진다 — 이중계산의 핵심 경로다."""
+def test_user_equipment_is_not_inflated_by_outlets():
+    """⚠️ 예전엔 사용자가 명시한 기기부하에도 콘센트가 더해졌다(30 + 8 = 38).
+    사용자 입력값 역시 콘센트를 포함한 총 기기부하다."""
     loads = _resolve({"equipmentPower": 30.0}, outlet_w_m2=8.0)
-    assert loads.equipment_w_m2 == 38.0
+    assert loads.equipment_w_m2 == 30.0
 
 
 # ── 급탕 ─────────────────────────────────────────────────

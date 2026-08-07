@@ -10,14 +10,18 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-#: 콘센트 부하를 아키타입 기기부하에 **더할지(sum) 큰 쪽만 쓸지(max)**.
+#: 콘센트 부하를 기기부하에 **더할지(sum) 큰 쪽만 쓸지(max)**.
 #
-# ⚠️ 기본이 `sum` 인데, 아키타입 기기부하(사무실 12 W/㎡)가 이미 일반 콘센트를
-# 포함한 값이라면 **이중계산**이다. `outletCount` 가 있는 파일에서는
-# 12 + 최대 25 = 37 W/㎡ 까지 간다.
-# 용호동은 20개 존 전부 `outletCount` 가 없어 이 경로를 타지 않았지만,
-# 위험 자체는 실재한다. 아키타입 정의를 확인해 결정해야 한다.
-DEFAULT_OUTLET_LOAD_TYPE = "sum"
+# ⚠️ 기본은 `max` 다. 두 값은 **같은 물리량의 서로 다른 추정치**이기 때문이다.
+#   · `equipmentPower` — 아키타입 기본값(사무실 12 W/㎡)은 ASHRAE/DOE 통상값이고,
+#     그 정의가 **콘센트(plug/receptacle) 부하**다. 별도 설비가 아니라 꽂아 쓰는 것 전체다.
+#   · `calc_outlet_power_density()` — 콘센트 개수로 **같은 양**을 추정한다.
+# 더하면 정의상 이중계산이다. 예전 기본값 `sum` 에서는 사무실이
+# 12 + 최대 25 = **37 W/㎡** 까지 갔다.
+#
+# `sum` 은 `equipmentPower` 가 콘센트를 **제외한** 공정·특수기기 부하임을 사용자가
+# 명시적으로 고른 경우에만 쓴다.
+DEFAULT_OUTLET_LOAD_TYPE = "max"
 
 SECONDS_PER_HOUR = 3600.0
 LITRES_PER_M3 = 1000.0
@@ -82,9 +86,13 @@ def resolve(zone: Dict[str, Any], floor_area_m2: float,
         return ZoneLoads()
 
     base_equipment = _or_default(zone, "equipmentPower", archetype_loads["equipment"])
-    load_type = zone.get("outletLoadType", DEFAULT_OUTLET_LOAD_TYPE)
-    equipment = (max(base_equipment, outlet_w_m2) if load_type == "max"
-                 else base_equipment + outlet_w_m2)
+    # ⚠️ `sum` 은 **사용자가 명시적으로 고른 경우에만** 이다. 기본은 `max` —
+    # 두 값이 같은 물리량의 다른 추정치라 더하면 이중계산이다.
+    load_type = zone.get("outletLoadType") or DEFAULT_OUTLET_LOAD_TYPE
+    # ⚠️ `float()` 로 고정한다. `max(12, 0.0)` 은 int 12 를 돌려주는데, 그러면
+    # 부하 방식에 따라 IDF 에 `12` 와 `12.0` 이 갈려 적힌다(값은 같지만 골든이 반응).
+    equipment = float(base_equipment + outlet_w_m2 if load_type == "sum"
+                      else max(base_equipment, outlet_w_m2))
 
     return ZoneLoads(
         people_density=_or_default(zone, "peopleDensity", archetype_loads["people"]),
