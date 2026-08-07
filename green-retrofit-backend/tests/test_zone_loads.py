@@ -70,11 +70,14 @@ def test_sum_is_available_when_the_user_asks_for_it():
     assert loads.equipment_w_m2 == 20.0        # 12 + 8
 
 
-@pytest.mark.parametrize("bad", [None, "", "알수없음"])
+@pytest.mark.parametrize("bad", [None, "", "알수없음", "SUM", "Max"])
 def test_unknown_load_type_falls_back_to_the_safe_option(bad):
     """⚠️ 오타나 빈 값이 이중계산 쪽으로 떨어지면 안 된다."""
     loads = _resolve({"outletLoadType": bad}, outlet_w_m2=8.0)
     assert loads.equipment_w_m2 == 12.0
+    # ⚠️ 보고값도 정규화해야 한다. 계산은 max 인데 원문("알수없음")을 그대로
+    # 실어 보내면 로그·응답이 실제 동작과 어긋난다.
+    assert loads.outlet_load_type == "max"
 
 
 def test_outlet_component_is_reported_separately():

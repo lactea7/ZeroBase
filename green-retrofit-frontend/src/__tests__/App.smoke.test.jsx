@@ -12,6 +12,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('../api/client.js', () => ({
   default: { post: vi.fn(), get: vi.fn() },
@@ -52,7 +53,9 @@ describe('랜딩 → 업로드 전환', () => {
     // 랜딩 단계에는 업로드 입력이 없다
     expect(container.querySelector('input[type="file"]')).toBeNull();
 
-    container.querySelector('#zb-cta-start').click();
+    // ⚠️ DOM 의 `.click()` 을 쓰면 React 가 act() 경고를 낸다. 경고를 방치하면
+    // 나중에 진짜 비동기 문제가 그 소음에 묻힌다.
+    await userEvent.click(container.querySelector('#zb-cta-start'));
 
     // ⚠️ 이 전환이 깨지면 사용자는 **아무것도 시작할 수 없다.**
     await waitFor(() => {
@@ -63,7 +66,7 @@ describe('랜딩 → 업로드 전환', () => {
 
   it('업로드 입력은 gbXML 확장자만 받는다', async () => {
     const { container } = render(<App />);
-    container.querySelector('#zb-cta-start').click();
+    await userEvent.click(container.querySelector('#zb-cta-start'));
 
     await waitFor(() => expect(container.querySelector('input[type="file"]')).toBeTruthy());
     expect(container.querySelector('input[type="file"]').accept).toBe('.xml,.gbxml');

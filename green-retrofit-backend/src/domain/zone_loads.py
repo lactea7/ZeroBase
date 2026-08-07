@@ -88,7 +88,10 @@ def resolve(zone: Dict[str, Any], floor_area_m2: float,
     base_equipment = _or_default(zone, "equipmentPower", archetype_loads["equipment"])
     # ⚠️ `sum` 은 **사용자가 명시적으로 고른 경우에만** 이다. 기본은 `max` —
     # 두 값이 같은 물리량의 다른 추정치라 더하면 이중계산이다.
-    load_type = zone.get("outletLoadType") or DEFAULT_OUTLET_LOAD_TYPE
+    #
+    # ⚠️ 알 수 없는 값을 **정규화**한다. 예전에는 계산만 max 로 하고 원문
+    # ("알수없음" 등)을 그대로 보고해서, 로그·응답이 실제 동작과 어긋났다.
+    load_type = "sum" if zone.get("outletLoadType") == "sum" else DEFAULT_OUTLET_LOAD_TYPE
     # ⚠️ `float()` 로 고정한다. `max(12, 0.0)` 은 int 12 를 돌려주는데, 그러면
     # 부하 방식에 따라 IDF 에 `12` 와 `12.0` 이 갈려 적힌다(값은 같지만 골든이 반응).
     equipment = float(base_equipment + outlet_w_m2 if load_type == "sum"

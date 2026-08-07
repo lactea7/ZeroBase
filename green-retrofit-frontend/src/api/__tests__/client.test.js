@@ -109,11 +109,15 @@ describe('runSimulation 실패 처리', () => {
     expect(http.get).not.toHaveBeenCalled();
   });
 
-  it('끝나지 않는 작업은 무한 대기가 아니라 시간 초과로 끝낸다', async () => {
+  it('끝나지 않는 작업은 30분 뒤 시간 초과로 끝낸다', async () => {
     http.post.mockResolvedValue(accepted);
     http.get.mockResolvedValue({ data: { status: 'running' } });
 
     await expect(runSimulation(PAYLOAD)).rejects.toThrow(/초과/);
+    // ⚠️ "유한하다"만 보면 재시도 횟수가 1 로 줄어도 통과한다. 실제 계약은
+    // **5초 × 360회 = 30분** 이다. 전/후 2회 실행 + 대기열을 감당해야 하므로
+    // 이 숫자가 줄면 정상 작업이 시간 초과로 죽는다.
+    expect(http.get).toHaveBeenCalledTimes(360);
   });
 });
 
