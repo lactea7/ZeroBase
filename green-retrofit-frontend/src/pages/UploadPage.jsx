@@ -7,6 +7,9 @@ import WizardShell from '../components/layout/WizardShell';
 /**
  * gbXML 업로드 화면.
  *
+ * ⚠️ 재업로드는 `onResetModel` **하나**로 처리한다. 예전엔 setter 5개를 나열해서
+ * `originalModel`(절감액의 기준선)·`gapWarnings`·`realFloorCount` 를 빠뜨렸다.
+ *
  * ⚠️ 여기서 막히면 사용자는 **아무것도 시작할 수 없다.** 파일 입력·샘플 시작·
  * 재업로드 세 경로가 모두 살아 있어야 한다.
  * 화면 간 계약은 `src/__tests__/App.upload.test.jsx` 가 지킨다.
@@ -15,7 +18,7 @@ export default function UploadPage({
   theme, isDarkMode, setStep, setShowGuide,
   surfaces, zones, uploadedFile, fileInputRef,
   handleFileUpload, handleStartWithSample,
-  setSurfaces, setZones, setUploadedFile, setMaterials, setConstructionOverrides,
+  onResetModel,
 }) {
   return (
             <WizardShell
@@ -78,13 +81,7 @@ export default function UploadPage({
                         </span>
                       </div>
                       <button
-                        onClick={() => {
-                          setUploadedFile(null);
-                          setSurfaces([]);
-                          setZones([]);
-                          setMaterials(null);
-                          setConstructionOverrides({});
-                        }}
+                        onClick={onResetModel}
                         className={`mt-8 text-xs font-bold transition-colors underline ${isDarkMode ? 'text-slate-500 hover:text-red-400' : 'text-slate-400 hover:text-red-500'}`}
                       >
                         다른 파일 다시 업로드하기

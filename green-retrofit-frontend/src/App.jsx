@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useReducer } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BarChart,
@@ -67,10 +67,10 @@ import {
 // --- 분리된 모듈 import ---
 import { uploadGbxml, runSimulation } from './api/client';
 import { buildSimulationPayload } from './utils/simulationPayload';
-import { mapZones } from './utils/parseResponse';
 import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { createInitialProjectData } from './data/initialProject';
+import { ModelAction, initialModelState, modelReducer } from './state/modelReducer';
 // ⚠️ 콘센트 산식은 백엔드와 같은 값이어야 한다 — utils/zoneLoads.js 주석 참조.
 import { calcOutletPower, getActivityCategory } from './utils/zoneLoads';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
@@ -113,12 +113,26 @@ export default function App() {
   
   const [showGuide, setShowGuide] = useState(false); // Revit gbXML 추출 가이드 영상 모달
 
+  // ── 업로드한 건물 모델 ──
+  // ⚠️ 이 아홉 개는 **함께 바뀌어야 한다.** 흩어진 setter 로 두었더니 재업로드
+  // 버튼 두 곳이 `originalModel`(절감액의 기준선)·`gapWarnings`·`realFloorCount`
+  // 를 안 지우고 있었다. 상태 전이는 state/modelReducer.js 가 표로 고정한다.
+  const [model, dispatchModel] = useReducer(modelReducer, initialModelState);
+  const {
+    surfaces, zones, originalModel, uploadedFile, uploadError,
+    gapWarnings, realFloorCount, materials, constructionOverrides,
+  } = model;
+
+  // 편집 경로용 호환 setter — `useState` 처럼 값/갱신함수를 받는다.
+  const setSurfaces = (v) => dispatchModel({ type: ModelAction.SURFACES_CHANGED, surfaces: v });
+  const setZones = (v) => dispatchModel({ type: ModelAction.ZONES_CHANGED, zones: v });
+  const setConstructionOverrides = (v) =>
+    dispatchModel({ type: ModelAction.OVERRIDES_CHANGED, overrides: v });
+  const resetModel = () => dispatchModel({ type: ModelAction.MODEL_RESET });
+
   const [projectData, setProjectData] = useState(createInitialProjectData);
 
-  const [surfaces, setSurfaces] = useState([]);
-  const [zones, setZones] = useState([]);
   // 업로드 원본(개선 전) 스냅샷 — 백엔드가 전/후 비교 시뮬레이션의 기준선으로 사용
-  const [originalModel, setOriginalModel] = useState(null);
   const [activeFloor, setActiveFloor] = useState(1);
   const [editMode, setEditMode] = useState('surface');
   const [selectedId, setSelectedId] = useState(null);
@@ -139,17 +153,11 @@ export default function App() {
 
   const fileInputRef = useRef(null);
   const scheduleEditorRef = useRef(null);
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [uploadError, setUploadError] = useState(null);
 
   const [lightCalc, setLightCalc] = useState({ active: false, w: 32, qty: 10, area: 100 });
   const [equipCalc, setEquipCalc] = useState({ active: false, w: 150, qty: 5, area: 100 });
-  const [gapWarnings, setGapWarnings] = useState([]);
-  const [realFloorCount, setRealFloorCount] = useState(0); // 파서가 감지한 실제 층수 (가상 층 제외)
   
   // 💡 단열재 및 구조체 속성 튜닝을 위한 State
-  const [materials, setMaterials] = useState(null);
-  const [constructionOverrides, setConstructionOverrides] = useState({});
 
   const calculateUpdatedUValue = (constr, override) => {
     if (!constr || !constr.layers || constr.layers.length === 0) return null;
@@ -469,12 +477,9 @@ export default function App() {
         });
       });
     }
-    setSurfaces(newSurfaces);
-    setZones(newZones);
-    setOriginalModel({ zones: newZones, surfaces: newSurfaces });
-
-    // 샘플용 가상 단열재 데이터 주입 (DB 연동/단열재 표시 기능 활성화용)
-    setMaterials({
+    // 샘플도 모델·기준선을 한 번에 싣는다(재료는 아래에서 덧붙인다).
+    // 샘플용 가상 단열재 데이터 (DB 연동/단열재 표시 기능 활성화용)
+    const sampleMaterials = {
       summary: { premium: 0, high: 2, standard: 0, basic: 0 },
       constructions: [
         {
@@ -504,7 +509,13 @@ export default function App() {
           ]
         }
       ]
+    };
+
+    dispatchModel({
+      type: ModelAction.SAMPLE_LOADED, surfaces: newSurfaces, zones: newZones,
+      materials: sampleMaterials,
     });
+
 
     // 샘플도 업로드와 동일하게 설정 위저드 첫 페이지로 진입
     setStep('projectInfo');
@@ -514,43 +525,31 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    setUploadedFile(file);
-    setUploadError(null);
+    dispatchModel({ type: ModelAction.PARSE_STARTED, file });
     setStep('parsing');
-
-    setMaterials(null);
-    setConstructionOverrides({});
     try {
       const response = await uploadGbxml(file);
       if (response && response.data) {
-        setSurfaces(response.data.surfaces || []);
-        if (response.data.materials) {
-          setMaterials(response.data.materials);
-        }
-        // 내부발열은 백엔드가 용도별 표준값을 채워 내려준다. 여기서 사무실 기본값을
-        // 덮어쓰면 화장실·계단실에도 사무실 수준 부하가 들어가고, 백엔드의 용도별
-        // 아키타입이 통째로 무력화된다. 값이 없을 때만 최소한으로 보정한다.
-        // (`||` 는 사용자가 명시한 0 까지 덮으므로 `??` 를 쓴다)
-        const mappedZones = mapZones(response.data.zones);
-        setZones(mappedZones);
-        setOriginalModel({ zones: mappedZones, surfaces: response.data.surfaces || [] });
-
-        // 💡 면 갭 경고 처리
-        const warnings = response.data.warnings || [];
-        if (warnings.length > 0) {
-          setGapWarnings(warnings);
-        }
-        // 💡 실제 층수 저장 (가상 층 구분용)
-        if (response.data.floorLevels) {
-          setRealFloorCount(response.data.floorLevels);
-        }
+        // ⚠️ 모델·기준선·경고·층수를 **한 번에** 싣는다. 예전엔 setter 를 따로
+        // 불러서, 한 곳만 빠뜨려도 이전 모델의 잔여물이 섞였다.
+        dispatchModel({
+          type: ModelAction.PARSE_SUCCEEDED,
+          surfaces: response.data.surfaces,
+          zones: response.data.zones,
+          materials: response.data.materials,
+          warnings: response.data.warnings,
+          floorLevels: response.data.floorLevels,
+        });
       }
       setStep('upload');
     } catch (error) {
       console.error('파싱 에러:', error);
       // 백엔드가 원인을 알려주면(400 detail 등) 그대로 보여준다 — "서버 응답 없음"으로 뭉개지 않기
       const detail = error?.response?.data?.detail;
-      setUploadError(detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.');
+      dispatchModel({
+        type: ModelAction.PARSE_FAILED,
+        message: detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.',
+      });
       // ⚠️ 여기서 `setStep('upload')` 를 하면 안 된다. 오류 화면은 `step === 'parsing'`
       // 블록 **안에** 있어서, upload 로 넘기면 사용자가 **아무 안내도 못 받고**
       // 업로드 화면으로 튕긴다. 왜 실패했는지 알 수 없으니 파일을 고칠 수도 없다.
@@ -559,8 +558,6 @@ export default function App() {
   };
 
   const handleStartWithSample = () => {
-    setUploadError(null);
-    setUploadedFile({ name: 'Sample_Building_V1.xml' });
     populateBuildingData();
   };
 
@@ -952,12 +949,9 @@ export default function App() {
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  setGapWarnings([]);
-                  setSurfaces([]);
-                  setZones([]);
-                  setMaterials(null);
-                  setConstructionOverrides({});
-                  setUploadedFile(null);
+                  // ⚠️ 예전엔 여기서 `originalModel`·`realFloorCount` 를 안 지웠다.
+                  // `originalModel` 은 절감액의 기준선이라 남으면 엉뚱한 건물과 비교한다.
+                  resetModel();
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
                 className={`flex-1 py-3 rounded-2xl text-sm font-bold border transition-all ${
@@ -969,7 +963,7 @@ export default function App() {
               {/* severity=block 은 해석 자체가 불가능한 입력이다 —
                   '그대로 진행'을 허용하면 신뢰할 수 없는 결과를 만들게 된다. */}
               <button
-                onClick={() => setGapWarnings([])}
+                onClick={() => dispatchModel({ type: ModelAction.WARNINGS_DISMISSED })}
                 disabled={gapWarnings.some((w) => w.severity === 'block')}
                 className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all ${
                   gapWarnings.some((w) => w.severity === 'block')
@@ -1029,10 +1023,7 @@ export default function App() {
               fileInputRef={fileInputRef}
               handleFileUpload={handleFileUpload}
               handleStartWithSample={handleStartWithSample}
-              setSurfaces={setSurfaces} setZones={setZones}
-              setUploadedFile={setUploadedFile}
-              setMaterials={setMaterials}
-              setConstructionOverrides={setConstructionOverrides}
+              onResetModel={resetModel}
             />
           )}
 

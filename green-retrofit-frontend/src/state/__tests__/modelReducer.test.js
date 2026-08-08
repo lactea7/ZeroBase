@@ -1,0 +1,211 @@
+/**
+ * state/modelReducer.js — 업로드 모델 상태 전이표.
+ *
+ * ⚠️ 이 상태들은 **함께 바뀌어야 한다.** 흩어진 setter 로 두면 하나를 빠뜨리기
+ * 쉽고, 그러면 이전 모델의 잔여물이 새 모델과 섞인다. 실제로 "수정하고 재업로드"
+ * 가 `originalModel`(절감액의 기준선)과 `realFloorCount` 를 안 지우고 있었다.
+ */
+import { describe, expect, it } from 'vitest';
+import {
+  ModelAction, initialModelState, modelReducer,
+} from '../modelReducer.js';
+
+const FILE = { name: 'b.xml' };
+const SURFACES = [{ id: 'S1', zone: 'Z1' }];
+const ZONES = [{ id: 'Z1', name: '사무실', lightingPower: 9 }];
+
+const act = (state, action) => modelReducer(state, action);
+const loaded = () => act(initialModelState, {
+  type: ModelAction.PARSE_SUCCEEDED,
+  surfaces: SURFACES, zones: ZONES, materials: { constructions: [] },
+  warnings: [{ id: 'S9' }], floorLevels: 3,
+});
+
+// ── 파싱 시작 ────────────────────────────────────────────
+
+describe('PARSE_STARTED', () => {
+  it('어떤 파일을 올렸는지 기록한다', () => {
+    expect(act(initialModelState, { type: ModelAction.PARSE_STARTED, file: FILE })
+      .uploadedFile).toBe(FILE);
+  });
+
+  it('⚠️ 이전 재료·override 를 지운다', () => {
+    // 안 지우면 새 건물에 옛 구성체가 붙어 U 값이 엉뚱해진다
+    const dirty = { ...loaded(), constructionOverrides: { S1: { tier: 'high' } } };
+    const next = act(dirty, { type: ModelAction.PARSE_STARTED, file: FILE });
+    expect(next.materials).toBeNull();
+    expect(next.constructionOverrides).toEqual({});
+  });
+
+  it('이전 오류를 지운다', () => {
+    const failed = act(initialModelState, { type: ModelAction.PARSE_FAILED, message: 'x' });
+    expect(act(failed, { type: ModelAction.PARSE_STARTED, file: FILE }).uploadError).toBeNull();
+  });
+});
+
+// ── 파싱 성공 ────────────────────────────────────────────
+
+describe('PARSE_SUCCEEDED', () => {
+  it('모델을 싣는다', () => {
+    const s = loaded();
+    expect(s.surfaces).toEqual(SURFACES);
+    expect(s.zones[0].id).toBe('Z1');
+    expect(s.materials).toEqual({ constructions: [] });
+  });
+
+  it('⚠️ 원본과 현재를 같은 순간에 채운다', () => {
+    // 따로 두면 기준선이 어긋나 절감액이 통째로 틀린다
+    const s = loaded();
+    expect(s.originalModel).toEqual({ zones: s.zones, surfaces: s.surfaces });
+  });
+
+  it('존 매핑을 거친다 (백엔드 값 보존)', () => {
+    const s = act(initialModelState, {
+      type: ModelAction.PARSE_SUCCEEDED, surfaces: [], zones: [{ id: 'Z', lightingPower: 0 }],
+    });
+    expect(s.zones[0].lightingPower).toBe(0);      // 명시된 0 을 안 덮는다
+    expect(s.zones[0].outletLoadType).toBe('max'); // 이중계산 방지 기본값
+  });
+
+  it('면 갭 경고를 싣는다', () => {
+    expect(loaded().gapWarnings).toHaveLength(1);
+  });
+
+  it('⚠️ 새 모델에 경고가 없으면 이전 경고를 지운다', () => {
+    // 남으면 멀쩡한 모델에 옛 경고가 뜬다
+    const s = act(loaded(), { type: ModelAction.PARSE_SUCCEEDED, surfaces: [], zones: [] });
+    expect(s.gapWarnings).toEqual([]);
+  });
+
+  it('실제 층수를 기록한다 (가상 층 구분용)', () => {
+    expect(loaded().realFloorCount).toBe(3);
+  });
+
+  it('빈 응답에도 깨지지 않는다', () => {
+    const s = act(initialModelState, { type: ModelAction.PARSE_SUCCEEDED });
+    expect(s.surfaces).toEqual([]);
+    expect(s.zones).toEqual([]);
+  });
+});
+
+// ── 파싱 실패 ────────────────────────────────────────────
+
+describe('PARSE_FAILED', () => {
+  it('원인을 싣는다', () => {
+    expect(act(initialModelState, {
+      type: ModelAction.PARSE_FAILED, message: 'Space 참조 없음',
+    }).uploadError).toBe('Space 참조 없음');
+  });
+
+  it('⚠️ 어떤 파일이 실패했는지 남긴다', () => {
+    const started = act(initialModelState, { type: ModelAction.PARSE_STARTED, file: FILE });
+    expect(act(started, { type: ModelAction.PARSE_FAILED, message: 'x' }).uploadedFile).toBe(FILE);
+  });
+
+  it('⚠️ 이전에 성공한 모델을 지우지 않는다', () => {
+    // 재업로드가 실패했다고 이미 편집하던 모델을 날리면 안 된다
+    const s = act(loaded(), { type: ModelAction.PARSE_FAILED, message: 'x' });
+    expect(s.surfaces).toEqual(SURFACES);
+    expect(s.originalModel).not.toBeNull();
+  });
+});
+
+// ── 샘플 ─────────────────────────────────────────────────
+
+describe('SAMPLE_LOADED', () => {
+  it('모델과 기준선을 함께 채운다', () => {
+    const s = act(initialModelState, {
+      type: ModelAction.SAMPLE_LOADED, surfaces: SURFACES, zones: ZONES,
+    });
+    expect(s.originalModel).toEqual({ zones: ZONES, surfaces: SURFACES });
+    expect(s.uploadedFile.name).toMatch(/Sample/);
+  });
+
+  it('⚠️ 이전 모델의 override 와 경고를 지운다', () => {
+    const dirty = { ...loaded(), constructionOverrides: { S1: {} } };
+    const s = act(dirty, { type: ModelAction.SAMPLE_LOADED, surfaces: [], zones: [] });
+    expect(s.constructionOverrides).toEqual({});
+    expect(s.gapWarnings).toEqual([]);
+  });
+
+  it('오류 상태에서 시작해도 오류가 지워진다', () => {
+    const failed = act(initialModelState, { type: ModelAction.PARSE_FAILED, message: 'x' });
+    expect(act(failed, { type: ModelAction.SAMPLE_LOADED, surfaces: [], zones: [] })
+      .uploadError).toBeNull();
+  });
+});
+
+// ── 초기화 ───────────────────────────────────────────────
+
+describe('MODEL_RESET', () => {
+  it('⚠️ 모든 키를 초기값으로 되돌린다', () => {
+    // 하나라도 남으면 다음 모델과 섞인다. 특히 `originalModel` 이 남으면
+    // 엉뚱한 건물과 비교해 절감액이 통째로 틀린다.
+    expect(act(loaded(), { type: ModelAction.MODEL_RESET })).toEqual(initialModelState);
+  });
+
+  it.each(Object.keys(initialModelState))('%s 가 초기값으로 돌아간다', (key) => {
+    const reset = act(loaded(), { type: ModelAction.MODEL_RESET });
+    expect(reset[key]).toEqual(initialModelState[key]);
+  });
+
+  it('초기 상태 객체를 공유하지 않는다', () => {
+    // 반환값을 나중에 변형해도 초기값이 오염되면 안 된다
+    expect(act(loaded(), { type: ModelAction.MODEL_RESET })).not.toBe(initialModelState);
+  });
+});
+
+// ── 편집 ─────────────────────────────────────────────────
+
+describe('편집 갱신', () => {
+  it('면을 값으로 바꾼다', () => {
+    const s = act(loaded(), { type: ModelAction.SURFACES_CHANGED, surfaces: [] });
+    expect(s.surfaces).toEqual([]);
+  });
+
+  it('면을 갱신함수로 바꾼다 (기존 setState 사용법 호환)', () => {
+    const s = act(loaded(), {
+      type: ModelAction.SURFACES_CHANGED,
+      surfaces: (prev) => prev.map((x) => ({ ...x, uValue: 0.2 })),
+    });
+    expect(s.surfaces[0].uValue).toBe(0.2);
+  });
+
+  it('⚠️ 편집이 기준선(originalModel)을 바꾸지 않는다', () => {
+    // 바뀌면 개선 전후가 같아져 절감이 0 이 된다
+    const base = loaded();
+    const s = act(base, { type: ModelAction.SURFACES_CHANGED, surfaces: [] });
+    expect(s.originalModel).toBe(base.originalModel);
+  });
+
+  it('override 를 갱신함수로 바꾼다', () => {
+    const s = act(loaded(), {
+      type: ModelAction.OVERRIDES_CHANGED,
+      overrides: (prev) => ({ ...prev, S1: { tier: 'high' } }),
+    });
+    expect(s.constructionOverrides.S1).toEqual({ tier: 'high' });
+  });
+
+  it('경고를 닫아도 모델은 남는다', () => {
+    const s = act(loaded(), { type: ModelAction.WARNINGS_DISMISSED });
+    expect(s.gapWarnings).toEqual([]);
+    expect(s.surfaces).toEqual(SURFACES);
+  });
+});
+
+describe('불변성', () => {
+  it('알 수 없는 action 은 같은 객체를 돌려준다', () => {
+    const s = loaded();
+    expect(act(s, { type: '없는액션' })).toBe(s);
+  });
+
+  it.each([
+    ModelAction.PARSE_STARTED, ModelAction.PARSE_FAILED,
+    ModelAction.WARNINGS_DISMISSED, ModelAction.MODEL_RESET,
+  ])('%s 가 이전 상태를 변형하지 않는다', (type) => {
+    const before = loaded();
+    const snapshot = JSON.parse(JSON.stringify(before));
+    act(before, { type, file: FILE, message: 'x' });
+    expect(JSON.parse(JSON.stringify(before))).toEqual(snapshot);
+  });
+});
