@@ -95,6 +95,10 @@ import FloorEditor from './components/steps/FloorEditor';
 import WizardShell from './components/layout/WizardShell';
 import LoadingPage from './pages/LoadingPage';
 import UploadPage from './pages/UploadPage';
+import FinancialPage from './pages/FinancialPage';
+import BudgetPage from './pages/BudgetPage';
+import RenewablePage from './pages/RenewablePage';
+import ProjectInfoPage from './pages/ProjectInfoPage';
 
 
 
@@ -1082,414 +1086,49 @@ export default function App() {
 
           {/* STEP: 프로젝트 기본 정보 */}
           {step === 'projectInfo' && (
-            <WizardShell
-              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
-              icon={<Building size={32} />}
-              title="프로젝트 기본 정보"
-              subtitle="건물 이름·용도·기상 지역·정북 방향을 설정하세요."
-              back="upload" next="renewable"
-            >
-              <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
-                    <div className="space-y-4">
-                      <div>
-                        <label className={`block text-[10px] font-black uppercase tracking-widest mb-2 ${theme.textSub}`}>Project Name</label>
-                        <input
-                          type="text"
-                          value={projectData.name}
-                          onChange={(e) => setProjectData({ ...projectData, name: e.target.value })}
-                          className={`w-full p-4 rounded-2xl outline-none border ${theme.input} focus:border-emerald-500`}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className={`block text-[10px] font-black uppercase tracking-widest mb-2 ${theme.textSub}`}>건물 기본 용도</label>
-                          <select
-                            value={projectData.activityId}
-                            onChange={(e) => setProjectData({ ...projectData, activityId: parseInt(e.target.value) })}
-                            className={`w-full p-4 rounded-2xl outline-none border appearance-none ${theme.input} focus:border-emerald-500`}
-                          >
-                            {ACTIVITIES.map((act) => (
-                              <option key={act.id} value={act.id}>
-                                {act.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={`block text-[10px] font-black uppercase tracking-widest mb-2 ${theme.textSub}`}>기상 데이터 지역 (Location)</label>
-                          <div className="relative">
-                            <select
-                              value={projectData.location}
-                              onChange={(e) => setProjectData({ ...projectData, location: e.target.value })}
-                              className={`w-full p-4 pl-10 rounded-2xl outline-none border appearance-none ${theme.input} focus:border-emerald-500`}
-                            >
-                              {KOREA_REGIONS.map((group) => (
-                                <optgroup key={group.group} label={group.group}>
-                                  {group.options.map((opt) => (
-                                    <option key={opt.id} value={opt.id}>
-                                      {opt.name}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              ))}
-                            </select>
-                            <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" />
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.customSchedule.useCustom ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-500/30 bg-black/5'}`}
-                        onClick={() => {
-                          const turningOn = !projectData.customSchedule.useCustom;
-                          setProjectData((prev) => ({ ...prev, customSchedule: { ...prev.customSchedule, useCustom: turningOn } }));
-                          // 켜질 때 인라인 편집기로 부드럽게 스크롤
-                          if (turningOn) {
-                            setTimeout(() => scheduleEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
-                          }
-                        }}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${projectData.customSchedule.useCustom ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
-                            <Clock size={18} />
-                          </div>
-                          <div>
-                            <span className={`block font-black text-sm ${projectData.customSchedule.useCustom ? 'text-indigo-500' : theme.textSub}`}>
-                              사용자 스케줄 적용
-                            </span>
-                            <span className="text-[10px] opacity-60">용도별 스케줄 대신 직접 수정합니다. (켜면 아래에서 바로 편집)</span>
-                          </div>
-                        </div>
-                        {projectData.customSchedule.useCustom ? (
-                          <ToggleRight size={32} className="text-indigo-500" />
-                        ) : (
-                          <ToggleLeft size={32} className="text-slate-500" />
-                        )}
-                      </div>
-
-                      {/* 사용자 스케줄 인라인 편집기 — 토글 ON 시 펼쳐지며 스크롤 */}
-                      {projectData.customSchedule.useCustom && (
-                        <div
-                          ref={scheduleEditorRef}
-                          className="mt-2 p-5 rounded-2xl border-2 border-indigo-500/30 bg-indigo-500/5 animate-in fade-in slide-in-from-top-2 duration-300"
-                        >
-                          <ScheduleEditor
-                            value={projectData.customSchedule}
-                            onChange={(newSchedule) => setProjectData({ ...projectData, customSchedule: newSchedule })}
-                          />
-                        </div>
-                      )}
-                    </div>
-              </div>
-            </WizardShell>
+            <ProjectInfoPage
+              theme={theme}
+              isDarkMode={isDarkMode}
+              setStep={setStep}
+              projectData={projectData}
+              setProjectData={setProjectData}
+              scheduleEditorRef={scheduleEditorRef}
+            />
           )}
 
           {/* STEP: 신재생 & 에너지 설비 */}
           {step === 'renewable' && (
-            <WizardShell
-              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
-              icon={<Sun size={32} />}
-              title="신재생 에너지 & 설비"
-              subtitle="태양광·지열·난방 열원·설비 교체 여부를 설정하세요."
-              back="projectInfo" next="budget"
-            >
-              <div className={`p-8 rounded-[2rem] border ${theme.card} border-blue-500/20`}>
-                    <div className="space-y-6">
-                      <div>
-                        <label className={`flex justify-between items-center text-sm font-black mb-3 ${theme.textMain}`}>
-                          <span className="flex items-center gap-2">
-                            <Sun className="text-yellow-500" size={16} /> 태양광(PV) 패널 설치 용량
-                          </span>
-                          <span className="text-[#c2734a] bg-[#c2734a]/10 px-3 py-1 rounded-lg text-[11px] uppercase tracking-widest">
-                            {projectData.pvCapacity} kW
-                          </span>
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="5"
-                          value={projectData.pvCapacity}
-                          onChange={(e) => setProjectData({ ...projectData, pvCapacity: parseInt(e.target.value) })}
-                          className="w-full h-3 rounded-full appearance-none accent-[#c2734a] bg-[#dccfbb] cursor-pointer"
-                        />
-                      </div>
-
-                      {/* 난방 열원 선택 — 요금·1차에너지·CO2가 열원별로 달라짐 */}
-                      <div>
-                        <label className={`flex items-center gap-2 text-sm font-black mb-3 ${theme.textMain}`}>
-                          <Flame className="text-orange-500" size={16} /> 난방 열원 (Heating Source)
-                        </label>
-                        <select
-                          value={projectData.heatSource}
-                          onChange={(e) => setProjectData({ ...projectData, heatSource: parseInt(e.target.value) })}
-                          disabled={projectData.geothermalApplied}
-                          className={`w-full p-3 text-sm font-bold rounded-xl border outline-none ${theme.input} focus:border-orange-500 ${projectData.geothermalApplied ? 'opacity-40 cursor-not-allowed' : ''}`}
-                        >
-                          {FUEL_TYPES.map((f) => (
-                            <option key={f.id} value={f.id}>{f.name}</option>
-                          ))}
-                        </select>
-                        <p className="text-[10px] opacity-60 mt-1">
-                          {projectData.geothermalApplied
-                            ? '지열 적용 시 난방은 전기(히트펌프)로 계산됩니다.'
-                            : '열원에 따라 난방 요금·1차에너지·CO2 계수가 달라집니다.'}
-                        </p>
-                      </div>
-
-                      {/* 냉난방 실기기 등급/연식 — 시뮬레이션 기기 효율(COP)에 직접 반영 */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className={`flex items-center gap-2 text-sm font-black mb-3 ${theme.textMain}`}>
-                            <Wind className="text-cyan-500" size={16} /> 냉방기(에어컨) 등급·연식
-                          </label>
-                          <select
-                            value={projectData.hvacEquipment?.coolingGrade || 'grade3'}
-                            onChange={(e) => setProjectData((prev) => ({
-                              ...prev,
-                              hvacEquipment: { ...(prev.hvacEquipment || {}), coolingGrade: e.target.value },
-                            }))}
-                            className={`w-full p-3 text-sm font-bold rounded-xl border outline-none ${theme.input} focus:border-cyan-500`}
-                          >
-                            {COOLING_GRADES.map((g) => (
-                              <option key={g.id} value={g.id}>{g.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className={`flex items-center gap-2 text-sm font-black mb-3 ${theme.textMain}`}>
-                            <Flame className="text-rose-400" size={16} /> 난방기(보일러) 연식
-                          </label>
-                          <select
-                            value={projectData.hvacEquipment?.heatingAge || 'new'}
-                            onChange={(e) => setProjectData((prev) => ({
-                              ...prev,
-                              hvacEquipment: { ...(prev.hvacEquipment || {}), heatingAge: e.target.value },
-                            }))}
-                            className={`w-full p-3 text-sm font-bold rounded-xl border outline-none ${theme.input} focus:border-rose-400`}
-                          >
-                            {HEATING_AGES.map((a) => (
-                              <option key={a.id} value={a.id}>{a.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <p className="md:col-span-2 text-[10px] opacity-60 -mt-2">
-                          입력한 등급·연식이 시뮬레이션 기기 효율(COP)에 직접 반영됩니다.
-                          존별 냉방기 설치 여부·용량은 3D 편집 단계에서 조정할 수 있어요.
-                        </p>
-                      </div>
-
-                      {/* 자기참조 최하층 바닥의 경계조건 선택.
-                          익스포터가 지면 접촉 바닥을 SlabOnGrade 대신 자기참조 InteriorFloor 로
-                          내보낸 경우가 있는데, 그것이 실제 지면 접촉인지 단열 경계인지는
-                          파일만으로 판정할 수 없다. 해당 면이 있을 때만 노출한다. */}
-                      {zones.length > 0 && groundEligible.count > 0 && (
-                        <div
-                          className={`mb-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.promoteGroundFloors ? 'border-sky-500 bg-sky-500/10' : 'border-slate-500/30 bg-black/5'}`}
-                          onClick={() => setProjectData((prev) => ({ ...prev, promoteGroundFloors: !prev.promoteGroundFloors }))}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${projectData.promoteGroundFloors ? 'bg-sky-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
-                              <Layers size={18} />
-                            </div>
-                            <div>
-                              <span className={`block font-black text-sm ${projectData.promoteGroundFloors ? 'text-sky-500' : theme.textSub}`}>
-                                최하층 바닥을 지면 접촉으로 처리
-                              </span>
-                              <span className="text-[10px] opacity-60">
-                                대상 {groundEligible.count}개 면 · {groundEligible.area.toFixed(1)}㎡ ·
-                                끄면 단열 경계(열 이동 없음). 켜면 지면 열손실을 반영합니다.
-                                지하층·필로티·외기 노출 바닥이면 켜지 마세요.
-                              </span>
-                            </div>
-                          </div>
-                          {projectData.promoteGroundFloors ? (
-                            <ToggleRight size={32} className="text-sky-500" />
-                          ) : (
-                            <ToggleLeft size={32} className="text-slate-500" />
-                          )}
-                        </div>
-                      )}
-
-                      <div
-                        className={`p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.geothermalApplied ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-500/30 bg-black/5'}`}
-                        onClick={() => setProjectData((prev) => ({ ...prev, geothermalApplied: !prev.geothermalApplied }))}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${projectData.geothermalApplied ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
-                            <Zap size={18} />
-                          </div>
-                          <div>
-                            <span className={`block font-black text-sm ${projectData.geothermalApplied ? 'text-emerald-500' : theme.textSub}`}>
-                              지열(Geothermal) 히트펌프 적용
-                            </span>
-                            <span className="text-[10px] opacity-60">냉난방 기기의 효율(COP)을 극대화합니다.</span>
-                          </div>
-                        </div>
-                        {projectData.geothermalApplied ? (
-                          <ToggleRight size={32} className="text-emerald-500" />
-                        ) : (
-                          <ToggleLeft size={32} className="text-slate-500" />
-                        )}
-                      </div>
-                      
-                      <div
-                        className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.hvacUpgradeActive ? 'border-orange-500 bg-orange-500/10' : 'border-slate-500/30 bg-black/5'}`}
-                        onClick={() => setProjectData((prev) => ({ ...prev, hvacUpgradeActive: !prev.hvacUpgradeActive }))}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${projectData.hvacUpgradeActive ? 'bg-orange-500 text-white' : 'bg-slate-600 text-slate-300'}`}>
-                            <Thermometer size={18} />
-                          </div>
-                          <div>
-                            <span className={`block font-black text-sm ${projectData.hvacUpgradeActive ? 'text-orange-500' : theme.textSub}`}>
-                              설비 시스템 전면 교체 (HVAC Upgrade)
-                            </span>
-                            <span className="text-[10px] opacity-60">기존 냉난방 설비의 노후화로 인해 기기를 완전히 교체할 경우 체크하세요. (공사비 증가)</span>
-                          </div>
-                        </div>
-                        {projectData.hvacUpgradeActive ? (
-                          <ToggleRight size={32} className="text-orange-500" />
-                        ) : (
-                          <ToggleLeft size={32} className="text-slate-500" />
-                        )}
-                      </div>
-                    </div>
-              </div>
-            </WizardShell>
+            <RenewablePage
+              theme={theme}
+              isDarkMode={isDarkMode}
+              setStep={setStep}
+              projectData={projectData}
+              setProjectData={setProjectData}
+              zones={zones}
+              groundEligible={groundEligible}
+            />
           )}
 
           {/* STEP: 목표 예산 & 기존 건물 사용량 */}
           {step === 'budget' && (
-            <WizardShell
-              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
-              icon={<PiggyBank size={32} />}
-              title="목표 예산 & 기존 건물 사용량"
-              subtitle="목표 공사비와, 리모델링 전 실제 사용량을 입력하세요."
-              back="renewable" next="financial"
-            >
-              <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
-                <div className="space-y-6">
-                      <div className="p-4 rounded-xl border-2 border-slate-500/30 bg-black/5">
-                        <label className="flex items-center justify-between mb-2">
-                          <span className={`font-black flex items-center gap-2 ${theme.textMain}`}>
-                            <PiggyBank className="text-pink-500" size={18} /> 목표 공사 예산 (단위: 만 원)
-                          </span>
-                          <span className="text-pink-500 bg-pink-500/10 px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest">
-                            {projectData.targetBudget === 0 ? '미설정 (제한없음)' : `${projectData.targetBudget.toLocaleString()} 만 원`}
-                          </span>
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="100"
-                          value={projectData.targetBudget || ''}
-                          placeholder="예: 5000 (5천만 원)"
-                          onChange={(e) => setProjectData({ ...projectData, targetBudget: parseInt(e.target.value) || 0 })}
-                          className={`w-full p-3 rounded-lg focus:ring-2 focus:ring-pink-500 outline-none transition-all font-mono font-bold ${theme.input}`}
-                        />
-                        <p className="text-[11px] opacity-60 mt-2">
-                          목표 예산을 설정하면, 시뮬레이션 결과에서 예산 초과 여부를 분석하고 비용 절감을 위한 대안(창호 등급 하향 등)을 추천해 드립니다.
-                        </p>
-                      </div>
-
-                      {/* 기존 건물 실측 운영비(선택) — 비우면 1.6배 추정으로 계산됨을 결과에 고지 */}
-                      <div>
-                        <label className={`flex items-center gap-2 text-sm font-black mb-2 ${theme.textMain}`}>
-                          <DollarSign className="text-emerald-500" size={16} /> 기존 건물 실제 사용량 (선택)
-                        </label>
-                        <p className="text-[10px] opacity-60 mb-3">
-                          리모델링 전 건물의 작년 값을 입력하면 절감액·NPV·IRR을 실측 기준으로 계산합니다.
-                          비워두면 <b>리모델링 후 운영비의 1.6배</b>로 추정합니다.
-                        </p>
-                        <div className="flex gap-2 mb-3">
-                          {[{ k: 'bill', t: '연간 요금(원)' }, { k: 'usage', t: '연간 사용량(kWh)' }].map((m) => (
-                            <button
-                              key={m.k}
-                              type="button"
-                              onClick={() => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, mode: m.k } }))}
-                              className={`flex-1 py-2 text-xs font-black rounded-lg border-2 transition-all ${projectData.baselineActual.mode === m.k ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : 'border-slate-500/30 opacity-60'}`}
-                            >
-                              {m.t}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {(projectData.baselineActual.mode === 'bill'
-                            ? [{ f: 'elecBill', t: '전기요금 (원/년)' }, { f: 'heatBill', t: '난방요금 (원/년)' }]
-                            : [{ f: 'elecKwh', t: '전기 (kWh/년)' }, { f: 'heatKwh', t: '난방 (kWh/년)' }]
-                          ).map((x) => (
-                            <div key={x.f}>
-                              <span className="text-[10px] opacity-70 block mb-1">{x.t}</span>
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="미입력 시 추정"
-                                value={projectData.baselineActual[x.f]}
-                                onChange={(e) => setProjectData((p) => ({ ...p, baselineActual: { ...p.baselineActual, [x.f]: e.target.value } }))}
-                                className={`w-full p-2.5 text-sm font-bold rounded-lg border outline-none ${theme.input} focus:border-emerald-500`}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                </div>
-              </div>
-            </WizardShell>
+            <BudgetPage
+              theme={theme}
+              isDarkMode={isDarkMode}
+              setStep={setStep}
+              projectData={projectData}
+              setProjectData={setProjectData}
+            />
           )}
 
           {/* STEP: 재무 분석 설정 (LCC) */}
           {step === 'financial' && (
-            <WizardShell
-              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
-              icon={<Calculator size={32} />}
-              title="재무 분석 설정 (LCC)"
-              subtitle="할인율·물가상승률·수명주기 기간을 설정합니다. (기본값 권장)"
-              back="budget" next="buildingView" nextLabel="3D 모델 렌더링"
-            >
-              <div className={`p-8 rounded-[2rem] border ${theme.card}`}>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>인플레이션율 (%)</label>
-                            <input
-                              type="number" step="0.1"
-                              value={projectData.lccParameters.inflationRate}
-                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, inflationRate: parseFloat(e.target.value) || 0 } })}
-                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
-                            />
-                          </div>
-                          <div>
-                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>에너지 요금 상승률 (%)</label>
-                            <input
-                              type="number" step="0.1"
-                              value={projectData.lccParameters.utilityInflation}
-                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, utilityInflation: parseFloat(e.target.value) || 0 } })}
-                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
-                            />
-                          </div>
-                          <div>
-                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>할인율 (기대수익률, %)</label>
-                            <input
-                              type="number" step="0.1"
-                              value={projectData.lccParameters.discountRate}
-                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, discountRate: parseFloat(e.target.value) || 0 } })}
-                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
-                            />
-                          </div>
-                          <div>
-                            <label className={`block text-xs font-bold mb-1 opacity-70 ${theme.textMain}`}>수명주기 분석 기간 (년)</label>
-                            <input
-                              type="number" step="1" min="5" max="50"
-                              value={projectData.lccParameters.lifecycleYears}
-                              onChange={(e) => setProjectData({ ...projectData, lccParameters: { ...projectData.lccParameters, lifecycleYears: parseInt(e.target.value) || 20 } })}
-                              className={`w-full p-2 rounded-lg outline-none font-mono font-bold ${theme.input}`}
-                            />
-                          </div>
-                          <p className="col-span-1 md:col-span-2 text-[10px] opacity-60 mt-1">
-                            수명주기비용(LCC) 분석 모형에 따라 각 항목별 물가상승률을 복리로 적용하여 순현재가치(NPV) 및 내부수익률(IRR)을 계산합니다.
-                          </p>
-                        </div>
-              </div>
-            </WizardShell>
+            <FinancialPage
+              theme={theme}
+              isDarkMode={isDarkMode}
+              setStep={setStep}
+              projectData={projectData}
+              setProjectData={setProjectData}
+            />
           )}
 
           {/* STEP 1.5: Parsing gbXML */}
