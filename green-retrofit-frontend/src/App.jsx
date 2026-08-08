@@ -69,6 +69,11 @@ import { buildSimulationPayload } from './utils/simulationPayload';
 import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { createInitialProjectData } from './data/initialProject';
+import { calculateSurfaceArea } from './utils/geometry';
+import {
+  FALLBACK_ZONE_AREA, deriveFloorEditorModel,
+  isVirtualFloor as isVirtualFloorPure,
+} from './state/floorEditorModel';
 import {
   AppAction, appReducer, initialAppState, toEdit, toExec, toModel,
 } from './state/appReducer';
@@ -323,36 +328,20 @@ export default function App() {
     }
   };
 
-  const availableFloors = Array.from(
-    new Set([...surfaces.map((s) => s.floor || 1), ...zones.map((z) => z.floor || 1)])
-  ).sort((a, b) => a - b);
-  const displayFloors = availableFloors.length > 0 ? availableFloors : [1, 2, 3];
+  // 파생값은 `state/floorEditorModel.js` 가 낸다 — 화면 없이 시험할 수 있어야 한다.
+  // ⚠️ `useMemo` 는 여기(호출부)에서 건다. 입력 참조를 전부 dependency 에 넣어야
+  // 하는데 그건 selector 가 아니라 여기만 안다.
+  const floorEditorModel = React.useMemo(
+    () => deriveFloorEditorModel({ surfaces, zones, realFloorCount, edit }),
+    [surfaces, zones, realFloorCount, edit],
+  );
+  const { zoneFloorAreaById, displayFloors, selectedSurfaceData } = floorEditorModel;
 
   const selectedRegion = KOREA_REGIONS.flatMap(g => g.options).find(opt => opt.id === projectData.location) || { name: '서울특별시 (Seoul)' };
   const latitude = REGION_LATITUDES[projectData.location] || 37.56;
   // 가상 층 판별: floor 번호가 실제 층 수보다 크면 특수 공간(창고, 샤프트 등)
-  const isVirtualFloor = (f) => realFloorCount > 0 && f > realFloorCount;
+  const isVirtualFloor = (f) => isVirtualFloorPure(f, realFloorCount);
 
-  const calculateSurfaceArea = (vertices) => {
-    if (!vertices || vertices.length < 3) return 0;
-    let area = 0;
-    const v0 = vertices[0];
-    for (let i = 1; i < vertices.length - 1; i++) {
-      const v1 = vertices[i];
-      const v2 = vertices[i + 1];
-      const ux = v1[0] - v0[0];
-      const uy = v1[1] - v0[1];
-      const uz = v1[2] - v0[2];
-      const vx = v2[0] - v0[0];
-      const vy = v2[1] - v0[1];
-      const vz = v2[2] - v0[2];
-      const cx = uy * vz - uz * vy;
-      const cy = uz * vx - ux * vz;
-      const cz = ux * vy - uy * vx;
-      area += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
-    }
-    return area;
-  };
 
   // 지면 승격 대상 — 백엔드(ep_simulator)의 승격 조건과 **동일한 식**을 써야 한다.
   //   selfAdjacent && 타입에 'floor' && 모든 꼭짓점 Z ≈ 0
@@ -370,22 +359,9 @@ export default function App() {
     };
   }, [surfaces]);
 
-  const getZoneFloorArea = (zoneId) => {
-    // 백엔드와 같은 기준을 써야 한다. 백엔드는 gbXML 선언 면적(declaredArea)을 우선하는데
-    // 여기서 기하 합산을 쓰면 화면과 시뮬레이션이 갈린다 — 층간 슬래브가 아래층 존에
-    // 바닥·천장으로 이중 계산돼 104 존이 프론트 223.22㎡ / 백엔드 107.22㎡ 로 2배 차이났다.
-    // 유효성 기준을 백엔드(gbxml_parser: 유한한 양수)와 반드시 같게 둔다.
-    // 임계값이 어긋나면 그 사이 면적의 존에서 화면과 시뮬레이션이 또 갈린다.
-    const zone = zones.find((z) => z.id === zoneId);
-    const declared = Number(zone?.declaredArea ?? zone?.area ?? 0);
-    if (Number.isFinite(declared) && declared > 0) return declared;
-
-    const zoneSurfaces = surfaces.filter(
-      (s) => s.zone === zoneId && s.type && (s.type.toLowerCase().includes('floor') || s.type.toLowerCase().includes('slab'))
-    );
-    const areaSum = zoneSurfaces.reduce((acc, s) => acc + calculateSurfaceArea(s.vertices), 0);
-    return areaSum >= 1.0 ? areaSum : 100.0;
-  };
+  // ⚠️ 존마다 면을 filter 하던 것을 **한 번의 순회**로 만든 map 조회로 바꿨다.
+  // 값 산정 규칙(선언 면적 우선, 백엔드와 동일 임계값)은 selector 가 지킨다.
+  const getZoneFloorArea = (zoneId) => zoneFloorAreaById[zoneId] ?? FALLBACK_ZONE_AREA;
 
 
   const getSampleVerts = (w, h, pos, rot) => {
@@ -709,7 +685,6 @@ export default function App() {
     pieBg: isDarkMode ? 'rgba(255,255,255,0.05)' : '#eae1d3',
   };
 
-  const selectedSurfaceData = editMode === 'surface' ? surfaces.find((s) => s.id === selectedId) : null;
 
   // 동적 창호 드롭다운 처리 로직
   const currentGlazing =
