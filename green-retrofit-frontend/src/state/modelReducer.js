@@ -10,7 +10,11 @@
 import { mapZones } from '../utils/parseResponse';
 
 export const initialModelState = {
+  //: **성공적으로 실린** 모델의 파일. 파싱 시도 중인 파일과 구분한다.
   uploadedFile: null,
+  //: 지금 파싱을 시도 중인(또는 실패한) 파일. ⚠️ 이걸 `uploadedFile` 과 섞으면
+  //: 실패한 파일이 업로드 화면에서 **성공한 것처럼** 보인다.
+  parsingFile: null,
   uploadError: null,
   surfaces: [],
   zones: [],
@@ -30,6 +34,8 @@ export const ModelAction = {
   SAMPLE_LOADED: 'SAMPLE_LOADED',
   MODEL_RESET: 'MODEL_RESET',
   WARNINGS_DISMISSED: 'WARNINGS_DISMISSED',
+  CONSTRUCTION_OVERRIDE_APPLIED: 'CONSTRUCTION_OVERRIDE_APPLIED',
+  CONSTRUCTION_OVERRIDE_RESET: 'CONSTRUCTION_OVERRIDE_RESET',
   SURFACES_CHANGED: 'SURFACES_CHANGED',
   ZONES_CHANGED: 'ZONES_CHANGED',
   OVERRIDES_CHANGED: 'OVERRIDES_CHANGED',
@@ -43,34 +49,36 @@ function resolve(next, current) {
 export function modelReducer(state, action) {
   switch (action.type) {
     case ModelAction.PARSE_STARTED:
-      // ⚠️ 이전 모델의 재료·override 를 여기서 지운다. 안 지우면 새 건물에
-      // 옛 구성체가 붙어 U 값이 엉뚱해진다.
-      return {
-        ...state,
-        uploadedFile: action.file,
-        uploadError: null,
-        materials: null,
-        constructionOverrides: {},
-      };
+      // ⚠️ **현재 성공 모델은 건드리지 않는다.** 예전엔 여기서 재료·override 를
+      // 지웠는데, 파싱이 실패하면 이전 모델이 **재료 없는 반쪽**으로 남았다.
+      // 교체는 성공했을 때(`PARSE_SUCCEEDED`) 한 번에 한다.
+      return { ...state, parsingFile: action.file, uploadError: null };
 
     case ModelAction.PARSE_SUCCEEDED: {
       const surfaces = action.surfaces || [];
       const zones = mapZones(action.zones);
+      // ⚠️ 모델 관련 키를 **전부** 교체한다. `...state` 로 흘려보내면 이전 모델의
+      // 잔여물(재료·override·경고·층수)이 새 건물에 섞인다.
       return {
         ...state,
+        uploadedFile: action.file ?? state.parsingFile,
+        parsingFile: null,
+        uploadError: null,
         surfaces,
         zones,
         // 원본과 현재를 **같은 순간에** 채운다 — 따로 두면 기준선이 어긋난다.
         originalModel: { zones, surfaces },
         materials: action.materials ?? null,
+        constructionOverrides: {},
         gapWarnings: action.warnings || [],
         realFloorCount: action.floorLevels ?? initialModelState.realFloorCount,
-        uploadError: null,
       };
     }
 
     case ModelAction.PARSE_FAILED:
-      // ⚠️ 실패해도 `uploadedFile` 은 남긴다 — 어떤 파일이 실패했는지 보여야 한다.
+      // ⚠️ **성공했던 모델을 통째로 보존한다.** 실패한 파일은 `parsingFile` 에
+      // 남아 있어 무엇이 실패했는지 알 수 있고, `uploadedFile` 은 여전히 이전
+      // 성공 파일을 가리킨다 — 실패한 파일이 성공한 것처럼 보이면 안 된다.
       return { ...state, uploadError: action.message };
 
     case ModelAction.SAMPLE_LOADED: {
@@ -79,6 +87,7 @@ export function modelReducer(state, action) {
       return {
         ...state,
         uploadedFile: action.file ?? { name: 'Sample_Building_V1.xml' },
+        parsingFile: null,
         uploadError: null,
         surfaces,
         zones,
@@ -86,6 +95,9 @@ export function modelReducer(state, action) {
         materials: action.materials ?? null,
         constructionOverrides: {},
         gapWarnings: [],
+        // ⚠️ 층수도 **반드시 교체**한다. `...state` 로 남기면 이전 건물의 층수로
+        // 가상층을 판정한다 — 파싱 실패 화면에서 바로 샘플로 갈 수 있어 실제 경로다.
+        realFloorCount: action.floorLevels ?? initialModelState.realFloorCount,
       };
     }
 
@@ -95,6 +107,33 @@ export function modelReducer(state, action) {
 
     case ModelAction.WARNINGS_DISMISSED:
       return { ...state, gapWarnings: [] };
+
+    case ModelAction.CONSTRUCTION_OVERRIDE_APPLIED:
+      // ⚠️ override 와 면의 U 값을 **한 번에** 바꾼다. 예전에는
+      // `setConstructionOverrides(prev => ...)` 의 갱신함수 **안에서**
+      // `setSurfaces`·`setEditState` 를 불렀다. reducer 로 옮기면서 그 함수가
+      // reducer 안에서 실행되게 되어 **순수하지 않은 reducer** 가 됐다.
+      return {
+        ...state,
+        constructionOverrides: {
+          ...state.constructionOverrides,
+          [action.surfaceId]: action.override,
+        },
+        surfaces: action.uValue == null ? state.surfaces : state.surfaces.map(
+          (s) => (s.id === action.surfaceId ? { ...s, uValue: action.uValue } : s)),
+      };
+
+    case ModelAction.CONSTRUCTION_OVERRIDE_RESET: {
+      const rest = { ...state.constructionOverrides };
+      delete rest[action.surfaceId];
+      return {
+        ...state,
+        constructionOverrides: rest,
+        // 원본 U 값 복원도 같은 전이에서 한다.
+        surfaces: action.uValue == null ? state.surfaces : state.surfaces.map(
+          (s) => (s.id === action.surfaceId ? { ...s, uValue: action.uValue } : s)),
+      };
+    }
 
     case ModelAction.SURFACES_CHANGED:
       return { ...state, surfaces: resolve(action.surfaces, state.surfaces) };

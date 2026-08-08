@@ -228,78 +228,64 @@ export default function App() {
   };
 
   const handleConstructionOverrideChange = (surfaceId, constructionId, overrideUpdate) => {
-    setConstructionOverrides(prev => {
-      const current = prev[surfaceId] || {};
-      const next = { ...current, ...overrideUpdate };
+    // ⚠️ 예전에는 `setConstructionOverrides(prev => ...)` 의 **갱신함수 안에서**
+    // `setSurfaces`·`setEditState` 를 불렀다. reducer 로 옮기면 그 함수가 reducer
+    // 안에서 실행돼 **순수하지 않은 reducer** 가 된다(codex 지적).
+    // 다음 override 를 먼저 계산한 뒤, 의미 있는 action 하나로 커밋한다.
+    const current = constructionOverrides[surfaceId] || {};
+    const next = { ...current, ...overrideUpdate };
 
-      // 제품 변경에 따른 기본 두께 적용 로직
-      if (overrideUpdate.isCustom) {
-        if (overrideUpdate.outerId && overrideUpdate.outerId !== current.outerId) {
-          next.outerThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.outerId)?.defaultThickness || 10;
-        }
-        if (overrideUpdate.coreId && overrideUpdate.coreId !== current.coreId) {
-          next.coreThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.coreId)?.defaultThickness || 150;
-        }
-        if (overrideUpdate.innerId && overrideUpdate.innerId !== current.innerId) {
-          next.innerThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.innerId)?.defaultThickness || 10;
-        }
-        if (overrideUpdate.insulId && overrideUpdate.insulId !== current.insulId) {
-          next.insulThick = INSULATION_TYPES.find(m => m.id === overrideUpdate.insulId)?.defaultThickness || 100;
-        }
-      } else if (overrideUpdate.insulationId && overrideUpdate.insulationId !== current.insulationId) {
-        // 단열재 단독 교체 모드일 경우
-        const product = INSULATION_TYPES.find(p => p.id === overrideUpdate.insulationId);
-        next.tier = product ? product.tier : 'standard';
-        if (overrideUpdate.thickness === undefined) {
-          next.thickness = product?.defaultThickness || 100;
-        }
+    // 제품 변경에 따른 기본 두께 적용 로직
+    if (overrideUpdate.isCustom) {
+      if (overrideUpdate.outerId && overrideUpdate.outerId !== current.outerId) {
+        next.outerThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.outerId)?.defaultThickness || 10;
       }
+      if (overrideUpdate.coreId && overrideUpdate.coreId !== current.coreId) {
+        next.coreThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.coreId)?.defaultThickness || 150;
+      }
+      if (overrideUpdate.innerId && overrideUpdate.innerId !== current.innerId) {
+        next.innerThick = STRUCTURAL_MATERIALS.find(m => m.id === overrideUpdate.innerId)?.defaultThickness || 10;
+      }
+      if (overrideUpdate.insulId && overrideUpdate.insulId !== current.insulId) {
+        next.insulThick = INSULATION_TYPES.find(m => m.id === overrideUpdate.insulId)?.defaultThickness || 100;
+      }
+    } else if (overrideUpdate.insulationId && overrideUpdate.insulationId !== current.insulationId) {
+      // 단열재 단독 교체 모드일 경우
+      const product = INSULATION_TYPES.find(p => p.id === overrideUpdate.insulationId);
+      next.tier = product ? product.tier : 'standard';
+      if (overrideUpdate.thickness === undefined) {
+        next.thickness = product?.defaultThickness || 100;
+      }
+    }
 
-      // 선택한 개별 서피스(Surface)에만 U-value 동적 재계산 반영
-      const constr = materials?.constructions?.find(c => c.id === constructionId);
-      if (constr) {
-        const newU = calculateUpdatedUValue(constr, next);
-        next.uValue = newU; // 백엔드로 전달하기 위해 override 객체에 저장
-        
-        setSurfaces(prevSurfaces =>
-          prevSurfaces.map(s =>
-            (s.id === surfaceId) ? { ...s, uValue: newU } : s
-          )
-        );
-        
-        // 🔥 현재 편집 중인 서피스의 U-Value도 업데이트 (저장 시 덮어쓰기 방지 및 슬라이더 연동)
-        setEditState(prevEdit => {
-          if (selectedId === surfaceId) {
-            return { ...prevEdit, uValue: newU };
-          }
-          return prevEdit;
-        });
-      }
-      return { ...prev, [surfaceId]: next };
+    // 선택한 개별 서피스(Surface)에만 U-value 동적 재계산 반영
+    const constr = materials?.constructions?.find(c => c.id === constructionId);
+    const newU = constr ? calculateUpdatedUValue(constr, next) : null;
+    if (newU != null) {
+      next.uValue = newU;   // 백엔드로 전달하기 위해 override 객체에 저장
+    }
+
+    dispatchModel({
+      type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+      surfaceId, override: next, uValue: newU,
     });
+
+    // 편집 중인 면의 슬라이더도 따라가야 한다(저장 시 덮어쓰기 방지).
+    // ⚠️ 편집 상태는 **다른 상태 묶음**이라 여기서 따로 갱신한다.
+    if (newU != null && selectedId === surfaceId) {
+      setEditState(prevEdit => ({ ...prevEdit, uValue: newU }));
+    }
   };
 
   const handleResetInsulationOverride = (surfaceId, constructionId) => {
-    const newOverrides = { ...constructionOverrides };
-    delete newOverrides[surfaceId];
-    setConstructionOverrides(newOverrides);
-
-    // 원본 U-value 복원
+    // 원본 U-value 복원까지 같은 전이에서 한다.
     const constr = materials?.constructions?.find(c => c.id === constructionId);
-    if (constr) {
-      const origU = constr.uValue;
-      setSurfaces(prevSurfaces =>
-        prevSurfaces.map(s =>
-          (s.id === surfaceId) ? { ...s, uValue: origU } : s
-        )
-      );
-      
-      setEditState(prevEdit => {
-        if (selectedId === surfaceId) {
-          return { ...prevEdit, uValue: origU };
-        }
-        return prevEdit;
-      });
+    dispatchModel({
+      type: ModelAction.CONSTRUCTION_OVERRIDE_RESET,
+      surfaceId, uValue: constr ? constr.uValue : null,
+    });
+    if (constr && selectedId === surfaceId) {
+      setEditState(prevEdit => ({ ...prevEdit, uValue: constr.uValue }));
     }
   };
 
@@ -514,6 +500,8 @@ export default function App() {
     dispatchModel({
       type: ModelAction.SAMPLE_LOADED, surfaces: newSurfaces, zones: newZones,
       materials: sampleMaterials,
+      // ⚠️ 층수를 안 넘기면 이전 건물의 층수로 가상층을 판정한다
+      floorLevels: floors,
     });
 
 

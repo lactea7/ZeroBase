@@ -24,17 +24,20 @@ const loaded = () => act(initialModelState, {
 // ── 파싱 시작 ────────────────────────────────────────────
 
 describe('PARSE_STARTED', () => {
-  it('어떤 파일을 올렸는지 기록한다', () => {
+  it('시도 중인 파일을 기록한다', () => {
     expect(act(initialModelState, { type: ModelAction.PARSE_STARTED, file: FILE })
-      .uploadedFile).toBe(FILE);
+      .parsingFile).toBe(FILE);
   });
 
-  it('⚠️ 이전 재료·override 를 지운다', () => {
-    // 안 지우면 새 건물에 옛 구성체가 붙어 U 값이 엉뚱해진다
-    const dirty = { ...loaded(), constructionOverrides: { S1: { tier: 'high' } } };
-    const next = act(dirty, { type: ModelAction.PARSE_STARTED, file: FILE });
-    expect(next.materials).toBeNull();
-    expect(next.constructionOverrides).toEqual({});
+  it('⚠️ 현재 성공 모델을 건드리지 않는다', () => {
+    // 예전엔 여기서 재료·override 를 지웠는데, 파싱이 실패하면 이전 모델이
+    // **재료 없는 반쪽**으로 남았다. 교체는 성공했을 때 한 번에 한다.
+    const base = { ...loaded(), constructionOverrides: { S1: { tier: 'high' } } };
+    const next = act(base, { type: ModelAction.PARSE_STARTED, file: FILE });
+    expect(next.materials).toEqual(base.materials);
+    expect(next.constructionOverrides).toEqual(base.constructionOverrides);
+    expect(next.surfaces).toEqual(base.surfaces);
+    expect(next.uploadedFile).toBe(base.uploadedFile);
   });
 
   it('이전 오류를 지운다', () => {
@@ -99,14 +102,29 @@ describe('PARSE_FAILED', () => {
 
   it('⚠️ 어떤 파일이 실패했는지 남긴다', () => {
     const started = act(initialModelState, { type: ModelAction.PARSE_STARTED, file: FILE });
-    expect(act(started, { type: ModelAction.PARSE_FAILED, message: 'x' }).uploadedFile).toBe(FILE);
+    expect(act(started, { type: ModelAction.PARSE_FAILED, message: 'x' }).parsingFile).toBe(FILE);
   });
 
-  it('⚠️ 이전에 성공한 모델을 지우지 않는다', () => {
-    // 재업로드가 실패했다고 이미 편집하던 모델을 날리면 안 된다
-    const s = act(loaded(), { type: ModelAction.PARSE_FAILED, message: 'x' });
-    expect(s.surfaces).toEqual(SURFACES);
-    expect(s.originalModel).not.toBeNull();
+  it('⚠️ 실패한 파일이 성공한 것처럼 보이지 않는다', () => {
+    // `uploadedFile` 은 **성공적으로 실린** 모델의 파일이다. 실패한 새 파일을
+    // 여기에 넣으면 업로드 화면이 그 파일을 정상 로드된 것처럼 보여준다.
+    const base = loaded();
+    const started = act(base, { type: ModelAction.PARSE_STARTED, file: FILE });
+    const failed = act(started, { type: ModelAction.PARSE_FAILED, message: 'x' });
+    expect(failed.uploadedFile).toBe(base.uploadedFile);
+    expect(failed.uploadedFile).not.toBe(FILE);
+  });
+
+  it('⚠️ 이전에 성공한 모델을 **통째로** 보존한다', () => {
+    // 재업로드가 실패했다고 편집하던 모델을 반쪽으로 만들면 안 된다
+    const base = { ...loaded(), constructionOverrides: { S1: { tier: 'high' } } };
+    const started = act(base, { type: ModelAction.PARSE_STARTED, file: FILE });
+    const failed = act(started, { type: ModelAction.PARSE_FAILED, message: 'x' });
+    expect(failed.surfaces).toEqual(SURFACES);
+    expect(failed.materials).toEqual(base.materials);
+    expect(failed.constructionOverrides).toEqual(base.constructionOverrides);
+    expect(failed.originalModel).toEqual(base.originalModel);
+    expect(failed.realFloorCount).toBe(base.realFloorCount);
   });
 });
 
@@ -207,5 +225,136 @@ describe('불변성', () => {
     const snapshot = JSON.parse(JSON.stringify(before));
     act(before, { type, file: FILE, message: 'x' });
     expect(JSON.parse(JSON.stringify(before))).toEqual(snapshot);
+  });
+});
+
+// ── 성공 시 완전 교체 ────────────────────────────────────
+
+describe('PARSE_SUCCEEDED 가 이전 모델을 남기지 않는다', () => {
+  it('⚠️ override 를 초기화한다', () => {
+    // 새 건물에 옛 면 id 로 걸린 override 가 남으면 U 값이 엉뚱해진다
+    const dirty = { ...loaded(), constructionOverrides: { S1: { tier: 'high' } } };
+    expect(act(dirty, { type: ModelAction.PARSE_SUCCEEDED, surfaces: [], zones: [] })
+      .constructionOverrides).toEqual({});
+  });
+
+  it('⚠️ 재료를 교체한다 (새 응답에 없으면 비운다)', () => {
+    expect(act(loaded(), { type: ModelAction.PARSE_SUCCEEDED, surfaces: [], zones: [] })
+      .materials).toBeNull();
+  });
+
+  it('⚠️ 층수를 교체한다', () => {
+    expect(act(loaded(), { type: ModelAction.PARSE_SUCCEEDED, surfaces: [], zones: [] })
+      .realFloorCount).toBe(initialModelState.realFloorCount);
+  });
+
+  it('시도 중이던 파일이 성공 파일이 된다', () => {
+    const started = act(initialModelState, { type: ModelAction.PARSE_STARTED, file: FILE });
+    const ok = act(started, { type: ModelAction.PARSE_SUCCEEDED, surfaces: [], zones: [] });
+    expect(ok.uploadedFile).toBe(FILE);
+    expect(ok.parsingFile).toBeNull();
+  });
+});
+
+describe('SAMPLE_LOADED 가 이전 건물 잔여물을 남기지 않는다', () => {
+  it('⚠️ 층수를 교체한다 — 파싱 실패 화면에서 바로 샘플로 갈 수 있다', () => {
+    const s = act(loaded(), {
+      type: ModelAction.SAMPLE_LOADED, surfaces: [], zones: [], floorLevels: 5,
+    });
+    expect(s.realFloorCount).toBe(5);
+  });
+
+  it('층수를 안 주면 초기값으로 돌린다 (이전 건물 값이 아니라)', () => {
+    expect(act(loaded(), { type: ModelAction.SAMPLE_LOADED, surfaces: [], zones: [] })
+      .realFloorCount).toBe(initialModelState.realFloorCount);
+  });
+});
+
+// ── 구성체 override ──────────────────────────────────────
+// ⚠️ 예전에는 `setConstructionOverrides(prev => ...)` 의 갱신함수 **안에서**
+// `setSurfaces`·`setEditState` 를 불렀다. reducer 로 옮기면 그 함수가 reducer 안에서
+// 실행돼 **순수하지 않은 reducer** 가 된다(codex 지적). 의미 있는 action 으로 바꿨다.
+
+describe('CONSTRUCTION_OVERRIDE_APPLIED', () => {
+  it('override 와 면 U 값을 한 번에 바꾼다', () => {
+    const s = act(loaded(), {
+      type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+      surfaceId: 'S1', override: { tier: 'high', uValue: 0.24 }, uValue: 0.24,
+    });
+    expect(s.constructionOverrides.S1.tier).toBe('high');
+    expect(s.surfaces[0].uValue).toBe(0.24);
+  });
+
+  it('U 값이 없으면 면을 건드리지 않는다 (구성체를 못 찾은 경우)', () => {
+    const base = loaded();
+    const s = act(base, {
+      type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+      surfaceId: 'S1', override: { tier: 'high' },
+    });
+    expect(s.surfaces).toBe(base.surfaces);
+  });
+
+  it('다른 면은 건드리지 않는다', () => {
+    const base = { ...loaded(), surfaces: [{ id: 'S1', uValue: 1 }, { id: 'S2', uValue: 2 }] };
+    const s = act(base, {
+      type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+      surfaceId: 'S1', override: {}, uValue: 0.3,
+    });
+    expect(s.surfaces[1].uValue).toBe(2);
+  });
+});
+
+describe('CONSTRUCTION_OVERRIDE_RESET', () => {
+  it('override 를 지우고 원본 U 값을 되돌린다', () => {
+    const withOv = act(loaded(), {
+      type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+      surfaceId: 'S1', override: { tier: 'high' }, uValue: 0.24,
+    });
+    const s = act(withOv, {
+      type: ModelAction.CONSTRUCTION_OVERRIDE_RESET, surfaceId: 'S1', uValue: 0.8,
+    });
+    expect(s.constructionOverrides.S1).toBeUndefined();
+    expect(s.surfaces[0].uValue).toBe(0.8);
+  });
+
+  it('다른 면의 override 는 남는다', () => {
+    let s = loaded();
+    for (const id of ['S1', 'S2']) {
+      s = act(s, { type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+                   surfaceId: id, override: { tier: 'high' } });
+    }
+    s = act(s, { type: ModelAction.CONSTRUCTION_OVERRIDE_RESET, surfaceId: 'S1' });
+    expect(s.constructionOverrides.S2).toBeDefined();
+  });
+});
+
+// ── 불변성 (전 action) ───────────────────────────────────
+// ⚠️ 예전 시험은 일부 action 만 봤다. **모든 action** 을 얼린 입력으로 돌린다.
+
+function deepFreeze(o) {
+  Object.getOwnPropertyNames(o).forEach((k) => {
+    const v = o[k];
+    if (v && typeof v === 'object') deepFreeze(v);
+  });
+  return Object.freeze(o);
+}
+
+describe('모든 action 이 입력을 변형하지 않는다', () => {
+  it.each([
+    [ModelAction.PARSE_STARTED, { file: FILE }],
+    [ModelAction.PARSE_SUCCEEDED, { surfaces: SURFACES, zones: ZONES, floorLevels: 2 }],
+    [ModelAction.PARSE_FAILED, { message: 'x' }],
+    [ModelAction.SAMPLE_LOADED, { surfaces: SURFACES, zones: ZONES }],
+    [ModelAction.MODEL_RESET, {}],
+    [ModelAction.WARNINGS_DISMISSED, {}],
+    [ModelAction.SURFACES_CHANGED, { surfaces: [] }],
+    [ModelAction.ZONES_CHANGED, { zones: [] }],
+    [ModelAction.OVERRIDES_CHANGED, { overrides: {} }],
+    [ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
+     { surfaceId: 'S1', override: { tier: 'high' }, uValue: 0.3 }],
+    [ModelAction.CONSTRUCTION_OVERRIDE_RESET, { surfaceId: 'S1', uValue: 0.8 }],
+  ])('%s', (type, payload) => {
+    const frozen = deepFreeze(loaded());
+    expect(() => modelReducer(frozen, { type, ...payload })).not.toThrow();
   });
 });
