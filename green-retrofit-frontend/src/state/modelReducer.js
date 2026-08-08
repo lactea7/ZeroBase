@@ -34,6 +34,8 @@ export const ModelAction = {
   SAMPLE_LOADED: 'SAMPLE_LOADED',
   MODEL_RESET: 'MODEL_RESET',
   WARNINGS_DISMISSED: 'WARNINGS_DISMISSED',
+  SURFACE_EDIT_COMMITTED: 'SURFACE_EDIT_COMMITTED',
+  ZONE_EDIT_COMMITTED: 'ZONE_EDIT_COMMITTED',
   CONSTRUCTION_OVERRIDE_APPLIED: 'CONSTRUCTION_OVERRIDE_APPLIED',
   CONSTRUCTION_OVERRIDE_RESET: 'CONSTRUCTION_OVERRIDE_RESET',
   SURFACES_CHANGED: 'SURFACES_CHANGED',
@@ -107,6 +109,33 @@ export function modelReducer(state, action) {
 
     case ModelAction.WARNINGS_DISMISSED:
       return { ...state, gapWarnings: [] };
+
+    case ModelAction.SURFACE_EDIT_COMMITTED:
+      return {
+        ...state,
+        surfaces: state.surfaces.map(
+          (s) => (s.id === action.surfaceId ? { ...s, ...action.patch } : s)),
+      };
+
+    case ModelAction.ZONE_EDIT_COMMITTED: {
+      // ⚠️ 일괄 적용은 **화이트리스트 필드만** 복사한다. 존 전체를 복사하면
+      // 위치·면적·id 같은 고유 정보까지 덮어써 다른 존이 통째로 망가진다.
+      const { surfaceId: _ignored, zoneId, patch, similarFields } = action;
+      const applySimilar = Array.isArray(similarFields) && similarFields.length > 0
+        && patch?.activityId != null;
+      const shared = {};
+      if (applySimilar) {
+        similarFields.forEach((k) => { shared[k] = patch[k]; });
+      }
+      return {
+        ...state,
+        zones: state.zones.map((z) => {
+          if (z.id === zoneId) return { ...z, ...patch };
+          if (applySimilar && z.activityId === patch.activityId) return { ...z, ...shared };
+          return z;
+        }),
+      };
+    }
 
     case ModelAction.CONSTRUCTION_OVERRIDE_APPLIED:
       // ⚠️ override 와 면의 U 값을 **한 번에** 바꾼다. 예전에는

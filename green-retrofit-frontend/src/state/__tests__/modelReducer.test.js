@@ -358,3 +358,103 @@ describe('모든 action 이 입력을 변형하지 않는다', () => {
     expect(() => modelReducer(frozen, { type, ...payload })).not.toThrow();
   });
 });
+
+// ── 편집 커밋 ────────────────────────────────────────────
+// ⚠️ `handleSaveClose` 는 두 역할이 섞여 있었다 — 초안을 모델에 커밋하는 것과
+// 편집 세션을 닫는 것. 커밋만 여기로 옮겼다(codex 조언).
+
+const SIMILAR_FIELDS = ['activityId', 'lightingPower', 'equipmentPower', 'isConditioned'];
+
+function withZones(zones) {
+  return { ...initialModelState, zones, originalModel: { zones, surfaces: [] } };
+}
+
+describe('SURFACE_EDIT_COMMITTED', () => {
+  it('대상 면만 바꾼다', () => {
+    const base = { ...initialModelState, surfaces: [{ id: 'S1', wwr: 10 }, { id: 'S2', wwr: 10 }] };
+    const s = act(base, {
+      type: ModelAction.SURFACE_EDIT_COMMITTED, surfaceId: 'S1', patch: { wwr: 40 } });
+    expect(s.surfaces[0].wwr).toBe(40);
+    expect(s.surfaces[1].wwr).toBe(10);
+  });
+
+  it('⚠️ 기준선(originalModel)은 안 바뀐다', () => {
+    // 바뀌면 개선 전후가 같아져 절감이 0 이 된다
+    const base = loaded();
+    const s = act(base, {
+      type: ModelAction.SURFACE_EDIT_COMMITTED, surfaceId: 'S1', patch: { wwr: 40 } });
+    expect(s.originalModel).toBe(base.originalModel);
+  });
+
+  it('없는 면 id 는 아무것도 안 바꾼다', () => {
+    const base = loaded();
+    const s = act(base, {
+      type: ModelAction.SURFACE_EDIT_COMMITTED, surfaceId: '없음', patch: { wwr: 40 } });
+    expect(s.surfaces).toEqual(base.surfaces);
+  });
+});
+
+describe('ZONE_EDIT_COMMITTED', () => {
+  const ZS = [
+    { id: 'Z1', activityId: 1105, lightingPower: 9, area: 100, floor: 1 },
+    { id: 'Z2', activityId: 1105, lightingPower: 9, area: 250, floor: 2 },
+    { id: 'Z3', activityId: 9999, lightingPower: 4, area: 30, floor: 1 },
+  ];
+
+  it('일괄 적용이 없으면 대상 존만 바꾼다', () => {
+    const s = act(withZones(ZS), {
+      type: ModelAction.ZONE_EDIT_COMMITTED, zoneId: 'Z1',
+      patch: { lightingPower: 5 },
+    });
+    expect(s.zones[0].lightingPower).toBe(5);
+    expect(s.zones[1].lightingPower).toBe(9);
+  });
+
+  it('같은 용도의 존에 일괄 적용한다', () => {
+    const s = act(withZones(ZS), {
+      type: ModelAction.ZONE_EDIT_COMMITTED, zoneId: 'Z1',
+      patch: { activityId: 1105, lightingPower: 5 }, similarFields: SIMILAR_FIELDS,
+    });
+    expect(s.zones[1].lightingPower).toBe(5);   // 같은 용도
+    expect(s.zones[2].lightingPower).toBe(4);   // 다른 용도는 그대로
+  });
+
+  it('⚠️ **고유 필드는 절대 복사하지 않는다**', () => {
+    // 존 전체를 복사하면 위치·면적·id 까지 덮어써 다른 존이 통째로 망가진다
+    const s = act(withZones(ZS), {
+      type: ModelAction.ZONE_EDIT_COMMITTED, zoneId: 'Z1',
+      patch: { activityId: 1105, lightingPower: 5, area: 100, floor: 1, id: 'Z1' },
+      similarFields: SIMILAR_FIELDS,
+    });
+    expect(s.zones[1].id).toBe('Z2');
+    expect(s.zones[1].area).toBe(250);
+    expect(s.zones[1].floor).toBe(2);
+  });
+
+  it('용도가 없으면 일괄 적용하지 않는다', () => {
+    // activityId 가 없으면 "같은 용도"를 판정할 수 없다
+    const s = act(withZones(ZS), {
+      type: ModelAction.ZONE_EDIT_COMMITTED, zoneId: 'Z1',
+      patch: { lightingPower: 5 }, similarFields: SIMILAR_FIELDS,
+    });
+    expect(s.zones[1].lightingPower).toBe(9);
+  });
+
+  it('대상 존 자신은 patch 전체를 받는다', () => {
+    const s = act(withZones(ZS), {
+      type: ModelAction.ZONE_EDIT_COMMITTED, zoneId: 'Z1',
+      patch: { activityId: 1105, lightingPower: 5, coolingSetpoint: 24 },
+      similarFields: SIMILAR_FIELDS,
+    });
+    expect(s.zones[0].coolingSetpoint).toBe(24);
+    // 화이트리스트 밖 필드는 다른 존에 안 간다
+    expect(s.zones[1].coolingSetpoint).toBeUndefined();
+  });
+
+  it('⚠️ 기준선은 안 바뀐다', () => {
+    const base = withZones(ZS);
+    const s = act(base, {
+      type: ModelAction.ZONE_EDIT_COMMITTED, zoneId: 'Z1', patch: { lightingPower: 5 } });
+    expect(s.originalModel).toBe(base.originalModel);
+  });
+});

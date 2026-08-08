@@ -71,6 +71,7 @@ import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { createInitialProjectData } from './data/initialProject';
 import { ModelAction, initialModelState, modelReducer } from './state/modelReducer';
+import { EditAction, editSessionReducer, initialEditSession } from './state/editSession';
 // ⚠️ 콘센트 산식은 백엔드와 같은 값이어야 한다 — utils/zoneLoads.js 주석 참조.
 import { calcOutletPower, getActivityCategory } from './utils/zoneLoads';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
@@ -128,18 +129,40 @@ export default function App() {
   const setZones = (v) => dispatchModel({ type: ModelAction.ZONES_CHANGED, zones: v });
   const setConstructionOverrides = (v) =>
     dispatchModel({ type: ModelAction.OVERRIDES_CHANGED, overrides: v });
-  const resetModel = () => dispatchModel({ type: ModelAction.MODEL_RESET });
+  // ⚠️ **모델을 갈아끼울 때는 편집 세션도 반드시 함께 초기화한다.** 모델만
+  // 바꾸면 `selectedId`·`activeFloor`·초안이 **이전 건물을 가리킨다**(codex 지적).
+  // 그래서 두 dispatch 를 한 함수로 묶어 빠뜨릴 수 없게 한다.
+  const loadModel = (action) => {
+    dispatchModel(action);
+    dispatchEdit({ type: EditAction.SESSION_RESET });
+  };
+  const resetModel = () => loadModel({ type: ModelAction.MODEL_RESET });
+
+  // ── 평면도 편집 세션 ──
+  // ⚠️ `editState` 는 아직 커밋되지 않은 **초안**이다. 모델 반영은 model reducer 의
+  // `*_EDIT_COMMITTED` 가 한다. 새 모델을 실을 때는 **반드시 SESSION_RESET** 을
+  // 함께 보낸다 — 안 그러면 선택·층·초안이 이전 건물을 가리킨다.
+  const [edit, dispatchEdit] = useReducer(editSessionReducer, initialEditSession);
+  const {
+    activeFloor, editMode, selectedId, hoveredId, editState,
+    applyToSimilarZones, lightCalc, equipCalc,
+  } = edit;
+
+  const setActiveFloor = (f) => dispatchEdit({ type: EditAction.FLOOR_CHANGED, floor: f });
+  const setSelectedId = (id) => (id == null
+    ? dispatchEdit({ type: EditAction.SELECTION_CLEARED })
+    : dispatchEdit({ type: EditAction.SURFACE_SELECTED, surface: { id } }));
+  const setHoveredId = (id) => dispatchEdit({ type: EditAction.HOVER_CHANGED, hoveredId: id });
+  const setEditState = (v) => dispatchEdit({ type: EditAction.DRAFT_CHANGED, editState: v });
+  const setApplyToSimilarZones = (v) =>
+    dispatchEdit({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v });
+  const setLightCalc = (v) => dispatchEdit({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v });
+  const setEquipCalc = (v) => dispatchEdit({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v });
 
   const [projectData, setProjectData] = useState(createInitialProjectData);
 
   // 업로드 원본(개선 전) 스냅샷 — 백엔드가 전/후 비교 시뮬레이션의 기준선으로 사용
-  const [activeFloor, setActiveFloor] = useState(1);
-  const [editMode, setEditMode] = useState('surface');
-  const [selectedId, setSelectedId] = useState(null);
-  const [hoveredId, setHoveredId] = useState(null);
-  const [editState, setEditState] = useState({});
   // 화장실·계단실 등 동일 용도 존 일괄 적용 체크 — handleZoneClick에서 존 전환 시 리셋
-  const [applyToSimilarZones, setApplyToSimilarZones] = useState(false);
   const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
   const [loadingStage, setLoadingStage] = useState(null); // queued | baseline | retrofit
   const [res, setRes] = useState(null);
@@ -154,8 +177,6 @@ export default function App() {
   const fileInputRef = useRef(null);
   const scheduleEditorRef = useRef(null);
 
-  const [lightCalc, setLightCalc] = useState({ active: false, w: 32, qty: 10, area: 100 });
-  const [equipCalc, setEquipCalc] = useState({ active: false, w: 150, qty: 5, area: 100 });
   
   // 💡 단열재 및 구조체 속성 튜닝을 위한 State
 
@@ -497,7 +518,7 @@ export default function App() {
       ]
     };
 
-    dispatchModel({
+    loadModel({
       type: ModelAction.SAMPLE_LOADED, surfaces: newSurfaces, zones: newZones,
       materials: sampleMaterials,
       // ⚠️ 층수를 안 넘기면 이전 건물의 층수로 가상층을 판정한다
@@ -520,7 +541,7 @@ export default function App() {
       if (response && response.data) {
         // ⚠️ 모델·기준선·경고·층수를 **한 번에** 싣는다. 예전엔 setter 를 따로
         // 불러서, 한 곳만 빠뜨려도 이전 모델의 잔여물이 섞였다.
-        dispatchModel({
+        loadModel({
           type: ModelAction.PARSE_SUCCEEDED,
           surfaces: response.data.surfaces,
           zones: response.data.zones,
@@ -551,10 +572,9 @@ export default function App() {
 
   const handleModeSwitch = (mode) => {
     if (editMode !== mode) {
+      // ⚠️ 저장이 **먼저**다. 세션을 먼저 지우면 편집하던 초안이 사라진다.
       handleSaveClose();
-      setEditMode(mode);
-      setSelectedId(null);
-      setHoveredId(null);
+      dispatchEdit({ type: EditAction.MODE_SWITCHED, mode });
     }
   };
 
@@ -562,22 +582,19 @@ export default function App() {
     if (editMode !== 'surface') return;
     if (selectedId && selectedId !== data?.id) handleSaveClose();
 
-    setSelectedId(data ? data.id : null);
-    if (data) {
-      setEditState({ wwr: data.wwr, uValue: data.uValue, glazingId: data.glazingId || 42 });
-    }
+    dispatchEdit({ type: EditAction.SURFACE_SELECTED, surface: data });
   };
 
   const handleZoneClick = (zoneId) => {
     if (editMode !== 'zone') return;
     if (selectedId && selectedId !== zoneId) handleSaveClose();
 
-    setSelectedId(zoneId ? zoneId : null);
-    const zData = zones.find((z) => z.id === zoneId);
-    if (zData) {
-      setEditState({ ...zData });
-    }
-    setApplyToSimilarZones(false); // 존 전환 시 일괄적용 체크는 리셋(다음 존에 실수로 이어붙지 않게)
+    // 존 전환 시 일괄적용 체크는 reducer 가 리셋한다(다음 존에 실수로 이어붙지 않게)
+    dispatchEdit({
+      type: EditAction.ZONE_SELECTED,
+      zone: zones.find((z) => z.id === zoneId) || null,
+      zoneId,
+    });
   };
 
   // 화장실·계단실처럼 같은 용도(activityId)의 존이 여러 개일 때, 하나씩 편집하는
@@ -591,30 +608,24 @@ export default function App() {
 
   const handleSaveClose = () => {
     if (!selectedId) return;
+    // ⚠️ **커밋과 닫기를 나눈다.** 초안을 모델에 반영하는 것(model reducer)과
+    // 편집 세션을 닫는 것(edit reducer)은 다른 관심사다 — 한 곳에 두면
+    // "저장했는데 화면만 바뀐" 상태가 생긴다.
     if (editMode === 'surface') {
-      setSurfaces((prev) =>
-        prev.map((s) => (s.id === selectedId ? { ...s, ...editState } : s))
-      );
-    } else if (editMode === 'zone' && applyToSimilarZones && editState.activityId != null) {
-      const shared = {};
-      SIMILAR_ZONE_FIELDS.forEach((k) => { shared[k] = editState[k]; });
-      setZones((prev) =>
-        prev.map((z) => {
-          if (z.id === selectedId) return { ...z, ...editState };
-          if (z.activityId === editState.activityId) return { ...z, ...shared };
-          return z;
-        })
-      );
+      dispatchModel({
+        type: ModelAction.SURFACE_EDIT_COMMITTED,
+        surfaceId: selectedId, patch: editState,
+      });
     } else if (editMode === 'zone') {
-      setZones((prev) =>
-        prev.map((z) => (z.id === selectedId ? { ...z, ...editState } : z))
-      );
+      dispatchModel({
+        type: ModelAction.ZONE_EDIT_COMMITTED,
+        zoneId: selectedId, patch: editState,
+        // ⚠️ 화이트리스트를 넘길 때만 일괄 적용된다. 존 전체를 복사하면
+        // 위치·면적·id 까지 덮어써 다른 존이 통째로 망가진다.
+        similarFields: applyToSimilarZones ? SIMILAR_ZONE_FIELDS : null,
+      });
     }
-
-    setApplyToSimilarZones(false);
-    setSelectedId(null);
-    setLightCalc((p) => ({ ...p, active: false }));
-    setEquipCalc((p) => ({ ...p, active: false }));
+    dispatchEdit({ type: EditAction.EDIT_CLOSED });
   };
 
   // 제안 1건의 상태 변경만 수행하고, 무엇을 바꿨는지 요약 문자열을 반환한다.
