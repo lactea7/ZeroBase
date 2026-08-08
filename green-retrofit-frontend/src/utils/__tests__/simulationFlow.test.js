@@ -14,9 +14,10 @@ const PAYLOAD = { projectData: {}, zones: [], surfaces: [] };
 
 function makeActions() {
   return {
-    setStep: vi.fn(),
-    setRes: vi.fn(),
-    setLoadingStage: vi.fn(),
+    onStarted: vi.fn(),
+    onStage: vi.fn(),
+    onSucceeded: vi.fn(),
+    onFailed: vi.fn(),
     setActiveResultTab: vi.fn(),
     startTicker: vi.fn(),
     stopTicker: vi.fn(),
@@ -43,7 +44,7 @@ describe('시작', () => {
 
     // ⚠️ 결과를 기다리기 **전에** 넘어가야 한다. 안 그러면 사용자는 30분간
     // 아무 반응 없는 화면을 본다.
-    expect(actions.setStep).toHaveBeenCalledWith('loading');
+    expect(actions.onStarted).toHaveBeenCalled();
     expect(actions.startTicker).toHaveBeenCalled();
 
     runner.resolve({ result: {} });
@@ -55,7 +56,7 @@ describe('시작', () => {
     const runner = vi.fn().mockResolvedValue({ result: {} });
     await runSimulationFlow(PAYLOAD, runner, actions, onError);
 
-    expect(runner).toHaveBeenCalledWith(PAYLOAD, actions.setLoadingStage);
+    expect(runner).toHaveBeenCalledWith(PAYLOAD, actions.onStage);
   });
 });
 
@@ -65,8 +66,7 @@ describe('성공', () => {
     const result = { summary: { consume_per_m2: 100 } };
     await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result }), actions, onError);
 
-    expect(actions.setRes).toHaveBeenCalledWith(result);
-    expect(actions.setStep).toHaveBeenLastCalledWith('result');
+    expect(actions.onSucceeded).toHaveBeenCalledWith(result);
   });
 
   it('에너지 탭을 먼저 보여준다', async () => {
@@ -76,12 +76,11 @@ describe('성공', () => {
     expect(actions.setActiveResultTab).toHaveBeenCalledWith('energy');
   });
 
-  it('타이머와 단계 표시를 정리한다', async () => {
+  it('타이머를 정리한다', async () => {
     // ⚠️ 안 하면 결과 화면에서 로딩 문구가 계속 돈다
     const actions = makeActions();
     await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }), actions, onError);
     expect(actions.stopTicker).toHaveBeenCalled();
-    expect(actions.setLoadingStage).toHaveBeenCalledWith(null);
   });
 
   it('오류 안내를 내지 않는다', async () => {
@@ -109,24 +108,23 @@ describe('실패', () => {
     expect(onError).toHaveBeenCalled();
   });
 
-  it('⚠️ 로딩 화면에 가두지 않고 편집 화면으로 돌려보낸다', async () => {
+  it('⚠️ 로딩 화면에 가두지 않고 실패 전이를 낸다', async () => {
     const actions = makeActions();
     await runSimulationFlow(PAYLOAD, vi.fn().mockRejectedValue(new Error('x')), actions, onError);
-    expect(actions.setStep).toHaveBeenLastCalledWith('floorView');
+    expect(actions.onFailed).toHaveBeenCalled();
   });
 
-  it('실패해도 타이머와 단계 표시를 정리한다', async () => {
+  it('실패해도 타이머를 정리한다', async () => {
     const actions = makeActions();
     await runSimulationFlow(PAYLOAD, vi.fn().mockRejectedValue(new Error('x')), actions, onError);
     expect(actions.stopTicker).toHaveBeenCalled();
-    expect(actions.setLoadingStage).toHaveBeenCalledWith(null);
   });
 
   it('실패 시 결과를 싣지 않는다', async () => {
     // ⚠️ 예전 결과가 남아 있으면 실패했는데 성공한 것처럼 보인다
     const actions = makeActions();
     await runSimulationFlow(PAYLOAD, vi.fn().mockRejectedValue(new Error('x')), actions, onError);
-    expect(actions.setRes).not.toHaveBeenCalled();
+    expect(actions.onSucceeded).not.toHaveBeenCalled();
   });
 
   it('예외를 밖으로 던지지 않는다', async () => {

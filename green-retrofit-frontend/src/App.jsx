@@ -70,8 +70,10 @@ import { buildSimulationPayload } from './utils/simulationPayload';
 import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { createInitialProjectData } from './data/initialProject';
-import { ModelAction, initialModelState, modelReducer } from './state/modelReducer';
-import { EditAction, editSessionReducer, initialEditSession } from './state/editSession';
+import { AppAction, appReducer, initialAppState } from './state/appReducer';
+import { ModelAction } from './state/modelReducer';
+import { ExecAction } from './state/execution';
+import { EditAction } from './state/editSession';
 // ⚠️ 콘센트 산식은 백엔드와 같은 값이어야 한다 — utils/zoneLoads.js 주석 참조.
 import { calcOutletPower, getActivityCategory } from './utils/zoneLoads';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
@@ -107,7 +109,6 @@ import ProjectInfoPage from './pages/ProjectInfoPage';
 
 // --- [메인 애플리케이션] ---
 export default function App() {
-  const [step, setStep] = useState('landing');
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -118,54 +119,66 @@ export default function App() {
   // ⚠️ 이 아홉 개는 **함께 바뀌어야 한다.** 흩어진 setter 로 두었더니 재업로드
   // 버튼 두 곳이 `originalModel`(절감액의 기준선)·`gapWarnings`·`realFloorCount`
   // 를 안 지우고 있었다. 상태 전이는 state/modelReducer.js 가 표로 고정한다.
-  const [model, dispatchModel] = useReducer(modelReducer, initialModelState);
+  const [app, dispatch] = useReducer(appReducer, initialAppState);
+  const { model, edit, exec } = app;
+  const { step, loadingStage, loadingMsgIdx, res } = exec;
+
+  const setStep = (v) => dispatch({ type: ExecAction.NAVIGATED, step: v });
   const {
     surfaces, zones, originalModel, uploadedFile, uploadError,
     gapWarnings, realFloorCount, materials, constructionOverrides,
   } = model;
 
   // 편집 경로용 호환 setter — `useState` 처럼 값/갱신함수를 받는다.
-  const setSurfaces = (v) => dispatchModel({ type: ModelAction.SURFACES_CHANGED, surfaces: v });
-  const setZones = (v) => dispatchModel({ type: ModelAction.ZONES_CHANGED, zones: v });
+  const setSurfaces = (v) => dispatch({ type: ModelAction.SURFACES_CHANGED, surfaces: v });
+  const setZones = (v) => dispatch({ type: ModelAction.ZONES_CHANGED, zones: v });
   const setConstructionOverrides = (v) =>
-    dispatchModel({ type: ModelAction.OVERRIDES_CHANGED, overrides: v });
+    dispatch({ type: ModelAction.OVERRIDES_CHANGED, overrides: v });
   // ⚠️ **모델을 갈아끼울 때는 편집 세션도 반드시 함께 초기화한다.** 모델만
   // 바꾸면 `selectedId`·`activeFloor`·초안이 **이전 건물을 가리킨다**(codex 지적).
   // 그래서 두 dispatch 를 한 함수로 묶어 빠뜨릴 수 없게 한다.
-  const loadModel = (action) => {
-    dispatchModel(action);
-    dispatchEdit({ type: EditAction.SESSION_RESET });
-  };
+  // ⚠️ **한 전이**로 모델 교체 + 편집 세션 초기화를 한다. 예전에는 dispatch 두
+  // 개를 나란히 불렀고, 그 연동은 정규식 소스 검사로만 지켜졌다(codex 지적).
+  const loadModel = (modelAction) =>
+    dispatch({ type: AppAction.MODEL_REPLACED, modelAction });
   const resetModel = () => loadModel({ type: ModelAction.MODEL_RESET });
 
   // ── 평면도 편집 세션 ──
   // ⚠️ `editState` 는 아직 커밋되지 않은 **초안**이다. 모델 반영은 model reducer 의
   // `*_EDIT_COMMITTED` 가 한다. 새 모델을 실을 때는 **반드시 SESSION_RESET** 을
   // 함께 보낸다 — 안 그러면 선택·층·초안이 이전 건물을 가리킨다.
-  const [edit, dispatchEdit] = useReducer(editSessionReducer, initialEditSession);
   const {
     activeFloor, editMode, selectedId, hoveredId, editState,
     applyToSimilarZones, lightCalc, equipCalc,
   } = edit;
 
-  const setActiveFloor = (f) => dispatchEdit({ type: EditAction.FLOOR_CHANGED, floor: f });
-  const setSelectedId = (id) => (id == null
-    ? dispatchEdit({ type: EditAction.SELECTION_CLEARED })
-    : dispatchEdit({ type: EditAction.SURFACE_SELECTED, surface: { id } }));
-  const setHoveredId = (id) => dispatchEdit({ type: EditAction.HOVER_CHANGED, hoveredId: id });
-  const setEditState = (v) => dispatchEdit({ type: EditAction.DRAFT_CHANGED, editState: v });
+  const setActiveFloor = (f) => dispatch({ type: EditAction.FLOOR_CHANGED, floor: f });
+  const setSelectedId = (id) => {
+    if (id == null) {
+      dispatch({ type: EditAction.SELECTION_CLEARED });
+      return;
+    }
+    // ⚠️ id 만으로 선택하면 초안이 `{wwr: undefined, ...}` 가 되어, 저장하는 순간
+    // 면의 실제 값을 undefined 로 덮어쓴다. **실제 면을 찾아** 초안을 만든다.
+    // (현재 호출부는 전부 null 을 넘기지만, 넘겨도 안전해야 한다)
+    const target = editMode === 'zone'
+      ? zones.find((z) => z.id === id)
+      : surfaces.find((sf) => sf.id === id);
+    dispatch(editMode === 'zone'
+      ? { type: EditAction.ZONE_SELECTED, zone: target || null, zoneId: id }
+      : { type: EditAction.SURFACE_SELECTED, surface: target || null });
+  };
+  const setHoveredId = (id) => dispatch({ type: EditAction.HOVER_CHANGED, hoveredId: id });
+  const setEditState = (v) => dispatch({ type: EditAction.DRAFT_CHANGED, editState: v });
   const setApplyToSimilarZones = (v) =>
-    dispatchEdit({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v });
-  const setLightCalc = (v) => dispatchEdit({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v });
-  const setEquipCalc = (v) => dispatchEdit({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v });
+    dispatch({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v });
+  const setLightCalc = (v) => dispatch({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v });
+  const setEquipCalc = (v) => dispatch({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v });
 
   const [projectData, setProjectData] = useState(createInitialProjectData);
 
   // 업로드 원본(개선 전) 스냅샷 — 백엔드가 전/후 비교 시뮬레이션의 기준선으로 사용
   // 화장실·계단실 등 동일 용도 존 일괄 적용 체크 — handleZoneClick에서 존 전환 시 리셋
-  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
-  const [loadingStage, setLoadingStage] = useState(null); // queued | baseline | retrofit
-  const [res, setRes] = useState(null);
   
   // 💡 [수정] 결과를 볼 때 '에너지 성능(energy)' 탭이 무조건 먼저 나오도록 기본값 설정
   const [activeResultTab, setActiveResultTab] = useState('energy');
@@ -286,7 +299,7 @@ export default function App() {
       next.uValue = newU;   // 백엔드로 전달하기 위해 override 객체에 저장
     }
 
-    dispatchModel({
+    dispatch({
       type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
       surfaceId, override: next, uValue: newU,
     });
@@ -301,7 +314,7 @@ export default function App() {
   const handleResetInsulationOverride = (surfaceId, constructionId) => {
     // 원본 U-value 복원까지 같은 전이에서 한다.
     const constr = materials?.constructions?.find(c => c.id === constructionId);
-    dispatchModel({
+    dispatch({
       type: ModelAction.CONSTRUCTION_OVERRIDE_RESET,
       surfaceId, uValue: constr ? constr.uValue : null,
     });
@@ -534,7 +547,7 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    dispatchModel({ type: ModelAction.PARSE_STARTED, file });
+    dispatch({ type: ModelAction.PARSE_STARTED, file });
     setStep('parsing');
     try {
       const response = await uploadGbxml(file);
@@ -555,7 +568,7 @@ export default function App() {
       console.error('파싱 에러:', error);
       // 백엔드가 원인을 알려주면(400 detail 등) 그대로 보여준다 — "서버 응답 없음"으로 뭉개지 않기
       const detail = error?.response?.data?.detail;
-      dispatchModel({
+      dispatch({
         type: ModelAction.PARSE_FAILED,
         message: detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.',
       });
@@ -574,7 +587,7 @@ export default function App() {
     if (editMode !== mode) {
       // ⚠️ 저장이 **먼저**다. 세션을 먼저 지우면 편집하던 초안이 사라진다.
       handleSaveClose();
-      dispatchEdit({ type: EditAction.MODE_SWITCHED, mode });
+      dispatch({ type: EditAction.MODE_SWITCHED, mode });
     }
   };
 
@@ -582,7 +595,7 @@ export default function App() {
     if (editMode !== 'surface') return;
     if (selectedId && selectedId !== data?.id) handleSaveClose();
 
-    dispatchEdit({ type: EditAction.SURFACE_SELECTED, surface: data });
+    dispatch({ type: EditAction.SURFACE_SELECTED, surface: data });
   };
 
   const handleZoneClick = (zoneId) => {
@@ -590,7 +603,7 @@ export default function App() {
     if (selectedId && selectedId !== zoneId) handleSaveClose();
 
     // 존 전환 시 일괄적용 체크는 reducer 가 리셋한다(다음 존에 실수로 이어붙지 않게)
-    dispatchEdit({
+    dispatch({
       type: EditAction.ZONE_SELECTED,
       zone: zones.find((z) => z.id === zoneId) || null,
       zoneId,
@@ -612,12 +625,12 @@ export default function App() {
     // 편집 세션을 닫는 것(edit reducer)은 다른 관심사다 — 한 곳에 두면
     // "저장했는데 화면만 바뀐" 상태가 생긴다.
     if (editMode === 'surface') {
-      dispatchModel({
+      dispatch({
         type: ModelAction.SURFACE_EDIT_COMMITTED,
         surfaceId: selectedId, patch: editState,
       });
     } else if (editMode === 'zone') {
-      dispatchModel({
+      dispatch({
         type: ModelAction.ZONE_EDIT_COMMITTED,
         zoneId: selectedId, patch: editState,
         // ⚠️ 화이트리스트를 넘길 때만 일괄 적용된다. 존 전체를 복사하면
@@ -625,7 +638,7 @@ export default function App() {
         similarFields: applyToSimilarZones ? SIMILAR_ZONE_FIELDS : null,
       });
     }
-    dispatchEdit({ type: EditAction.EDIT_CLOSED });
+    dispatch({ type: EditAction.EDIT_CLOSED });
   };
 
   // 제안 1건의 상태 변경만 수행하고, 무엇을 바꿨는지 요약 문자열을 반환한다.
@@ -658,7 +671,6 @@ export default function App() {
   };
 
   const handleSimulation = async () => {
-    setLoadingMsgIdx(0);
     // 화면 전환 계약은 utils/simulationFlow.js — 긴 UI 경로 없이 시험한다.
     let interval = null;
     await runSimulationFlow(
@@ -667,11 +679,15 @@ export default function App() {
       }),
       runSimulation,
       {
-        setStep, setRes, setLoadingStage, setActiveResultTab,
+        onStarted: () => dispatch({ type: ExecAction.SIMULATION_STARTED }),
+        onStage: (stage) => dispatch({ type: ExecAction.LOADING_STAGE_CHANGED, stage }),
+        onSucceeded: (result) => dispatch({ type: ExecAction.SIMULATION_SUCCEEDED, result }),
+        onFailed: () => dispatch({ type: ExecAction.SIMULATION_FAILED }),
+        setActiveResultTab,
         startTicker: () => {
-          interval = setInterval(() => {
-            setLoadingMsgIdx((prev) => Math.min(prev + 1, LOADING_MESSAGES.length - 1));
-          }, 1500);
+          interval = setInterval(() => dispatch({
+            type: ExecAction.LOADING_MESSAGE_TICKED, max: LOADING_MESSAGES.length - 1,
+          }), 1500);
         },
         stopTicker: () => clearInterval(interval),
       },
@@ -962,7 +978,7 @@ export default function App() {
               {/* severity=block 은 해석 자체가 불가능한 입력이다 —
                   '그대로 진행'을 허용하면 신뢰할 수 없는 결과를 만들게 된다. */}
               <button
-                onClick={() => dispatchModel({ type: ModelAction.WARNINGS_DISMISSED })}
+                onClick={() => dispatch({ type: ModelAction.WARNINGS_DISMISSED })}
                 disabled={gapWarnings.some((w) => w.severity === 'block')}
                 className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all ${
                   gapWarnings.some((w) => w.severity === 'block')
