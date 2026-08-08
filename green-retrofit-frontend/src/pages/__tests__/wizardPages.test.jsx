@@ -9,6 +9,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 
+import { createInitialProjectData } from '../../data/initialProject.js';
+
 import BudgetPage from '../BudgetPage.jsx';
 import FinancialPage from '../FinancialPage.jsx';
 import ProjectInfoPage from '../ProjectInfoPage.jsx';
@@ -20,19 +22,10 @@ const THEME = {
   tableHeader: '', tableBorder: '', chartText: '#000', chartGrid: '#000', pieBg: '#000',
 };
 
-// ⚠️ **App 의 초기 `projectData` 모양을 그대로 따른다.** 페이지의 계약은 그
-// 상태이고, 여기서 임의로 줄이면 있지도 않은 결함을 쫓게 된다(실제로 그랬다).
-const PROJECT = {
-  name: '테스트', activityId: 1105, location: 'KOR_SO_Seoul',
-  pvCapacity: 0, heatSource: 11, geothermalApplied: false,
-  promoteGroundFloors: false, hvacUpgradeActive: false, orientation: 0,
-  targetBudget: 0, ledFixtureCount: 0,
-  baselineActual: { mode: 'bill', elecBill: '', heatBill: '', elecKwh: '', heatKwh: '' },
-  lccParameters: {
-    discountRate: 5.0, inflationRate: 3.0, utilityInflation: 4.0, lifecycleYears: 20,
-  },
-  customSchedule: { useCustom: false, mode: 'simplified', holidays: [] },
-};
+// ⚠️ App 과 **같은 초기 상태**를 쓴다. 손으로 베끼면 드리프트가 생긴다 —
+// 실제로 `customSchedule.simplifiedParams`·`profiles` 가 빠진 fixture 때문에
+// 있지도 않은 결함을 쫓을 뻔했다(codex 지적).
+const PROJECT = { ...createInitialProjectData(), name: '테스트' };
 
 const common = () => ({
   theme: THEME, isDarkMode: false, setStep: vi.fn(),
@@ -72,8 +65,12 @@ describe.each(PAGES)('%s', (name, Page, props) => {
   it('렌더를 깨는 콘솔 오류가 없다', () => {
     const errors = [];
     const spy = vi.spyOn(console, 'error').mockImplementation((...a) => errors.push(a));
-    render(<Page {...props} />);
-    spy.mockRestore();
+    // ⚠️ render 가 던지면 복원이 안 돼 이후 시험의 콘솔이 먹통이 된다
+    try {
+      render(<Page {...props} />);
+    } finally {
+      spy.mockRestore();
+    }
     const fatal = errors.filter(([m]) =>
       typeof m === 'string' && /is not defined|is not a function|Cannot read/.test(m));
     expect(fatal).toEqual([]);

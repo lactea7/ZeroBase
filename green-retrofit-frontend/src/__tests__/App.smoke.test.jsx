@@ -39,8 +39,11 @@ describe('App 첫 화면', () => {
   it('렌더를 깨는 콘솔 오류가 없다', () => {
     const errors = [];
     const spy = vi.spyOn(console, 'error').mockImplementation((...a) => errors.push(a));
-    render(<App />);
-    spy.mockRestore();
+    try {
+      render(<App />);
+    } finally {
+      spy.mockRestore();   // ⚠️ 던지면 복원이 안 돼 이후 시험의 콘솔이 먹통이 된다
+    }
     const fatal = errors.filter(([m]) =>
       typeof m === 'string' && /is not a function|Cannot read|undefined is not/.test(m));
     expect(fatal).toEqual([]);

@@ -70,6 +70,7 @@ import { buildSimulationPayload } from './utils/simulationPayload';
 import { mapZones } from './utils/parseResponse';
 import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
+import { createInitialProjectData } from './data/initialProject';
 // ⚠️ 콘센트 산식은 백엔드와 같은 값이어야 한다 — utils/zoneLoads.js 주석 참조.
 import { calcOutletPower, getActivityCategory } from './utils/zoneLoads';
 import { INSULATION_TYPES, INSULATION_CATEGORIES } from './data/insulation';
@@ -95,6 +96,7 @@ import FloorEditor from './components/steps/FloorEditor';
 import WizardShell from './components/layout/WizardShell';
 import LoadingPage from './pages/LoadingPage';
 import UploadPage from './pages/UploadPage';
+import BuildingViewPage from './pages/BuildingViewPage';
 import FinancialPage from './pages/FinancialPage';
 import BudgetPage from './pages/BudgetPage';
 import RenewablePage from './pages/RenewablePage';
@@ -111,57 +113,7 @@ export default function App() {
   
   const [showGuide, setShowGuide] = useState(false); // Revit gbXML 추출 가이드 영상 모달
 
-  const [projectData, setProjectData] = useState({
-    name: '신규 프로젝트',
-    activityId: 1105,
-    location: 'KOR_SO_Seoul',
-    pvCapacity: 0,
-    heatSource: 11, // 난방 열원: 2전기 11지역난방
-    // 기존 건물 실측 운영비(선택). 비우면 1.6배 추정으로 계산됨을 결과에 명시 고지.
-    //   mode 'bill'=연간 요금(원), 'usage'=연간 사용량(kWh). 빈칸은 백엔드에서 무시.
-    baselineActual: { mode: 'bill', elecBill: '', heatBill: '', elecKwh: '', heatKwh: '' },
-    geothermalApplied: false,
-    // 자기참조 최하층 바닥을 지면 경계로 볼지. 기본 off(단열 경계) —
-    // 지하층·필로티·외기 노출 바닥을 지면으로 오분류하면 결과가 크게 틀어진다.
-    promoteGroundFloors: false,
-    hvacUpgradeActive: false,
-    orientation: 0,
-    targetBudget: 0,
-    lccParameters: {
-      discountRate: 5.0,
-      inflationRate: 3.0,
-      utilityInflation: 4.0,
-      lifecycleYears: 20
-    },
-    ledFixtureCount: 0,
-    customSchedule: {
-      useCustom: false, // 기본=용도별 자동 스케줄, 켜면 전체 존에 커스텀 override
-      mode: 'simplified', // 'simplified' | 'detailed'
-      simplifiedParams: {
-        weekday: { openTime: 8, closeTime: 18, heatOcc: 20, heatUnocc: 15, coolOcc: 26, coolUnocc: 30, opOcc: 1.0, opUnocc: 0.0 },
-        weekend: { openTime: 0, closeTime: 0, heatOcc: 15, heatUnocc: 15, coolOcc: 30, coolUnocc: 30, opOcc: 0.0, opUnocc: 0.0 },
-        holiday: { openTime: 0, closeTime: 0, heatOcc: 15, heatUnocc: 15, coolOcc: 30, coolUnocc: 30, opOcc: 0.0, opUnocc: 0.0 }
-      },
-      holidays: ["01/01", "03/01", "05/05", "06/06", "08/15", "10/03", "10/09", "12/25"],
-      profiles: {
-        weekday: {
-          heating: Array(24).fill().map((_, i) => (i >= 8 && i < 18) ? 20 : 15),
-          cooling: Array(24).fill().map((_, i) => (i >= 8 && i < 18) ? 26 : 30),
-          operation: Array(24).fill().map((_, i) => (i >= 8 && i < 18) ? 1.0 : 0.0),
-        },
-        weekend: {
-          heating: Array(24).fill(15),
-          cooling: Array(24).fill(30),
-          operation: Array(24).fill(0.0),
-        },
-        holiday: {
-          heating: Array(24).fill(15),
-          cooling: Array(24).fill(30),
-          operation: Array(24).fill(0.0),
-        }
-      }
-    }
-  });
+  const [projectData, setProjectData] = useState(createInitialProjectData);
 
   const [surfaces, setSurfaces] = useState([]);
   const [zones, setZones] = useState([]);
@@ -1180,61 +1132,25 @@ export default function App() {
 
           {/* STEP 2: Building View */}
           {step === 'buildingView' && (
-            <div className="flex-1 flex flex-col animate-in fade-in min-h-0 w-full h-full">
-              <div className="p-6 border-b flex-shrink-0 flex flex-col md:flex-row md:justify-between items-start md:items-center bg-black/5 z-10 shadow-sm gap-4">
-                <div className="flex-shrink-0">
-                  <h2 className="text-xl font-black flex items-center gap-2">
-                    <Building className="text-emerald-500" /> 전체 건물 형상 시각화
-                  </h2>
-                  <p className="text-xs opacity-60 mt-1">층별 버튼을 눌러 상세 편집 모드로 진입하세요.</p>
-                </div>
-                <div className="flex flex-wrap gap-2 justify-start md:justify-end w-full md:max-w-[70%] max-h-[120px] overflow-y-auto custom-scrollbar pr-2">
-                  {displayFloors.map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => {
-                        setActiveFloor(f);
-                        setStep('floorView');
-                        setSelectedId(null);
-                      }}
-                      className={`px-4 py-2 rounded-xl text-white font-black hover:opacity-90 transition-all shadow-md min-w-[3.5rem] flex flex-col items-center gap-0.5 ${
-                        isVirtualFloor(f)
-                          ? 'bg-amber-600 hover:bg-amber-500'
-                          : 'bg-emerald-600 hover:bg-emerald-500'
-                      }`}
-                    >
-                      <span>{isVirtualFloor(f) ? '⚡' : ''}{f}F</span>
-                      {isVirtualFloor(f) && <span className="text-[9px] font-medium opacity-80 leading-none">특수공간</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex-1 relative flex flex-col md:flex-row overflow-hidden w-full h-full gap-4 p-4">
-                {/* 3D 모델 시각화 영역 */}
-                <div className="flex-1 relative min-h-[400px]">
-                  <BuildingViewer
-                    surfaces={surfaces}
-                    zones={zones}
-                    activeFloor="all"
-                    editMode="surface"
-                    onSurfaceClick={() => {}}
-                    onZoneClick={() => {}}
-                    isDarkMode={isDarkMode}
-                    viewMode={viewMode}
-                    setViewMode={setViewMode}
-                    sunMonth={sunMonth}
-                    setSunMonth={setSunMonth}
-                    sunHour={sunHour}
-                    setSunHour={setSunHour}
-                    res={res}
-                    latitude={latitude}
-                    locationName={selectedRegion.name}
-                  />
-                </div>
-
-
-              </div>
-            </div>
+            <BuildingViewPage
+              isDarkMode={isDarkMode}
+              setStep={setStep}
+              surfaces={surfaces}
+              zones={zones}
+              displayFloors={displayFloors}
+              isVirtualFloor={isVirtualFloor}
+              setActiveFloor={setActiveFloor}
+              setSelectedId={setSelectedId}
+              viewMode={viewMode}
+              setViewMode={setViewMode}
+              sunMonth={sunMonth}
+              setSunMonth={setSunMonth}
+              sunHour={sunHour}
+              setSunHour={setSunHour}
+              res={res}
+              latitude={latitude}
+              selectedRegion={selectedRegion}
+            />
           )}
 
           {/* STEP 3 & 4: Floor View + Side Editor Panel */}
