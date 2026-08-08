@@ -1,7 +1,8 @@
 import React from 'react';
 // ⚠️ 블록을 옮길 때 **아이콘 import 를 빠뜨리기 쉽다.** 빌드는 통과하고
 // 런타임에만 죽어 화면이 백지가 된다 — 예전에 실제로 그렇게 됐다.
-import { CheckCircle2, PlayCircle, UploadCloud } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { CheckCircle2, PlayCircle, UploadCloud, X } from 'lucide-react';
 import WizardShell from '../components/layout/WizardShell';
 
 /**
@@ -15,12 +16,17 @@ import WizardShell from '../components/layout/WizardShell';
  * 화면 간 계약은 `src/__tests__/App.upload.test.jsx` 가 지킨다.
  */
 export default function UploadPage({
-  theme, isDarkMode, setStep, setShowGuide,
+  theme, isDarkMode, setStep,
   surfaces, zones, uploadedFile, fileInputRef,
   handleFileUpload, handleStartWithSample,
   onResetModel,
 }) {
+  // ⚠️ **이 화면만 여는 모달이다.** App 에 두면 다른 화면이 소유하지도 않는
+  // 상태를 들고 다닌다(여는 곳도 여기, 닫는 곳도 여기).
+  const [showGuide, setShowGuide] = React.useState(false);
+
   return (
+    <>
             <WizardShell
               theme={theme} isDarkMode={isDarkMode} setStep={setStep}
               icon={<UploadCloud size={32} />}
@@ -90,5 +96,43 @@ export default function UploadPage({
                   )}
                 </div>
             </WizardShell>
+
+      {/* Revit gbXML 추출 가이드 영상 모달 */}
+      <AnimatePresence>
+        {showGuide && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowGuide(false)}></div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className={`relative w-full max-w-3xl rounded-[2rem] shadow-2xl overflow-hidden border ${isDarkMode ? 'bg-[#241a13] border-[#3a2c20]' : 'bg-[#fbf7f0] border-[#d8cbb5]'}`}
+            >
+              <div className="flex items-center justify-between px-6 py-4">
+                <h3 className={`text-base font-black flex items-center gap-2 ${theme.textMain}`}>
+                  <PlayCircle size={18} className="text-emerald-600" /> Revit에서 gbXML 추출하기
+                </h3>
+                <button
+                  onClick={() => setShowGuide(false)}
+                  className={`p-2 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+                >
+                  <X size={20} className={theme.textSub} />
+                </button>
+              </div>
+              <video
+                src="/gbXML_manual.mp4"
+                controls
+                autoPlay
+                playsInline
+                className="w-full max-h-[70vh] bg-black"
+              />
+              <p className={`px-6 py-4 text-xs leading-relaxed ${theme.textSub}`}>
+                Revit · File → Export → gbXML 로 내보낸 .xml 파일을 업로드 화면에 올리면 됩니다.
+              </p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

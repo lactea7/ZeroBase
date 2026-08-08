@@ -1,5 +1,4 @@
 import React, { useState, useRef, useReducer } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   BarChart,
   Bar,
@@ -85,7 +84,6 @@ import { LOADING_MESSAGES, DIR_MAP } from './utils/format';
 import { getPanesCategory, getCoatingType } from './utils/surface';
 import { getZebGradeInfo, buildAnnualChartData, buildCashFlowData } from './utils/resultData';
 import { applyRecommendation } from './utils/recommendationActions';
-import ScheduleEditor from './components/ScheduleEditor';
 import ZeroBaseLanding from './components/landing/ZeroBaseLanding';
 import { REGION_LATITUDES } from './utils/solarHelper';
 import * as THREE from 'three';
@@ -111,31 +109,32 @@ import ProjectInfoPage from './pages/ProjectInfoPage';
 
 // --- [메인 애플리케이션] ---
 export default function App() {
-  const [selectedMetric, setSelectedMetric] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
   
-  const [showGuide, setShowGuide] = useState(false); // Revit gbXML 추출 가이드 영상 모달
 
   // ── 업로드한 건물 모델 ──
   // ⚠️ 이 아홉 개는 **함께 바뀌어야 한다.** 흩어진 setter 로 두었더니 재업로드
   // 버튼 두 곳이 `originalModel`(절감액의 기준선)·`gapWarnings`·`realFloorCount`
   // 를 안 지우고 있었다. 상태 전이는 state/modelReducer.js 가 표로 고정한다.
   const [app, dispatch] = useReducer(appReducer, initialAppState);
+  // 봉투를 매번 손으로 씌우면 읽기 어렵다 — 묶음별 dispatch 로 감싼다.
+  const dispatchModel = (action) => dispatch(toModel(action));
+  const dispatchEdit = (action) => dispatch(toEdit(action));
+  const dispatchExec = (action) => dispatch(toExec(action));
   const { model, edit, exec } = app;
   const { step, loadingStage, loadingMsgIdx, res } = exec;
 
-  const setStep = (v) => dispatch(toExec({ type: ExecAction.NAVIGATED, step: v }));
+  const setStep = (v) => dispatchExec(({ type: ExecAction.NAVIGATED, step: v }));
   const {
     surfaces, zones, originalModel, uploadedFile, uploadError,
     gapWarnings, realFloorCount, materials, constructionOverrides,
   } = model;
 
   // 편집 경로용 호환 setter — `useState` 처럼 값/갱신함수를 받는다.
-  const setSurfaces = (v) => dispatch(toModel({ type: ModelAction.SURFACES_CHANGED, surfaces: v }));
-  const setZones = (v) => dispatch(toModel({ type: ModelAction.ZONES_CHANGED, zones: v }));
+  const setSurfaces = (v) => dispatchModel(({ type: ModelAction.SURFACES_CHANGED, surfaces: v }));
+  const setZones = (v) => dispatchModel(({ type: ModelAction.ZONES_CHANGED, zones: v }));
   const setConstructionOverrides = (v) =>
-    dispatch(toModel({ type: ModelAction.OVERRIDES_CHANGED, overrides: v }));
+    dispatchModel(({ type: ModelAction.OVERRIDES_CHANGED, overrides: v }));
   // ⚠️ **모델을 갈아끼울 때는 편집 세션도 반드시 함께 초기화한다.** 모델만
   // 바꾸면 `selectedId`·`activeFloor`·초안이 **이전 건물을 가리킨다**(codex 지적).
   // 그래서 두 dispatch 를 한 함수로 묶어 빠뜨릴 수 없게 한다.
@@ -154,24 +153,28 @@ export default function App() {
     applyToSimilarZones, lightCalc, equipCalc,
   } = edit;
 
-  const setActiveFloor = (f) => dispatch(toEdit({ type: EditAction.FLOOR_CHANGED, floor: f }));
+  const setActiveFloor = (f) => dispatchEdit(({ type: EditAction.FLOOR_CHANGED, floor: f }));
   // ⚠️ **선택 해제 전용**이다. 실제 선택은 `handleSurfaceClick(data)` /
   // `handleZoneClick(id)` 가 한다 — 그쪽은 대상 객체를 알고 초안을 제대로 만든다.
   // id 만으로 선택하면 초안이 `{wwr: undefined, ...}` 가 되어 저장하는 순간
   // 면의 실제 값을 지운다(codex 지적).
   const setSelectedId = (id) => {
     if (id != null) {
-      throw new Error(
-        'setSelectedId 는 해제 전용입니다. 선택은 handleSurfaceClick/handleZoneClick 을 쓰세요.');
+      // ⚠️ 사용자 앞에서 앱을 죽이지 않는다 — 개발 중에만 알리고 무시한다.
+      if (import.meta.env?.DEV) {
+        console.error(
+          'setSelectedId 는 해제 전용입니다. 선택은 handleSurfaceClick/handleZoneClick 을 쓰세요.');
+      }
+      return;
     }
-    dispatch(toEdit({ type: EditAction.SELECTION_CLEARED }));
+    dispatchEdit(({ type: EditAction.SELECTION_CLEARED }));
   };
-  const setHoveredId = (id) => dispatch(toEdit({ type: EditAction.HOVER_CHANGED, hoveredId: id }));
-  const setEditState = (v) => dispatch(toEdit({ type: EditAction.DRAFT_CHANGED, editState: v }));
+  const setHoveredId = (id) => dispatchEdit(({ type: EditAction.HOVER_CHANGED, hoveredId: id }));
+  const setEditState = (v) => dispatchEdit(({ type: EditAction.DRAFT_CHANGED, editState: v }));
   const setApplyToSimilarZones = (v) =>
-    dispatch(toEdit({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v }));
-  const setLightCalc = (v) => dispatch(toEdit({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v }));
-  const setEquipCalc = (v) => dispatch(toEdit({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v }));
+    dispatchEdit(({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v }));
+  const setLightCalc = (v) => dispatchEdit(({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v }));
+  const setEquipCalc = (v) => dispatchEdit(({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v }));
 
   const [projectData, setProjectData] = useState(createInitialProjectData);
 
@@ -179,7 +182,6 @@ export default function App() {
   // 화장실·계단실 등 동일 용도 존 일괄 적용 체크 — handleZoneClick에서 존 전환 시 리셋
   
   // 💡 [수정] 결과를 볼 때 '에너지 성능(energy)' 탭이 무조건 먼저 나오도록 기본값 설정
-  const [activeResultTab, setActiveResultTab] = useState('energy');
 
   const [viewMode, setViewMode] = useState('default'); // 'default' | 'sunpath' | 'thermal' | 'airflow'
   const [sunMonth, setSunMonth] = useState(6);
@@ -297,7 +299,7 @@ export default function App() {
       next.uValue = newU;   // 백엔드로 전달하기 위해 override 객체에 저장
     }
 
-    dispatch(toModel({
+    dispatchModel(({
       type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
       surfaceId, override: next, uValue: newU,
     }));
@@ -312,7 +314,7 @@ export default function App() {
   const handleResetInsulationOverride = (surfaceId, constructionId) => {
     // 원본 U-value 복원까지 같은 전이에서 한다.
     const constr = materials?.constructions?.find(c => c.id === constructionId);
-    dispatch(toModel({
+    dispatchModel(({
       type: ModelAction.CONSTRUCTION_OVERRIDE_RESET,
       surfaceId, uValue: constr ? constr.uValue : null,
     }));
@@ -545,8 +547,8 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    dispatch(toModel({ type: ModelAction.PARSE_STARTED, file }));
-    dispatch(toExec({ type: ExecAction.PARSE_STARTED }));
+    dispatchModel(({ type: ModelAction.PARSE_STARTED, file }));
+    dispatchExec(({ type: ExecAction.PARSE_STARTED }));
     try {
       const response = await uploadGbxml(file);
       if (response && response.data) {
@@ -561,19 +563,19 @@ export default function App() {
           floorLevels: response.data.floorLevels,
         });
       }
-      dispatch(toExec({ type: ExecAction.PARSE_SETTLED, ok: true }));
+      dispatchExec(({ type: ExecAction.PARSE_SETTLED, ok: true }));
     } catch (error) {
       console.error('파싱 에러:', error);
       // 백엔드가 원인을 알려주면(400 detail 등) 그대로 보여준다 — "서버 응답 없음"으로 뭉개지 않기
       const detail = error?.response?.data?.detail;
-      dispatch(toModel({
+      dispatchModel(({
         type: ModelAction.PARSE_FAILED,
         message: detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.',
       }));
       // ⚠️ 실패하면 `parsing` 에 **머문다.** 오류 화면이 그 단계 블록 **안에**
       // 있어서, upload 로 넘기면 사용자가 아무 안내도 못 받고 튕긴다.
       // 그 규칙은 `ExecAction.PARSE_SETTLED{ok:false}` 가 지킨다.
-      dispatch(toExec({ type: ExecAction.PARSE_SETTLED, ok: false }));
+      dispatchExec(({ type: ExecAction.PARSE_SETTLED, ok: false }));
     }
   };
 
@@ -585,7 +587,7 @@ export default function App() {
     if (editMode !== mode) {
       // ⚠️ 저장이 **먼저**다. 세션을 먼저 지우면 편집하던 초안이 사라진다.
       handleSaveClose();
-      dispatch(toEdit({ type: EditAction.MODE_SWITCHED, mode }));
+      dispatchEdit(({ type: EditAction.MODE_SWITCHED, mode }));
     }
   };
 
@@ -593,7 +595,7 @@ export default function App() {
     if (editMode !== 'surface') return;
     if (selectedId && selectedId !== data?.id) handleSaveClose();
 
-    dispatch(toEdit({ type: EditAction.SURFACE_SELECTED, surface: data }));
+    dispatchEdit(({ type: EditAction.SURFACE_SELECTED, surface: data }));
   };
 
   const handleZoneClick = (zoneId) => {
@@ -601,7 +603,7 @@ export default function App() {
     if (selectedId && selectedId !== zoneId) handleSaveClose();
 
     // 존 전환 시 일괄적용 체크는 reducer 가 리셋한다(다음 존에 실수로 이어붙지 않게)
-    dispatch(toEdit({
+    dispatchEdit(({
       type: EditAction.ZONE_SELECTED,
       zone: zones.find((z) => z.id === zoneId) || null,
       zoneId,
@@ -623,12 +625,12 @@ export default function App() {
     // 편집 세션을 닫는 것(edit reducer)은 다른 관심사다 — 한 곳에 두면
     // "저장했는데 화면만 바뀐" 상태가 생긴다.
     if (editMode === 'surface') {
-      dispatch(toModel({
+      dispatchModel(({
         type: ModelAction.SURFACE_EDIT_COMMITTED,
         surfaceId: selectedId, patch: editState,
       }));
     } else if (editMode === 'zone') {
-      dispatch(toModel({
+      dispatchModel(({
         type: ModelAction.ZONE_EDIT_COMMITTED,
         zoneId: selectedId, patch: editState,
         // ⚠️ 화이트리스트를 넘길 때만 일괄 적용된다. 존 전체를 복사하면
@@ -636,7 +638,7 @@ export default function App() {
         similarFields: applyToSimilarZones ? SIMILAR_ZONE_FIELDS : null,
       }));
     }
-    dispatch(toEdit({ type: EditAction.EDIT_CLOSED }));
+    dispatchEdit(({ type: EditAction.EDIT_CLOSED }));
   };
 
   // 제안 1건의 상태 변경만 수행하고, 무엇을 바꿨는지 요약 문자열을 반환한다.
@@ -677,14 +679,13 @@ export default function App() {
       }),
       runSimulation,
       {
-        onStarted: () => dispatch(toExec({ type: ExecAction.SIMULATION_STARTED })),
-        onStage: (stage) => dispatch(toExec({ type: ExecAction.LOADING_STAGE_CHANGED, stage })),
+        onStarted: () => dispatchExec(({ type: ExecAction.SIMULATION_STARTED })),
+        onStage: (stage) => dispatchExec(({ type: ExecAction.LOADING_STAGE_CHANGED, stage })),
         onSucceeded: (result) =>
-          dispatch(toExec({ type: ExecAction.SIMULATION_SUCCEEDED, result })),
-        onFailed: () => dispatch(toExec({ type: ExecAction.SIMULATION_FAILED })),
-        setActiveResultTab,
+          dispatchExec(({ type: ExecAction.SIMULATION_SUCCEEDED, result })),
+        onFailed: () => dispatchExec(({ type: ExecAction.SIMULATION_FAILED })),
         startTicker: () => {
-          interval = setInterval(() => dispatch(toExec({
+          interval = setInterval(() => dispatchExec(({
             type: ExecAction.LOADING_MESSAGE_TICKED, lastIndex: LOADING_MESSAGES.length - 1,
           })), 1500);
         },
@@ -977,7 +978,7 @@ export default function App() {
               {/* severity=block 은 해석 자체가 불가능한 입력이다 —
                   '그대로 진행'을 허용하면 신뢰할 수 없는 결과를 만들게 된다. */}
               <button
-                onClick={() => dispatch(toModel({ type: ModelAction.WARNINGS_DISMISSED }))}
+                onClick={() => dispatchModel(({ type: ModelAction.WARNINGS_DISMISSED }))}
                 disabled={gapWarnings.some((w) => w.severity === 'block')}
                 className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all ${
                   gapWarnings.some((w) => w.severity === 'block')
@@ -1032,7 +1033,7 @@ export default function App() {
           {step === 'upload' && (
             <UploadPage
               theme={theme} isDarkMode={isDarkMode}
-              setStep={setStep} setShowGuide={setShowGuide}
+              setStep={setStep}
               surfaces={surfaces} zones={zones} uploadedFile={uploadedFile}
               fileInputRef={fileInputRef}
               handleFileUpload={handleFileUpload}
@@ -1235,9 +1236,6 @@ export default function App() {
               isDarkMode={isDarkMode}
               projectData={projectData}
               lccAnalysis={lccAnalysis}
-              activeResultTab={activeResultTab}
-              setActiveResultTab={setActiveResultTab}
-              setSelectedMetric={setSelectedMetric}
               zones={zones}
               surfaces={surfaces}
               setStep={setStep}
@@ -1255,114 +1253,9 @@ export default function App() {
             />
           )}
 
-          {/* 팝업 모달 공간 (전역으로 위치 조정됨) */}
-          <AnimatePresence>
-            {selectedMetric && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                  onClick={() => setSelectedMetric(null)}
-                />
-                <motion.div
-                  layoutId={selectedMetric.layoutId}
-                  className={`relative w-full max-w-2xl p-10 rounded-[3rem] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] ${isDarkMode ? 'bg-[#0f172a] border border-slate-700/50' : 'bg-white border border-[#D5D2C9]'} z-10 overflow-hidden flex flex-col`}
-                >
-                  <button
-                    onClick={() => setSelectedMetric(null)}
-                    className="absolute top-6 right-6 p-2 rounded-full hover:bg-slate-500/20 transition-colors"
-                  >
-                    ✖
-                  </button>
-                  
-                  <motion.p layoutId={`${selectedMetric.layoutId}-label`} className={`text-sm font-black uppercase tracking-widest mb-4 opacity-60 ${theme.textSub}`}>
-                    {selectedMetric.label}
-                  </motion.p>
-                  <motion.div layoutId={`${selectedMetric.layoutId}-val`} className="flex items-baseline gap-2 mb-8 border-b border-slate-500/20 pb-8">
-                    <span className={`text-6xl font-black tracking-tighter ${selectedMetric.colorClass || 'text-emerald-400'}`}>
-                      {selectedMetric.isRawString ? selectedMetric.val : Number(selectedMetric.val).toFixed(1)}
-                    </span>
-                    <span className="text-lg font-bold opacity-50">{selectedMetric.unit}</span>
-                  </motion.div>
-                  
-                  <motion.p
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ delay: 0.1 }}
-                    className={`text-base font-medium leading-relaxed ${theme.textMain} whitespace-pre-wrap`}
-                  >
-                    {selectedMetric.desc}
-                  </motion.p>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
 
           {/* 스케줄 수정 모달 */}
-          <AnimatePresence>
-            {showScheduleModal && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowScheduleModal(false)}></div>
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem] shadow-2xl ${isDarkMode ? 'bg-slate-900' : 'bg-white'} border border-slate-700/50 p-6`}
-                >
-                  <button
-                    onClick={() => setShowScheduleModal(false)}
-                    className="absolute top-6 right-6 p-2 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors z-50"
-                  >
-                    <X size={20} className="text-slate-500" />
-                  </button>
-                  <ScheduleEditor
-                    value={projectData.customSchedule}
-                    onChange={(newSchedule) => setProjectData({...projectData, customSchedule: newSchedule})}
-                  />
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
 
-          {/* Revit gbXML 추출 가이드 영상 모달 */}
-          <AnimatePresence>
-            {showGuide && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowGuide(false)}></div>
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className={`relative w-full max-w-3xl rounded-[2rem] shadow-2xl overflow-hidden border ${isDarkMode ? 'bg-[#241a13] border-[#3a2c20]' : 'bg-[#fbf7f0] border-[#d8cbb5]'}`}
-                >
-                  <div className="flex items-center justify-between px-6 py-4">
-                    <h3 className={`text-base font-black flex items-center gap-2 ${theme.textMain}`}>
-                      <PlayCircle size={18} className="text-emerald-600" /> Revit에서 gbXML 추출하기
-                    </h3>
-                    <button
-                      onClick={() => setShowGuide(false)}
-                      className={`p-2 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
-                    >
-                      <X size={20} className={theme.textSub} />
-                    </button>
-                  </div>
-                  <video
-                    src="/gbXML_manual.mp4"
-                    controls
-                    autoPlay
-                    playsInline
-                    className="w-full max-h-[70vh] bg-black"
-                  />
-                  <p className={`px-6 py-4 text-xs leading-relaxed ${theme.textSub}`}>
-                    Revit · File → Export → gbXML 로 내보낸 .xml 파일을 업로드 화면에 올리면 됩니다.
-                  </p>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
         </main>
       </div>
       )}

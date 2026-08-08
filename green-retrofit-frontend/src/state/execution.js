@@ -68,7 +68,15 @@ export function executionReducer(state, action) {
     case ExecAction.RESULT_INVALIDATED:
       // ⚠️ 모델이 바뀌면 이전 결과는 **다른 건물의 것**이다. 남기면 3D 뷰가
       // 옛 결과로 칠해지고 결과 화면이 다른 건물 숫자를 보여준다.
-      return state.res === null ? state : { ...state, res: null, loadingStage: null };
+      if (state.res === null) return state;
+      return {
+        ...state,
+        res: null,
+        loadingStage: null,
+        // ⚠️ 결과 화면에 있는데 결과만 지우면 **0 으로 채워진 빈 결과 화면**이
+        // 남는다. 안전한 단계로 보낸다(codex 지적).
+        step: state.step === 'result' ? 'buildingView' : state.step,
+      };
 
     default:
       return state;

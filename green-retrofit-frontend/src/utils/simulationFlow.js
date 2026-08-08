@@ -18,32 +18,37 @@
  */
 export async function runSimulationFlow(payload, runner, actions, onError = null) {
   const {
-    onStarted, onStage, onSucceeded, onFailed, setActiveResultTab,
-    startTicker, stopTicker,
+    onStarted, onStage, onSucceeded, onFailed, startTicker, stopTicker,
   } = actions;
 
   onStarted();
   startTicker?.();
 
   try {
-    const response = await runner(payload, onStage);
+    let response;
+    // ⚠️ **`runner()` 만 감싼다.** 예전엔 전체를 try/catch 로 묶어서,
+    // `onSucceeded()`(화면 갱신)가 던져도 **백엔드 실패로 오인**해 오류 안내를
+    // 띄우고 `onFailed()` 로 편집 화면에 돌려보냈다(codex 지적).
+    // 시뮬레이션은 성공했는데 실패했다고 알리는 셈이다.
+    try {
+      response = await runner(payload, onStage);
+    } catch (error) {
+      // ⚠️ 원인을 삼키면 사용자는 무엇을 고쳐야 할지 모른다.
+      const detail = error?.message ? `\n\n원인: ${error.message}` : '';
+      (onError || globalThis.alert)(
+        `시뮬레이션에 실패했습니다. 백엔드 서버 상태를 확인하세요.${detail}`);
+      // ⚠️ 로딩 화면에 갇히면 안 된다 — 편집 화면으로 돌려보내 다시 시도하게 한다.
+      onFailed();
+      return null;
+    }
+
+    // 여기서 던지는 것은 **화면 쪽 문제**다. 백엔드 실패로 위장하지 않는다.
     onSucceeded(response.result);
-    // 시뮬레이션 직후에는 에너지 탭이 먼저 보여야 한다 — 이전 탭이 남으면
-    // 사용자가 방금 돌린 결과를 못 찾는다.
-    setActiveResultTab('energy');
+    // 결과 탭 초기화는 하지 않는다 — 결과 화면이 unmount 되므로 다시 성공하면
+    // 자연히 첫 탭으로 돌아간다. 여기서 되돌리면 남의 상태를 만지는 셈이다.
     return response;
-  } catch (error) {
-    // ⚠️ 원인을 삼키면 사용자는 무엇을 고쳐야 할지 모른다.
-    const detail = error?.message ? `\n\n원인: ${error.message}` : '';
-    (onError || globalThis.alert)(
-      `시뮬레이션에 실패했습니다. 백엔드 서버 상태를 확인하세요.${detail}`);
-    // ⚠️ 로딩 화면에 갇히면 안 된다 — 편집 화면으로 돌려보내 다시 시도하게 한다.
-    onFailed();
-    return null;
   } finally {
-    // ⚠️ `finally` 여야 한다. 예전엔 try/catch 양쪽에서 각각 껐는데, 그러면
-    // `onSucceeded` 나 `setActiveResultTab` 이 던졌을 때 **백엔드 실패로 오인**해
-    // `onFailed` 를 부르고 타이머도 남는다(codex 지적).
+    // 성공·실패·예외 어느 쪽이든 타이머를 끈다. 안 하면 로딩 문구가 계속 돈다.
     stopTicker?.();
   }
 }

@@ -18,7 +18,6 @@ function makeActions() {
     onStage: vi.fn(),
     onSucceeded: vi.fn(),
     onFailed: vi.fn(),
-    setActiveResultTab: vi.fn(),
     startTicker: vi.fn(),
     stopTicker: vi.fn(),
   };
@@ -67,13 +66,6 @@ describe('성공', () => {
     await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result }), actions, onError);
 
     expect(actions.onSucceeded).toHaveBeenCalledWith(result);
-  });
-
-  it('에너지 탭을 먼저 보여준다', async () => {
-    // ⚠️ 이전 탭이 남으면 사용자가 방금 돌린 결과를 못 찾는다
-    const actions = makeActions();
-    await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }), actions, onError);
-    expect(actions.setActiveResultTab).toHaveBeenCalledWith('energy');
   });
 
   it('타이머를 정리한다', async () => {
@@ -140,15 +132,6 @@ describe('실패', () => {
 // **백엔드 실패로 오인**해 `onFailed` 를 부르고 타이머도 남는다(codex 지적).
 
 describe('타이머 정리', () => {
-  it('⚠️ 성공 처리가 던져도 타이머를 끈다', async () => {
-    const actions = makeActions();
-    actions.onSucceeded.mockImplementation(() => { throw new Error('화면 오류'); });
-
-    await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }),
-                            actions, onError);
-    expect(actions.stopTicker).toHaveBeenCalled();
-  });
-
   it('실패해도 끈다', async () => {
     const actions = makeActions();
     await runSimulationFlow(PAYLOAD, vi.fn().mockRejectedValue(new Error('x')),
@@ -160,6 +143,41 @@ describe('타이머 정리', () => {
     const actions = makeActions();
     await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }),
                             actions, onError);
+    expect(actions.stopTicker).toHaveBeenCalled();
+  });
+});
+
+// ── 화면 오류를 백엔드 실패로 위장하지 않는다 ────────────
+// ⚠️ 예전엔 전체를 try/catch 로 묶어서, `onSucceeded()`(화면 갱신)가 던져도
+// 오류 안내를 띄우고 `onFailed()` 로 편집 화면에 돌려보냈다 — 시뮬레이션은
+// 성공했는데 실패했다고 알리는 셈이다(codex 지적).
+
+describe('화면 오류 ≠ 백엔드 실패', () => {
+  function throwingSuccess() {
+    const actions = makeActions();
+    actions.onSucceeded.mockImplementation(() => { throw new Error('렌더 오류'); });
+    return actions;
+  }
+
+  it('⚠️ 성공 처리가 던져도 실패 안내를 하지 않는다', async () => {
+    const actions = throwingSuccess();
+    await expect(runSimulationFlow(
+      PAYLOAD, vi.fn().mockResolvedValue({ result: {} }), actions, onError,
+    )).rejects.toThrow('렌더 오류');
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('⚠️ 성공 처리가 던져도 편집 화면으로 돌려보내지 않는다', async () => {
+    const actions = throwingSuccess();
+    await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }),
+                            actions, onError).catch(() => {});
+    expect(actions.onFailed).not.toHaveBeenCalled();
+  });
+
+  it('그래도 타이머는 끈다', async () => {
+    const actions = throwingSuccess();
+    await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }),
+                            actions, onError).catch(() => {});
     expect(actions.stopTicker).toHaveBeenCalled();
   });
 });

@@ -19,9 +19,6 @@ export default function ResultDashboard({
   res,
   isDarkMode,
   lccAnalysis,
-  activeResultTab,
-  setActiveResultTab,
-  setSelectedMetric,
   zones,
   surfaces,
   setStep,
@@ -38,6 +35,12 @@ export default function ResultDashboard({
   selectedRegion,
   projectData,
 }) {
+  // ⚠️ **결과 화면 안에서만 쓰는 상태다.** App 에 두면 다른 화면이 소유하지도
+  // 않는 값을 들고 다닌다. 시뮬레이션 중에는 이 컴포넌트가 unmount 되므로
+  // 다시 성공했을 때 자연히 'energy' 탭으로 돌아간다 — App 이 따로 되돌릴 필요가 없다.
+  const [activeResultTab, setActiveResultTab] = React.useState('energy');
+  const [selectedMetric, setSelectedMetric] = React.useState(null);
+
   // 에너지 항목 분류 및 차트 색상 (App.jsx에서 함께 이동)
   const categories = ['신재생', '난방', '냉방', '급탕', '조명', '환기', '기기'];
   const colors = ['#2DD4BF', '#F87171', '#60A5FA', '#FB923C', '#FACC15', '#4ADE80', '#A78BFA'];
@@ -50,6 +53,7 @@ export default function ResultDashboard({
     );
 
   return (
+    <>
             <div className="w-full h-full max-w-[1400px] mx-auto p-8 overflow-y-auto animate-in zoom-in duration-500 custom-scrollbar flex flex-col">
               <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4 flex-shrink-0">
                 <div>
@@ -1172,5 +1176,53 @@ export default function ResultDashboard({
                 </div>
               )}
             </div>
+
+      {/* 지표 상세 모달 — 결과 화면 소유다. App 에 두면 다른 화면이 소유하지도
+          않는 상태를 들고 다닌다. */}
+      <AnimatePresence>
+      {selectedMetric && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setSelectedMetric(null)}
+          />
+          <motion.div
+            layoutId={selectedMetric.layoutId}
+            className={`relative w-full max-w-2xl p-10 rounded-[3rem] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] ${isDarkMode ? 'bg-[#0f172a] border border-slate-700/50' : 'bg-white border border-[#D5D2C9]'} z-10 overflow-hidden flex flex-col`}
+          >
+            <button
+              onClick={() => setSelectedMetric(null)}
+              className="absolute top-6 right-6 p-2 rounded-full hover:bg-slate-500/20 transition-colors"
+            >
+              ✖
+            </button>
+            
+            <motion.p layoutId={`${selectedMetric.layoutId}-label`} className={`text-sm font-black uppercase tracking-widest mb-4 opacity-60 ${theme.textSub}`}>
+              {selectedMetric.label}
+            </motion.p>
+            <motion.div layoutId={`${selectedMetric.layoutId}-val`} className="flex items-baseline gap-2 mb-8 border-b border-slate-500/20 pb-8">
+              <span className={`text-6xl font-black tracking-tighter ${selectedMetric.colorClass || 'text-emerald-400'}`}>
+                {selectedMetric.isRawString ? selectedMetric.val : Number(selectedMetric.val).toFixed(1)}
+              </span>
+              <span className="text-lg font-bold opacity-50">{selectedMetric.unit}</span>
+            </motion.div>
+            
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ delay: 0.1 }}
+              className={`text-base font-medium leading-relaxed ${theme.textMain} whitespace-pre-wrap`}
+            >
+              {selectedMetric.desc}
+            </motion.p>
+          </motion.div>
+        </div>
+      )}
+      </AnimatePresence>
+    </>
   );
 }

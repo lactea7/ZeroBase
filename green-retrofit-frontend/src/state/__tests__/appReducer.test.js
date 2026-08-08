@@ -166,43 +166,42 @@ describe('파싱 단계', () => {
 });
 
 // ── action 라우팅 ────────────────────────────────────────
-// ⚠️ `appReducer` 는 action **값**으로 어느 묶음인지 정한다. 값이 겹치면 조용히
-// 잘못된 reducer 로 간다. 실제로 `PARSE_STARTED` 가 model·execution 양쪽에 있어
-// execution 쪽 값을 `'EXEC_PARSE_STARTED'` 로 달리 줘야 했다.
+// ⚠️ 봉투를 쓰기 **전에는** action 값이 겹치면 조용히 다른 reducer 로 갔다
+// (실제로 `PARSE_STARTED` 가 두 묶음에 있어 한쪽 값을 바꿔야 했다).
+// 이제는 **값이 같아도** 봉투가 라우팅을 정한다 — 그것을 시험한다.
 
-describe('action 값이 묶음 간에 겹치지 않는다', () => {
-  const GROUPS = { model: ModelAction, edit: EditAction, exec: ExecAction };
+describe('봉투가 라우팅을 정한다', () => {
+  it('⚠️ 같은 action 값이어도 봉투대로 간다', () => {
+    // 두 묶음이 같은 문자열을 써도 서로를 침범하지 않아야 한다
+    const before = busy();
+    const shared = { type: ModelAction.PARSE_FAILED, message: 'x' };
 
-  it('⚠️ 겹치면 조용히 다른 reducer 로 라우팅된다', () => {
-    const seen = new Map();
-    const clashes = [];
-    for (const [group, actions] of Object.entries(GROUPS)) {
-      for (const value of Object.values(actions)) {
-        if (seen.has(value)) clashes.push(`${value}: ${seen.get(value)} ↔ ${group}`);
-        seen.set(value, group);
-      }
-    }
-    expect(clashes).toEqual([]);
+    const asModel = act(before, toModel(shared));
+    expect(asModel.model.uploadError).toBe('x');
+    expect(asModel.edit).toBe(before.edit);
+
+    // edit reducer 는 이 값을 모르므로 아무것도 안 바꾼다
+    const asEdit = act(before, toEdit(shared));
+    expect(asEdit.model).toBe(before.model);
+    expect(asEdit.edit).toBe(before.edit);
   });
 
-  it('상위 전용 action 도 겹치지 않는다', () => {
-    const lower = new Set(Object.values(GROUPS).flatMap((a) => Object.values(a)));
-    for (const value of Object.values(AppAction)) {
-      expect(lower.has(value)).toBe(false);
+  it.each([
+    ['model', toModel, { type: ModelAction.WARNINGS_DISMISSED }],
+    ['edit', toEdit, { type: EditAction.SELECTION_CLEARED }],
+    ['exec', toExec, { type: ExecAction.NAVIGATED, step: 'result' }],
+  ])('%s 봉투는 자기 묶음만 바꾼다', (group, wrap, action) => {
+    const before = busy();
+    const after = act(before, wrap(action));
+    for (const other of ['model', 'edit', 'exec'].filter((g) => g !== group)) {
+      expect(after[other]).toBe(before[other]);
     }
   });
 
-  it.each(Object.entries({ model: ModelAction, edit: EditAction, exec: ExecAction }))(
-    '%s action 은 자기 묶음만 바꾼다', (group, actions) => {
-      const others = ['model', 'edit', 'exec'].filter((g) => g !== group);
-      for (const type of Object.values(actions)) {
-        const before = busy();
-        const after = send(before, { type, surfaces: [], zones: [], patch: {} });
-        for (const other of others) {
-          expect(after[other]).toBe(before[other]);
-        }
-      }
-    });
+  it('봉투 없는 action 은 아무것도 안 바꾼다', () => {
+    const s = busy();
+    expect(act(s, { type: ModelAction.WARNINGS_DISMISSED })).toBe(s);
+  });
 });
 
 // ── 모델 교체 시 결과 무효화 ─────────────────────────────
@@ -224,16 +223,24 @@ describe('MODEL_REPLACED 가 이전 결과를 버린다', () => {
     expect(after.exec.res).toBeNull();
   });
 
+  it('⚠️ 결과 화면에 있었다면 빈 결과 화면으로 남기지 않는다', () => {
+    // 결과만 지우고 화면을 그대로 두면 **0 으로 채워진 결과 화면**이 남는다
+    const s = act(withResult(), {
+      type: AppAction.MODEL_REPLACED, modelAction: { type: ModelAction.MODEL_RESET } });
+    expect(s.exec.step).not.toBe('result');
+  });
+
+  it('결과 화면이 아니면 단계를 건드리지 않는다', () => {
+    const editing = send(withResult(), { type: ExecAction.NAVIGATED, step: 'floorView' });
+    const s = act(editing, {
+      type: AppAction.MODEL_REPLACED, modelAction: { type: ModelAction.MODEL_RESET } });
+    expect(s.exec.step).toBe('floorView');
+  });
+
   it('결과가 없으면 exec 를 건드리지 않는다', () => {
     const before = busy();
     const after = act(before, {
       type: AppAction.MODEL_REPLACED, modelAction: { type: ModelAction.MODEL_RESET } });
     expect(after.exec).toBe(before.exec);
-  });
-
-  it('화면 단계는 유지한다 — 결과만 버린다', () => {
-    const s = act(withResult(), {
-      type: AppAction.MODEL_REPLACED, modelAction: { type: ModelAction.MODEL_RESET } });
-    expect(s.exec.step).toBe('result');   // 이동은 호출부가 정한다
   });
 });
