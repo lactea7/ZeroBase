@@ -134,3 +134,32 @@ describe('실패', () => {
     ).resolves.toBeNull();
   });
 });
+
+// ── 타이머 정리 (finally) ────────────────────────────────
+// ⚠️ 예전엔 try/catch 양쪽에서 각각 껐다. 그러면 `onSucceeded` 가 던졌을 때
+// **백엔드 실패로 오인**해 `onFailed` 를 부르고 타이머도 남는다(codex 지적).
+
+describe('타이머 정리', () => {
+  it('⚠️ 성공 처리가 던져도 타이머를 끈다', async () => {
+    const actions = makeActions();
+    actions.onSucceeded.mockImplementation(() => { throw new Error('화면 오류'); });
+
+    await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }),
+                            actions, onError);
+    expect(actions.stopTicker).toHaveBeenCalled();
+  });
+
+  it('실패해도 끈다', async () => {
+    const actions = makeActions();
+    await runSimulationFlow(PAYLOAD, vi.fn().mockRejectedValue(new Error('x')),
+                            actions, onError);
+    expect(actions.stopTicker).toHaveBeenCalled();
+  });
+
+  it('성공 경로에서도 끈다', async () => {
+    const actions = makeActions();
+    await runSimulationFlow(PAYLOAD, vi.fn().mockResolvedValue({ result: {} }),
+                            actions, onError);
+    expect(actions.stopTicker).toHaveBeenCalled();
+  });
+});

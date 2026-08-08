@@ -15,9 +15,19 @@ export const initialAppState = {
 };
 
 export const AppAction = {
-  //: 모델을 통째로 갈아끼운다. 편집 세션 초기화가 **함께** 일어난다.
+  //: 모델을 통째로 갈아끼운다. 편집 세션 초기화·결과 무효화가 **함께** 일어난다.
   MODEL_REPLACED: 'MODEL_REPLACED',
+  //: 아래 셋은 **봉투(envelope)** 다. 어느 묶음으로 갈지를 이름이 아니라
+  //: 구조로 정한다 — 값이 겹치면 조용히 잘못 라우팅되는 문제를 없앤다.
+  MODEL: 'MODEL',
+  EDIT: 'EDIT',
+  EXEC: 'EXEC',
 };
+
+/** 묶음별 dispatch 봉투. `dispatch(toModel({type: ...}))` 처럼 쓴다. */
+export const toModel = (action) => ({ type: AppAction.MODEL, action });
+export const toEdit = (action) => ({ type: AppAction.EDIT, action });
+export const toExec = (action) => ({ type: AppAction.EXEC, action });
 
 /** 모델을 교체하는 action 들 — 이들은 편집 세션을 이전 건물에 남겨두면 안 된다. */
 export const MODEL_REPLACING_ACTIONS = [
@@ -34,16 +44,23 @@ export function appReducer(state, action) {
       ...state,
       model: modelReducer(state.model, action.modelAction),
       edit: editSessionReducer(state.edit, { type: EditAction.SESSION_RESET }),
+      // ⚠️ **이전 결과를 버린다.** 안 버리면 새 건물의 3D 뷰가 **옛 건물의 면별
+      // 결과**로 칠해지고(뷰어가 `res.surfaceThermal` 을 쓴다), 결과 화면으로
+      // 돌아가면 다른 건물의 숫자를 본다.
+      exec: executionReducer(state.exec, { type: ExecAction.RESULT_INVALIDATED }),
     };
   }
-  if (Object.values(ModelAction).includes(action.type)) {
-    return { ...state, model: modelReducer(state.model, action) };
+  // ⚠️ 봉투로 라우팅한다. 예전에는 action **값**을 묶음별 목록과 대조했는데,
+  // 값이 겹치면 조용히 다른 reducer 로 갔다(실제로 `PARSE_STARTED` 가 두 묶음에
+  // 있어 한쪽 값을 바꿔야 했다). 구조로 정하면 겹칠 수가 없다.
+  switch (action.type) {
+    case AppAction.MODEL:
+      return { ...state, model: modelReducer(state.model, action.action) };
+    case AppAction.EDIT:
+      return { ...state, edit: editSessionReducer(state.edit, action.action) };
+    case AppAction.EXEC:
+      return { ...state, exec: executionReducer(state.exec, action.action) };
+    default:
+      return state;
   }
-  if (Object.values(EditAction).includes(action.type)) {
-    return { ...state, edit: editSessionReducer(state.edit, action) };
-  }
-  if (Object.values(ExecAction).includes(action.type)) {
-    return { ...state, exec: executionReducer(state.exec, action) };
-  }
-  return state;
 }

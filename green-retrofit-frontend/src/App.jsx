@@ -70,7 +70,9 @@ import { buildSimulationPayload } from './utils/simulationPayload';
 import { runSimulationFlow } from './utils/simulationFlow';
 import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { createInitialProjectData } from './data/initialProject';
-import { AppAction, appReducer, initialAppState } from './state/appReducer';
+import {
+  AppAction, appReducer, initialAppState, toEdit, toExec, toModel,
+} from './state/appReducer';
 import { ModelAction } from './state/modelReducer';
 import { ExecAction } from './state/execution';
 import { EditAction } from './state/editSession';
@@ -123,17 +125,17 @@ export default function App() {
   const { model, edit, exec } = app;
   const { step, loadingStage, loadingMsgIdx, res } = exec;
 
-  const setStep = (v) => dispatch({ type: ExecAction.NAVIGATED, step: v });
+  const setStep = (v) => dispatch(toExec({ type: ExecAction.NAVIGATED, step: v }));
   const {
     surfaces, zones, originalModel, uploadedFile, uploadError,
     gapWarnings, realFloorCount, materials, constructionOverrides,
   } = model;
 
   // 편집 경로용 호환 setter — `useState` 처럼 값/갱신함수를 받는다.
-  const setSurfaces = (v) => dispatch({ type: ModelAction.SURFACES_CHANGED, surfaces: v });
-  const setZones = (v) => dispatch({ type: ModelAction.ZONES_CHANGED, zones: v });
+  const setSurfaces = (v) => dispatch(toModel({ type: ModelAction.SURFACES_CHANGED, surfaces: v }));
+  const setZones = (v) => dispatch(toModel({ type: ModelAction.ZONES_CHANGED, zones: v }));
   const setConstructionOverrides = (v) =>
-    dispatch({ type: ModelAction.OVERRIDES_CHANGED, overrides: v });
+    dispatch(toModel({ type: ModelAction.OVERRIDES_CHANGED, overrides: v }));
   // ⚠️ **모델을 갈아끼울 때는 편집 세션도 반드시 함께 초기화한다.** 모델만
   // 바꾸면 `selectedId`·`activeFloor`·초안이 **이전 건물을 가리킨다**(codex 지적).
   // 그래서 두 dispatch 를 한 함수로 묶어 빠뜨릴 수 없게 한다.
@@ -152,28 +154,24 @@ export default function App() {
     applyToSimilarZones, lightCalc, equipCalc,
   } = edit;
 
-  const setActiveFloor = (f) => dispatch({ type: EditAction.FLOOR_CHANGED, floor: f });
+  const setActiveFloor = (f) => dispatch(toEdit({ type: EditAction.FLOOR_CHANGED, floor: f }));
+  // ⚠️ **선택 해제 전용**이다. 실제 선택은 `handleSurfaceClick(data)` /
+  // `handleZoneClick(id)` 가 한다 — 그쪽은 대상 객체를 알고 초안을 제대로 만든다.
+  // id 만으로 선택하면 초안이 `{wwr: undefined, ...}` 가 되어 저장하는 순간
+  // 면의 실제 값을 지운다(codex 지적).
   const setSelectedId = (id) => {
-    if (id == null) {
-      dispatch({ type: EditAction.SELECTION_CLEARED });
-      return;
+    if (id != null) {
+      throw new Error(
+        'setSelectedId 는 해제 전용입니다. 선택은 handleSurfaceClick/handleZoneClick 을 쓰세요.');
     }
-    // ⚠️ id 만으로 선택하면 초안이 `{wwr: undefined, ...}` 가 되어, 저장하는 순간
-    // 면의 실제 값을 undefined 로 덮어쓴다. **실제 면을 찾아** 초안을 만든다.
-    // (현재 호출부는 전부 null 을 넘기지만, 넘겨도 안전해야 한다)
-    const target = editMode === 'zone'
-      ? zones.find((z) => z.id === id)
-      : surfaces.find((sf) => sf.id === id);
-    dispatch(editMode === 'zone'
-      ? { type: EditAction.ZONE_SELECTED, zone: target || null, zoneId: id }
-      : { type: EditAction.SURFACE_SELECTED, surface: target || null });
+    dispatch(toEdit({ type: EditAction.SELECTION_CLEARED }));
   };
-  const setHoveredId = (id) => dispatch({ type: EditAction.HOVER_CHANGED, hoveredId: id });
-  const setEditState = (v) => dispatch({ type: EditAction.DRAFT_CHANGED, editState: v });
+  const setHoveredId = (id) => dispatch(toEdit({ type: EditAction.HOVER_CHANGED, hoveredId: id }));
+  const setEditState = (v) => dispatch(toEdit({ type: EditAction.DRAFT_CHANGED, editState: v }));
   const setApplyToSimilarZones = (v) =>
-    dispatch({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v });
-  const setLightCalc = (v) => dispatch({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v });
-  const setEquipCalc = (v) => dispatch({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v });
+    dispatch(toEdit({ type: EditAction.APPLY_SIMILAR_CHANGED, value: v }));
+  const setLightCalc = (v) => dispatch(toEdit({ type: EditAction.LIGHT_CALC_CHANGED, lightCalc: v }));
+  const setEquipCalc = (v) => dispatch(toEdit({ type: EditAction.EQUIP_CALC_CHANGED, equipCalc: v }));
 
   const [projectData, setProjectData] = useState(createInitialProjectData);
 
@@ -299,10 +297,10 @@ export default function App() {
       next.uValue = newU;   // 백엔드로 전달하기 위해 override 객체에 저장
     }
 
-    dispatch({
+    dispatch(toModel({
       type: ModelAction.CONSTRUCTION_OVERRIDE_APPLIED,
       surfaceId, override: next, uValue: newU,
-    });
+    }));
 
     // 편집 중인 면의 슬라이더도 따라가야 한다(저장 시 덮어쓰기 방지).
     // ⚠️ 편집 상태는 **다른 상태 묶음**이라 여기서 따로 갱신한다.
@@ -314,10 +312,10 @@ export default function App() {
   const handleResetInsulationOverride = (surfaceId, constructionId) => {
     // 원본 U-value 복원까지 같은 전이에서 한다.
     const constr = materials?.constructions?.find(c => c.id === constructionId);
-    dispatch({
+    dispatch(toModel({
       type: ModelAction.CONSTRUCTION_OVERRIDE_RESET,
       surfaceId, uValue: constr ? constr.uValue : null,
-    });
+    }));
     if (constr && selectedId === surfaceId) {
       setEditState(prevEdit => ({ ...prevEdit, uValue: constr.uValue }));
     }
@@ -547,8 +545,8 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    dispatch({ type: ModelAction.PARSE_STARTED, file });
-    setStep('parsing');
+    dispatch(toModel({ type: ModelAction.PARSE_STARTED, file }));
+    dispatch(toExec({ type: ExecAction.PARSE_STARTED }));
     try {
       const response = await uploadGbxml(file);
       if (response && response.data) {
@@ -563,19 +561,19 @@ export default function App() {
           floorLevels: response.data.floorLevels,
         });
       }
-      setStep('upload');
+      dispatch(toExec({ type: ExecAction.PARSE_SETTLED, ok: true }));
     } catch (error) {
       console.error('파싱 에러:', error);
       // 백엔드가 원인을 알려주면(400 detail 등) 그대로 보여준다 — "서버 응답 없음"으로 뭉개지 않기
       const detail = error?.response?.data?.detail;
-      dispatch({
+      dispatch(toModel({
         type: ModelAction.PARSE_FAILED,
         message: detail || '백엔드 서버(Python) 응답이 없거나 gbXML 파일 해석에 실패했습니다.',
-      });
-      // ⚠️ 여기서 `setStep('upload')` 를 하면 안 된다. 오류 화면은 `step === 'parsing'`
-      // 블록 **안에** 있어서, upload 로 넘기면 사용자가 **아무 안내도 못 받고**
-      // 업로드 화면으로 튕긴다. 왜 실패했는지 알 수 없으니 파일을 고칠 수도 없다.
-      // 오류 화면의 "다시 업로드 시도" 버튼이 upload 로 보내는 역할을 한다.
+      }));
+      // ⚠️ 실패하면 `parsing` 에 **머문다.** 오류 화면이 그 단계 블록 **안에**
+      // 있어서, upload 로 넘기면 사용자가 아무 안내도 못 받고 튕긴다.
+      // 그 규칙은 `ExecAction.PARSE_SETTLED{ok:false}` 가 지킨다.
+      dispatch(toExec({ type: ExecAction.PARSE_SETTLED, ok: false }));
     }
   };
 
@@ -587,7 +585,7 @@ export default function App() {
     if (editMode !== mode) {
       // ⚠️ 저장이 **먼저**다. 세션을 먼저 지우면 편집하던 초안이 사라진다.
       handleSaveClose();
-      dispatch({ type: EditAction.MODE_SWITCHED, mode });
+      dispatch(toEdit({ type: EditAction.MODE_SWITCHED, mode }));
     }
   };
 
@@ -595,7 +593,7 @@ export default function App() {
     if (editMode !== 'surface') return;
     if (selectedId && selectedId !== data?.id) handleSaveClose();
 
-    dispatch({ type: EditAction.SURFACE_SELECTED, surface: data });
+    dispatch(toEdit({ type: EditAction.SURFACE_SELECTED, surface: data }));
   };
 
   const handleZoneClick = (zoneId) => {
@@ -603,11 +601,11 @@ export default function App() {
     if (selectedId && selectedId !== zoneId) handleSaveClose();
 
     // 존 전환 시 일괄적용 체크는 reducer 가 리셋한다(다음 존에 실수로 이어붙지 않게)
-    dispatch({
+    dispatch(toEdit({
       type: EditAction.ZONE_SELECTED,
       zone: zones.find((z) => z.id === zoneId) || null,
       zoneId,
-    });
+    }));
   };
 
   // 화장실·계단실처럼 같은 용도(activityId)의 존이 여러 개일 때, 하나씩 편집하는
@@ -625,20 +623,20 @@ export default function App() {
     // 편집 세션을 닫는 것(edit reducer)은 다른 관심사다 — 한 곳에 두면
     // "저장했는데 화면만 바뀐" 상태가 생긴다.
     if (editMode === 'surface') {
-      dispatch({
+      dispatch(toModel({
         type: ModelAction.SURFACE_EDIT_COMMITTED,
         surfaceId: selectedId, patch: editState,
-      });
+      }));
     } else if (editMode === 'zone') {
-      dispatch({
+      dispatch(toModel({
         type: ModelAction.ZONE_EDIT_COMMITTED,
         zoneId: selectedId, patch: editState,
         // ⚠️ 화이트리스트를 넘길 때만 일괄 적용된다. 존 전체를 복사하면
         // 위치·면적·id 까지 덮어써 다른 존이 통째로 망가진다.
         similarFields: applyToSimilarZones ? SIMILAR_ZONE_FIELDS : null,
-      });
+      }));
     }
-    dispatch({ type: EditAction.EDIT_CLOSED });
+    dispatch(toEdit({ type: EditAction.EDIT_CLOSED }));
   };
 
   // 제안 1건의 상태 변경만 수행하고, 무엇을 바꿨는지 요약 문자열을 반환한다.
@@ -679,15 +677,16 @@ export default function App() {
       }),
       runSimulation,
       {
-        onStarted: () => dispatch({ type: ExecAction.SIMULATION_STARTED }),
-        onStage: (stage) => dispatch({ type: ExecAction.LOADING_STAGE_CHANGED, stage }),
-        onSucceeded: (result) => dispatch({ type: ExecAction.SIMULATION_SUCCEEDED, result }),
-        onFailed: () => dispatch({ type: ExecAction.SIMULATION_FAILED }),
+        onStarted: () => dispatch(toExec({ type: ExecAction.SIMULATION_STARTED })),
+        onStage: (stage) => dispatch(toExec({ type: ExecAction.LOADING_STAGE_CHANGED, stage })),
+        onSucceeded: (result) =>
+          dispatch(toExec({ type: ExecAction.SIMULATION_SUCCEEDED, result })),
+        onFailed: () => dispatch(toExec({ type: ExecAction.SIMULATION_FAILED })),
         setActiveResultTab,
         startTicker: () => {
-          interval = setInterval(() => dispatch({
-            type: ExecAction.LOADING_MESSAGE_TICKED, max: LOADING_MESSAGES.length - 1,
-          }), 1500);
+          interval = setInterval(() => dispatch(toExec({
+            type: ExecAction.LOADING_MESSAGE_TICKED, lastIndex: LOADING_MESSAGES.length - 1,
+          })), 1500);
         },
         stopTicker: () => clearInterval(interval),
       },
@@ -978,7 +977,7 @@ export default function App() {
               {/* severity=block 은 해석 자체가 불가능한 입력이다 —
                   '그대로 진행'을 허용하면 신뢰할 수 없는 결과를 만들게 된다. */}
               <button
-                onClick={() => dispatch({ type: ModelAction.WARNINGS_DISMISSED })}
+                onClick={() => dispatch(toModel({ type: ModelAction.WARNINGS_DISMISSED }))}
                 disabled={gapWarnings.some((w) => w.severity === 'block')}
                 className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all ${
                   gapWarnings.some((w) => w.severity === 'block')

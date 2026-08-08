@@ -27,16 +27,12 @@ export async function runSimulationFlow(payload, runner, actions, onError = null
 
   try {
     const response = await runner(payload, onStage);
-    // ⚠️ 성공·실패 어느 쪽이든 타이머를 **반드시** 정리한다. 안 하면 결과 화면에서
-    // 로딩 문구가 계속 돈다. (단계 표시 정리는 성공/실패 전이가 함께 한다)
-    stopTicker?.();
     onSucceeded(response.result);
     // 시뮬레이션 직후에는 에너지 탭이 먼저 보여야 한다 — 이전 탭이 남으면
     // 사용자가 방금 돌린 결과를 못 찾는다.
     setActiveResultTab('energy');
     return response;
   } catch (error) {
-    stopTicker?.();
     // ⚠️ 원인을 삼키면 사용자는 무엇을 고쳐야 할지 모른다.
     const detail = error?.message ? `\n\n원인: ${error.message}` : '';
     (onError || globalThis.alert)(
@@ -44,5 +40,10 @@ export async function runSimulationFlow(payload, runner, actions, onError = null
     // ⚠️ 로딩 화면에 갇히면 안 된다 — 편집 화면으로 돌려보내 다시 시도하게 한다.
     onFailed();
     return null;
+  } finally {
+    // ⚠️ `finally` 여야 한다. 예전엔 try/catch 양쪽에서 각각 껐는데, 그러면
+    // `onSucceeded` 나 `setActiveResultTab` 이 던졌을 때 **백엔드 실패로 오인**해
+    // `onFailed` 를 부르고 타이머도 남는다(codex 지적).
+    stopTicker?.();
   }
 }

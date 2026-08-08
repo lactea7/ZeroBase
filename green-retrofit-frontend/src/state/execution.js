@@ -24,6 +24,7 @@ export const ExecAction = {
   LOADING_MESSAGE_TICKED: 'LOADING_MESSAGE_TICKED',
   SIMULATION_SUCCEEDED: 'SIMULATION_SUCCEEDED',
   SIMULATION_FAILED: 'SIMULATION_FAILED',
+  RESULT_INVALIDATED: 'RESULT_INVALIDATED',
 };
 
 export function executionReducer(state, action) {
@@ -46,11 +47,14 @@ export function executionReducer(state, action) {
     case ExecAction.LOADING_STAGE_CHANGED:
       return { ...state, loadingStage: action.stage ?? null };
 
-    case ExecAction.LOADING_MESSAGE_TICKED:
-      return {
-        ...state,
-        loadingMsgIdx: Math.min(state.loadingMsgIdx + 1, action.max ?? state.loadingMsgIdx + 1),
-      };
+    case ExecAction.LOADING_MESSAGE_TICKED: {
+      // ⚠️ 상한은 호출부가 준다 — reducer 가 UI 문구 배열을 import 하면
+      // 의존성이 거꾸로 흐른다(codex 조언).
+      const next = state.loadingMsgIdx + 1;
+      const last = Number.isFinite(action.lastIndex) && action.lastIndex >= 0
+        ? action.lastIndex : next;
+      return { ...state, loadingMsgIdx: Math.min(next, last) };
+    }
 
     case ExecAction.SIMULATION_SUCCEEDED:
       // ⚠️ 결과 적재·화면 전환·로딩 정리를 **한 전이에서** 한다.
@@ -60,6 +64,11 @@ export function executionReducer(state, action) {
       // ⚠️ 결과는 건드리지 않는다 — 지난 성공 결과를 지우면 사용자가 비교 대상을
       // 잃는다. 로딩 화면에 가두지 않고 편집 화면으로 돌려보낸다.
       return { ...state, step: 'floorView', loadingStage: null };
+
+    case ExecAction.RESULT_INVALIDATED:
+      // ⚠️ 모델이 바뀌면 이전 결과는 **다른 건물의 것**이다. 남기면 3D 뷰가
+      // 옛 결과로 칠해지고 결과 화면이 다른 건물 숫자를 보여준다.
+      return state.res === null ? state : { ...state, res: null, loadingStage: null };
 
     default:
       return state;
