@@ -92,43 +92,11 @@ import ResultDashboard from './components/steps/ResultDashboard';
 
 // --- 분리된 평면도/속성 편집기 (STEP 3 & 4) ---
 import FloorEditor from './components/steps/FloorEditor';
+import WizardShell from './components/layout/WizardShell';
+import LoadingPage from './pages/LoadingPage';
+import UploadPage from './pages/UploadPage';
 
 
-// --- 설정 위저드 공통 셸 (스텝별 페이지 래퍼: 헤더 + 이전/다음 네비게이션) ---
-// 모듈 스코프에 정의해야 매 렌더마다 재생성되어 입력 포커스를 잃는 문제를 피할 수 있다.
-function WizardShell({ theme, isDarkMode, setStep, icon, title, subtitle, back, next, nextLabel = '다음', nextDisabled = false, children }) {
-  return (
-    <div className="w-full h-full mx-auto px-6 pt-8 pb-28 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto custom-scrollbar">
-      <div className="max-w-3xl mx-auto">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-500 mb-4">{icon}</div>
-          <h2 className={`text-3xl font-black mb-2 tracking-tight ${theme.textMain}`}>{title}</h2>
-          {subtitle && <p className={`text-sm ${theme.textSub}`}>{subtitle}</p>}
-        </div>
-        {children}
-        <div className="mt-10 flex justify-between items-center gap-4">
-          {back ? (
-            <button
-              onClick={() => setStep(back)}
-              className={`px-6 py-3 rounded-2xl font-bold text-sm border-2 transition-all flex items-center gap-2 ${isDarkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-300 hover:bg-slate-200 text-slate-600'}`}
-            >
-              <ArrowLeft size={18} /> 이전
-            </button>
-          ) : <span />}
-          {next ? (
-            <button
-              onClick={() => { if (!nextDisabled) setStep(next); }}
-              disabled={nextDisabled}
-              className={`px-8 py-3 rounded-2xl font-black text-sm shadow-lg flex items-center gap-2 transition-all ${nextDisabled ? 'bg-slate-400/30 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white hover:scale-105 shadow-emerald-500/30'}`}
-            >
-              {nextLabel} <ArrowRight size={18} />
-            </button>
-          ) : <span />}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // --- [메인 애플리케이션] ---
 export default function App() {
@@ -1098,81 +1066,18 @@ export default function App() {
         <main className="flex-1 flex overflow-hidden relative w-full h-full">
           {/* STEP 1: Upload & Project Setup */}
           {step === 'upload' && (
-            <WizardShell
-              theme={theme} isDarkMode={isDarkMode} setStep={setStep}
-              icon={<UploadCloud size={32} />}
-              title="gbXML 모델 업로드"
-              subtitle="분석할 BIM 모델 파일을 올리거나, 샘플 건물로 바로 시작하세요."
-              next="projectInfo"
-              nextDisabled={surfaces.length === 0}
-            >
-                <div className="flex flex-col gap-4">
-                  {!uploadedFile || surfaces.length === 0 ? (
-                    <>
-                      <div
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`flex-1 min-h-[300px] p-12 rounded-[2rem] border-2 border-dashed ${isDarkMode ? 'border-slate-700 hover:border-emerald-500' : 'border-slate-300 hover:border-emerald-500'} flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-emerald-500/5 group ${theme.card}`}
-                      >
-                        <UploadCloud size={60} className="text-emerald-500 mb-6 group-hover:scale-110 transition-transform" />
-                        <h3 className="text-2xl font-black mb-2">gbXML 모델 업로드</h3>
-                        <p className={`text-sm text-center ${theme.textSub}`}>클릭하여 파일을 선택하세요 (.xml / .gbxml)</p>
-                        <input
-                          type="file"
-                          accept=".xml,.gbxml"
-                          ref={fileInputRef}
-                          className="hidden"
-                          onChange={handleFileUpload}
-                        />
-                      </div>
-                      <div className="flex items-center gap-4 my-1">
-                        <div className="flex-1 h-px bg-current opacity-10"></div>
-                        <span className="text-[10px] font-bold opacity-50 uppercase tracking-widest">OR</span>
-                        <div className="flex-1 h-px bg-current opacity-10"></div>
-                      </div>
-                      <button
-                        onClick={handleStartWithSample}
-                        className={`w-full py-5 rounded-[1.5rem] font-black text-sm border-2 transition-all active:scale-95 ${isDarkMode ? 'border-slate-700 hover:bg-slate-800 text-slate-300' : 'border-slate-300 hover:bg-slate-200 text-slate-600'}`}
-                      >
-                        샘플 3층 상업용 건물로 바로 시작하기
-                      </button>
-                      <button
-                        onClick={() => setShowGuide(true)}
-                        className="mt-1 inline-flex items-center justify-center gap-2 self-center text-sm font-bold text-emerald-600 hover:text-emerald-500 transition-colors"
-                      >
-                        <PlayCircle size={18} /> Revit에서 gbXML 추출하는 법 보기
-                      </button>
-                    </>
-                  ) : (
-                    <div className={`flex-1 min-h-[300px] p-12 rounded-[2rem] border-2 border-emerald-500 ${isDarkMode ? 'bg-emerald-500/10' : 'bg-emerald-50'} flex flex-col items-center justify-center transition-all animate-in zoom-in-95`}>
-                      <CheckCircle2 size={60} className="text-emerald-500 mb-6 animate-pulse" />
-                      <h3 className="text-2xl font-black mb-2 text-emerald-500">모델 파싱 완료!</h3>
-                      <p className={`text-sm text-center font-bold ${theme.textMain} max-w-[250px] truncate`}>
-                        {uploadedFile.name}
-                      </p>
-                      <div className="flex gap-4 mt-6 text-sm">
-                        <span className={`px-4 py-2 rounded-xl ${isDarkMode ? 'bg-black/20' : 'bg-white/50'} text-emerald-500 font-bold border border-emerald-500/20`}>
-                          면(Surface): {surfaces.length}개
-                        </span>
-                        <span className={`px-4 py-2 rounded-xl ${isDarkMode ? 'bg-black/20' : 'bg-white/50'} text-blue-500 font-bold border border-blue-500/20`}>
-                          존(Zone): {zones.length}개
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setUploadedFile(null);
-                          setSurfaces([]);
-                          setZones([]);
-                          setMaterials(null);
-                          setConstructionOverrides({});
-                        }}
-                        className={`mt-8 text-xs font-bold transition-colors underline ${isDarkMode ? 'text-slate-500 hover:text-red-400' : 'text-slate-400 hover:text-red-500'}`}
-                      >
-                        다른 파일 다시 업로드하기
-                      </button>
-                    </div>
-                  )}
-                </div>
-            </WizardShell>
+            <UploadPage
+              theme={theme} isDarkMode={isDarkMode}
+              setStep={setStep} setShowGuide={setShowGuide}
+              surfaces={surfaces} zones={zones} uploadedFile={uploadedFile}
+              fileInputRef={fileInputRef}
+              handleFileUpload={handleFileUpload}
+              handleStartWithSample={handleStartWithSample}
+              setSurfaces={setSurfaces} setZones={setZones}
+              setUploadedFile={setUploadedFile}
+              setMaterials={setMaterials}
+              setConstructionOverrides={setConstructionOverrides}
+            />
           )}
 
           {/* STEP: 프로젝트 기본 정보 */}
@@ -1755,29 +1660,11 @@ export default function App() {
 
           {/* STEP 5: Loading */}
           {step === 'loading' && (
-            <div className="flex-1 flex flex-col items-center justify-center animate-in fade-in h-full">
-              <h2 className={`text-4xl font-black mb-4 tracking-tighter uppercase text-center ${theme.textMain}`}>
-                {LOADING_MESSAGES[loadingMsgIdx]}
-              </h2>
-              {/* 백엔드가 알려주는 실제 진행 단계 */}
-              <p className={`text-sm font-bold mb-10 ${theme.textSub}`}>
-                {loadingStage === 'queued' && '대기열에서 순서를 기다리는 중...'}
-                {loadingStage === 'baseline' && '1/2단계 — 개선 전(원본) 건물 시뮬레이션 중'}
-                {loadingStage === 'retrofit' && '개선안 건물 시뮬레이션 중'}
-                {loadingStage?.startsWith('alt:') && '추가 절감 대안의 에너지 영향 계산 중 (대안별 재시뮬레이션)'}
-                {!loadingStage && 'EnergyPlus 물리 엔진 가동 중'}
-              </p>
-              <div className="relative flex justify-center items-center h-24">
-                <div className="loading-wrapper">
-                  <div className="loading-circle"></div>
-                  <div className="loading-circle"></div>
-                  <div className="loading-circle"></div>
-                  <div className="loading-shadow"></div>
-                  <div className="loading-shadow"></div>
-                  <div className="loading-shadow"></div>
-                </div>
-              </div>
-            </div>
+            <LoadingPage
+              theme={theme}
+              loadingMsgIdx={loadingMsgIdx}
+              loadingStage={loadingStage}
+            />
           )}
 
           {/* STEP 6: Result */}
