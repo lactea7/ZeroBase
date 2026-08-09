@@ -7,6 +7,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:      # 병합 전에 브랜치에서 직접 돌려 보기 위해
+
+env:
+  # 참조값을 만든 버전과 같아야 한다 — 필드 순서가 달라지면 골든 IDF 가 어긋난다.
+  EP_VERSION: 25.2.0
+  EP_SHA: cf7368216c
 
 jobs:
   frontend:
@@ -38,6 +44,33 @@ jobs:
           python-version: '3.14'
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      # ⚠️ `-m "not slow"` 는 EnergyPlus 실행이 필요한 118개를 뺀다.
-      # 골든 IDF·응답 계약·도메인 계산은 전부 여기 포함된다(EnergyPlus 없이 돈다).
+
+      # ⚠️ **IDD 는 EnergyPlus 실행과 별개로 필요하다.** `_emit_by_idd` 가 객체별
+      # 필드 순서를 이 스키마에서 읽으므로, 없으면 IDF 조립 자체가 안 된다
+      # (PTHP·UnitHeater·블라인드·골든 IDF 등 26개가 죽는다).
+      # 첫 CI 실행이 이걸 잡아 줬다 — 로컬에는 EnergyPlus 가 깔려 있어 안 보였다.
+      #
+      # 전체 EnergyPlus 를 깔면 관문이 느려지므로 **IDD 파일만** 받아 캐시한다.
+      # 버전은 참조값을 만든 25.2.0 과 같아야 한다 — 필드 순서가 달라지면
+      # 골든 IDF 가 통째로 어긋난다.
+      - name: Energy+.idd 캐시
+        id: idd-cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/EnergyPlus-25-2-0
+          key: energyplus-idd-${{ env.EP_VERSION }}-${{ runner.os }}
+
+      - name: Energy+.idd 내려받기
+        if: steps.idd-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://github.com/NREL/EnergyPlus/releases/download/v${EP_VERSION}/EnergyPlus-${EP_VERSION}-${EP_SHA}-Linux-Ubuntu24.04-x86_64.tar.gz"
+          curl -fsSL "$url" -o /tmp/ep.tar.gz
+          sudo mkdir -p /usr/local/EnergyPlus-25-2-0
+          # 4.3MB 스키마 하나만 꺼낸다 (전체 설치는 수백 MB).
+          sudo tar -xzf /tmp/ep.tar.gz -C /usr/local/EnergyPlus-25-2-0 \
+            --strip-components=1 --wildcards '*/Energy+.idd'
+
+      # ⚠️ `-m "not slow"` 는 EnergyPlus **실행**이 필요한 118개를 뺀다.
+      # 골든 IDF·응답 계약·도메인 계산은 여기 포함된다.
       - run: pytest -q -m "not slow"
