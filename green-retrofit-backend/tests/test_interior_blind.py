@@ -114,3 +114,51 @@ def test_blind_assumption_is_reported_in_the_response():
     m = re.search(r'"key":\s*"interior_blind".*?"confidence":\s*"(\w+)"', src, re.S)
     assert m, "assumptions 에 interior_blind 항목이 없다"
     assert m.group(1) == "low", "측정값이 아니라 가정이므로 confidence 는 low 여야 한다"
+
+
+# ── 창이 많은 존 ─────────────────────────────────────────
+# ⚠️ IDD 는 반복 필드를 **예시로 10개만** 나열한다. 그 개수를 상한으로 착각해
+# 이름으로 넣었더니 11번째부터 "IDD에 없는 필드"로 거부됐고, 창 22개짜리 존이 있는
+# 실제 모델(회의실.xml)에서 **시뮬레이션이 통째로 죽었다.**
+
+@pytest.mark.parametrize("count", [1, 9, 10, 11, 22, 50])
+def test_any_number_of_windows_is_accepted(count):
+    idf = IdfBuilder()
+    idf.add_window_shading_control("Z1", [f"W{i}" for i in range(count)])
+    fields = idf.objects[-1].fields
+    assert fields[-count:] == [f"W{i}" for i in range(count)]
+
+
+def test_windows_start_at_the_extensible_position():
+    """⚠️ 반복 값이 한 칸이라도 밀리면 EnergyPlus 가 엉뚱한 필드로 읽는다."""
+    from src.idf_builder import _get_idd_index
+    start = _get_idd_index()["windowshadingcontrol"]["ext_start"]
+    idf = IdfBuilder()
+    idf.add_window_shading_control("Z1", ["W1", "W2"])
+    fields = idf.objects[-1].fields
+    assert fields[start] == "W1"
+    assert fields[start + 1] == "W2"
+    # 반복 시작 **직전**은 명시 필드여야 한다(빈칸으로 밀리지 않았는지)
+    assert fields[start - 1] == "Sequential"
+
+
+def test_named_fields_are_still_validated():
+    """확장을 허용했다고 오타 검출까지 잃으면 안 된다."""
+    idf = IdfBuilder()
+    with pytest.raises(ValueError, match="IDD에 없는 필드"):
+        idf._emit_by_idd("WindowShadingControl", {"없는필드": 1})
+
+
+def test_non_extensible_object_rejects_extensible_values():
+    idf = IdfBuilder()
+    with pytest.raises(ValueError, match="확장"):
+        idf._emit_by_idd("Zone", {"Name": "Z1"}, extensible=["x"])
+
+
+def test_named_field_inside_the_extensible_range_is_rejected():
+    """⚠️ 명시 필드가 반복 구간을 침범하면 값이 통째로 밀린다."""
+    idf = IdfBuilder()
+    with pytest.raises(ValueError, match="extensible"):
+        idf._emit_by_idd("WindowShadingControl",
+                         {"Name": "C", "Fenestration Surface 1 Name": "W1"},
+                         extensible=["W2"])

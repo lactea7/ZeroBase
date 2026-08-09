@@ -41,7 +41,16 @@ def _idd_candidates():
 
 
 def _get_idd_index():
-    """Energy+.idd를 1회 파싱해 {객체타입(소문자): {fields:[필드명...], min:최소필드수}} 반환."""
+    """Energy+.idd를 1회 파싱해 객체별 필드 정보를 반환한다.
+
+    `{객체타입(소문자): {fields: [필드명...], min: 최소필드수,
+                        ext_size: 반복 묶음 크기, ext_start: 반복 시작 위치}}`
+
+    ⚠️ **확장(extensible) 객체를 알아야 한다.** IDD 는 반복 필드를 몇 개만 예시로
+    나열하고 `\\extensible:N` 으로 "이 묶음이 무한 반복된다"고 표시한다. 그걸 모르면
+    나열된 개수를 상한으로 착각한다 — 실제로 `WindowShadingControl` 은 창을 10개까지만
+    받는 줄 알고 있었고, 창 22개짜리 존이 있는 모델에서 시뮬레이션이 통째로 죽었다.
+    """
     global _IDD_INDEX_CACHE
     if _IDD_INDEX_CACHE is not None:
         return _IDD_INDEX_CACHE
@@ -54,14 +63,18 @@ def _get_idd_index():
     obj_header = re.compile(r"^([A-Za-z][A-Za-z0-9:_]*)\s*,\s*$")
     field_line = re.compile(r"^\s+[AN]\d+\s*[,;]\s*\\field\s+(.+?)\s*$")
     minf_line = re.compile(r"^\s+\\min-fields\s+(\d+)")
+    ext_line = re.compile(r"^\s+\\extensible:(\d+)")
+    begin_ext = re.compile(r"^\s+\\begin-extensible")
 
     cur = None
+    pending_begin_ext = False
     with open(idd_path, "r", encoding="utf-8", errors="ignore") as f:
         for raw in f:
             line = raw.rstrip("\n")
             m = obj_header.match(line)
             if m:
-                cur = {"fields": [], "min": 0}
+                cur = {"fields": [], "min": 0, "ext_size": 0, "ext_start": None}
+                pending_begin_ext = False
                 index[m.group(1).lower()] = cur
                 continue
             if cur is None:
@@ -69,6 +82,15 @@ def _get_idd_index():
             fm = field_line.match(line)
             if fm:
                 cur["fields"].append(fm.group(1).strip())
+                continue
+            # ⚠️ `\begin-extensible` 은 **직전 필드**에 붙는다(그 필드부터 반복).
+            if begin_ext.match(line):
+                if cur["ext_start"] is None and cur["fields"]:
+                    cur["ext_start"] = len(cur["fields"]) - 1
+                continue
+            em = ext_line.match(line)
+            if em:
+                cur["ext_size"] = int(em.group(1))
                 continue
             mm = minf_line.match(line)
             if mm:
@@ -172,12 +194,21 @@ class IdfBuilder:
         self.objects.append(IdfObject(obj_type, fields or []))
         return self
 
-    def _emit_by_idd(self, obj_type: str, field_dict: dict) -> "IdfBuilder":
-        """{필드명: 값} dict를 IDD 필드 순서대로 위치 리스트로 평탄화해 추가.
+    def _emit_by_idd(self, obj_type: str, field_dict: dict,
+                     extensible: list | None = None) -> "IdfBuilder":
+        r"""{필드명: 값} dict를 IDD 필드 순서대로 위치 리스트로 평탄화해 추가.
 
-        - 미설정 필드는 "" 로 채움(마지막 설정 필드 또는 \\min-fields 까지).
+        - 미설정 필드는 "" 로 채움(마지막 설정 필드 또는 \min-fields 까지).
         - field_dict 키가 IDD에 없으면 ValueError(오타·버전 불일치 조기 발견).
         - IDD를 못 찾으면 RuntimeError(이 경로는 IDD 기반 객체 emit을 요구).
+
+        `extensible` — 반복 묶음의 값 목록. 각 원소는 한 묶음이며, 묶음 크기가 1이면
+        값을 그대로 줘도 된다.
+
+        ⚠️ **IDD 는 반복 필드를 몇 개만 예시로 나열한다.** 그 개수를 상한으로 착각하면
+        안 된다 — `WindowShadingControl` 은 창을 10개까지만 받는 줄 알고 있었고,
+        창 22개짜리 존이 있는 모델에서 **시뮬레이션이 통째로 죽었다.** 반복 값은
+        이름이 아니라 이 인자로 넘겨 `\begin-extensible` 위치부터 이어 붙인다.
         """
         idx = _get_idd_index().get(obj_type.lower())
         if idx is None or not idx["fields"]:
@@ -193,15 +224,37 @@ class IdfBuilder:
             raise ValueError(
                 f"'{obj_type}' IDD에 없는 필드: {unknown}\n사용 가능 필드 일부: {names[:8]}..."
             )
+
+        ext_start, ext_size = idx.get("ext_start"), idx.get("ext_size") or 0
+        if extensible and (ext_start is None or ext_size <= 0):
+            raise ValueError(
+                f"'{obj_type}' 은 확장(extensible) 객체가 아닌데 반복 값을 받았습니다.")
+        # ⚠️ 명시 필드가 반복 시작 위치를 침범하면 값이 밀린다 — 조기에 잡는다.
+        if extensible and any(pos[k] >= ext_start for k in field_dict):
+            bad = [k for k in field_dict if pos[k] >= ext_start]
+            raise ValueError(
+                f"'{obj_type}' 반복 구간(index {ext_start}~) 필드는 extensible 로 "
+                f"넘겨야 합니다: {bad}")
+
         if not field_dict:
             last = 0
         else:
             last = max(pos[k] for k in field_dict) + 1
         length = max(last, idx.get("min", 0))
+        if extensible:
+            length = max(length, ext_start)
         fields = []
         for i in range(length):
             v = field_dict.get(names[i], "")
             fields.append("" if v is None else v)
+
+        for group in (extensible or []):
+            values = group if isinstance(group, (list, tuple)) else [group]
+            if len(values) != ext_size:
+                raise ValueError(
+                    f"'{obj_type}' 반복 묶음 크기는 {ext_size} 인데 {len(values)} 개를 받았습니다.")
+            fields.extend("" if v is None else v for v in values)
+
         return self.add(obj_type, fields)
 
     # -------------------------------------------------------
@@ -400,9 +453,11 @@ class IdfBuilder:
             "Type of Slat Angle Control for Blinds": "FixedSlatAngle",
             "Multiple Surface Control Type": "Sequential",
         }
-        for i, wid in enumerate(window_ids, start=1):
-            fields[f"Fenestration Surface {i} Name"] = wid
-        return self._emit_by_idd("WindowShadingControl", fields)
+        # ⚠️ 창 목록은 **이름이 아니라 확장 인자**로 넘긴다. IDD 가 예시로 10개만
+        # 나열하는데 이름으로 넣으면 11번째부터 "IDD에 없는 필드"로 거부된다 —
+        # 창 22개짜리 존이 있는 모델에서 시뮬레이션이 통째로 죽었다.
+        return self._emit_by_idd("WindowShadingControl", fields,
+                                 extensible=list(window_ids))
 
     def add_surface_crack(self, surface_id: str, area_m2: float) -> str:
         """표면 면적에 비례하는 균열 컴포넌트를 만들고 이름을 돌려준다.
