@@ -161,7 +161,7 @@ export default function RenewablePage({
                           <ToggleLeft size={32} className="text-slate-500" />
                         )}
                       </div>
-                      
+
                       <div
                         className={`mt-4 p-4 rounded-xl flex items-center justify-between cursor-pointer border-2 transition-all ${projectData.hvacUpgradeActive ? 'border-orange-500 bg-orange-500/10' : 'border-slate-500/30 bg-black/5'}`}
                         onClick={() => setProjectData((prev) => ({ ...prev, hvacUpgradeActive: !prev.hvacUpgradeActive }))}

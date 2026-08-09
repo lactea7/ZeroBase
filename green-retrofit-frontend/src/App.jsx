@@ -71,8 +71,8 @@ import { ACTIVITIES, GLAZING_TYPES, KOREA_REGIONS } from './data/constants';
 import { createInitialProjectData } from './data/initialProject';
 import { calculateSurfaceArea } from './utils/geometry';
 import {
-  FALLBACK_ZONE_AREA, deriveFloorEditorModel,
-  isVirtualFloor as isVirtualFloorPure,
+  MIN_ZONE_AREA, buildDisplayFloors, buildZoneFloorAreaById,
+  isVirtualFloor as isVirtualFloorPure, selectSurface,
 } from './state/floorEditorModel';
 import {
   AppAction, appReducer, initialAppState, toEdit, toExec, toModel,
@@ -331,11 +331,14 @@ export default function App() {
   // 파생값은 `state/floorEditorModel.js` 가 낸다 — 화면 없이 시험할 수 있어야 한다.
   // ⚠️ `useMemo` 는 여기(호출부)에서 건다. 입력 참조를 전부 dependency 에 넣어야
   // 하는데 그건 selector 가 아니라 여기만 안다.
-  const floorEditorModel = React.useMemo(
-    () => deriveFloorEditorModel({ surfaces, zones, realFloorCount, edit }),
-    [surfaces, zones, realFloorCount, edit],
-  );
-  const { zoneFloorAreaById, displayFloors, selectedSurfaceData } = floorEditorModel;
+  // ⚠️ **따로 memo 한다.** `edit` 전체를 dependency 로 묶으면 hover 만 움직여도
+  // 모든 존 면적을 다시 계산한다(codex 지적).
+  const zoneFloorAreaById = React.useMemo(
+    () => buildZoneFloorAreaById(zones, surfaces), [zones, surfaces]);
+  const displayFloors = React.useMemo(
+    () => buildDisplayFloors(zones, surfaces), [zones, surfaces]);
+  const selectedSurfaceData = React.useMemo(
+    () => selectSurface(surfaces, editMode, selectedId), [surfaces, editMode, selectedId]);
 
   const selectedRegion = KOREA_REGIONS.flatMap(g => g.options).find(opt => opt.id === projectData.location) || { name: '서울특별시 (Seoul)' };
   const latitude = REGION_LATITUDES[projectData.location] || 37.56;
@@ -361,7 +364,7 @@ export default function App() {
 
   // ⚠️ 존마다 면을 filter 하던 것을 **한 번의 순회**로 만든 map 조회로 바꿨다.
   // 값 산정 규칙(선언 면적 우선, 백엔드와 동일 임계값)은 selector 가 지킨다.
-  const getZoneFloorArea = (zoneId) => zoneFloorAreaById[zoneId] ?? FALLBACK_ZONE_AREA;
+  const getZoneFloorArea = (zoneId) => zoneFloorAreaById[zoneId] ?? MIN_ZONE_AREA;
 
 
   const getSampleVerts = (w, h, pos, rot) => {

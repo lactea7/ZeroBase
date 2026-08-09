@@ -5,22 +5,26 @@
 
 import { calculateSurfaceArea } from '../utils/geometry';
 
-//: 존 면적을 못 구했을 때의 최후 기본값(㎡).
-export const FALLBACK_ZONE_AREA = 100.0;
-//: 기하 합산 결과를 유효하다고 볼 최소 면적(㎡).
-export const MIN_GEOMETRY_AREA = 1.0;
+//: 존 면적의 **최후 하한**(㎡).
+//
+// ⚠️ 예전 프런트는 100㎡ 였다. 백엔드는 그 값이 **한겨울에 냉방이 도는 왜곡**을
+// 만들어 1㎡ 로 바꿨다 — 실면적 ~5㎡ 샤프트·설비존에 100㎡ 분 내부발열을 주입했기
+// 때문이다. 프런트가 100 을 쓰면 화면 면적과 시뮬레이션 면적이 20배 갈린다.
+export const MIN_ZONE_AREA = 1.0;
+
 //: 층 정보가 전혀 없을 때 보여줄 층.
 export const DEFAULT_FLOORS = [1, 2, 3];
 
 /**
  * 존별 바닥면적 map.
  *
- * ⚠️ **백엔드와 같은 기준이어야 한다.** 백엔드는 gbXML 선언 면적(`declaredArea`)을
- * 우선하는데 여기서 기하 합산을 쓰면 화면과 시뮬레이션이 갈린다 — 층간 슬래브가
- * 아래층 존에 바닥·천장으로 이중 계산돼 104 존이 프런트 223.22㎡ /
- * 백엔드 107.22㎡ 로 **2배** 차이났다.
- * 유효성 기준(유한한 양수)도 백엔드 `gbxml_parser` 와 같게 둔다 — 임계값이
- * 어긋나면 그 사이 면적의 존에서 또 갈린다.
+ * ⚠️ **백엔드 `ep_simulator.compute_zone_floor_areas` 와 같은 순서여야 한다.**
+ * 갈라지면 화면 면적과 시뮬레이션 면적이 달라진다.
+ *
+ *   declaredArea → geometricArea → area → 바닥/슬래브 합 → 천장/지붕 합 → 1㎡
+ *
+ * ⚠️ `geometricArea` 를 빠뜨리면 안 된다. 파서가 층간면 귀속을 보정한 값인데,
+ * 단순 합산으로 대체하면 101 화장실이 12.42 vs 24.84 로 **2배** 갈린다.
  *
  * ⚠️ 존 id 가 객체 키가 되므로 `Object.create(null)` 을 쓴다. 평범한 `{}` 는
  * `constructor` 같은 이름의 존에서 프로토타입 속성과 충돌한다.
@@ -29,23 +33,37 @@ export function buildZoneFloorAreaById(zones, surfaces) {
   const byZone = Object.create(null);
 
   // ⚠️ 존마다 `surfaces.filter()` 를 돌면 존×면 이다. **한 번만 순회**한다.
-  const geometrySum = Object.create(null);
+  const floorSum = Object.create(null);
+  const ceilingSum = Object.create(null);
   for (const surface of surfaces || []) {
-    const type = (surface?.type || '').toLowerCase();
-    if (!type.includes('floor') && !type.includes('slab')) continue;
     const zoneId = surface?.zone;
     if (zoneId == null) continue;
-    geometrySum[zoneId] = (geometrySum[zoneId] || 0) + calculateSurfaceArea(surface.vertices);
+    const type = (surface?.type || '').toLowerCase();
+    const bucket = (type.includes('floor') || type.includes('slab')) ? floorSum
+      : (type.includes('ceiling') || type.includes('roof')) ? ceilingSum : null;
+    if (!bucket) continue;
+    bucket[zoneId] = (bucket[zoneId] || 0) + calculateSurfaceArea(surface.vertices);
   }
 
   for (const zone of zones || []) {
-    const declared = Number(zone?.declaredArea ?? zone?.area ?? 0);
-    if (Number.isFinite(declared) && declared > 0) {
+    const declared = Number(zone?.declaredArea) || 0;
+    if (declared > 0) {
       byZone[zone.id] = declared;
       continue;
     }
-    const summed = geometrySum[zone.id] || 0;
-    byZone[zone.id] = summed >= MIN_GEOMETRY_AREA ? summed : FALLBACK_ZONE_AREA;
+    // 파서가 계산한 값을 그다음으로 쓴다 — 여기서 다시 합산하면 층간면 귀속
+    // 보정이 사라진다.
+    const parsed = (Number(zone?.geometricArea) || 0) || (Number(zone?.area) || 0);
+    if (parsed > 0) {
+      byZone[zone.id] = parsed;
+      continue;
+    }
+    const floors = floorSum[zone.id] || 0;
+    // 바닥 폴리곤이 없거나 퇴화된 존(샤프트·설비존, 바닥면 누락 화장실)은
+    // 천장/지붕으로 대체하고, 그래도 없으면 하한만 적용한다.
+    byZone[zone.id] = floors >= MIN_ZONE_AREA
+      ? floors
+      : Math.max(floors, ceilingSum[zone.id] || 0, MIN_ZONE_AREA);
   }
   return byZone;
 }

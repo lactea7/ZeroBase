@@ -996,7 +996,7 @@ export default function ResultDashboard({
                   </div>
 
                   {/* 💰 하이라이트: ROI Cash Flow 차트 */}
-                  <motion.div 
+                  <motion.div
                     layoutId="lcc-graph"
                     onClick={() => setSelectedMetric({
                       layoutId: 'lcc-graph',
@@ -1199,7 +1199,7 @@ export default function ResultDashboard({
             >
               ✖
             </button>
-            
+
             <motion.p layoutId={`${selectedMetric.layoutId}-label`} className={`text-sm font-black uppercase tracking-widest mb-4 opacity-60 ${theme.textSub}`}>
               {selectedMetric.label}
             </motion.p>
@@ -1209,7 +1209,7 @@ export default function ResultDashboard({
               </span>
               <span className="text-lg font-bold opacity-50">{selectedMetric.unit}</span>
             </motion.div>
-            
+
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}

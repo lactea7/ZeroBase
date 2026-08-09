@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_FLOORS, FALLBACK_ZONE_AREA, MIN_GEOMETRY_AREA,
+  DEFAULT_FLOORS, MIN_ZONE_AREA,
   buildDisplayFloors, buildZoneFloorAreaById, deriveFloorEditorModel,
   isVirtualFloor, selectSurface,
 } from '../floorEditorModel.js';
@@ -31,15 +31,15 @@ describe('buildZoneFloorAreaById', () => {
     expect(buildZoneFloorAreaById([{ id: 'Z1', area: 80 }], []).Z1).toBe(80);
   });
 
-  it.each([0, -5, NaN, Infinity, null, undefined, '', 'abc'])(
-    '⚠️ 유효하지 않은 선언 면적(%s)은 기하로 넘어간다', (bad) => {
-      // 유효성 기준은 백엔드(유한한 양수)와 같아야 한다
+  it.each([0, -5, NaN, null, undefined, '', 'abc'])(
+    '⚠️ 유효하지 않은 선언 면적(%s)은 다음 후보로 넘어간다', (bad) => {
+      // 유효성 기준은 백엔드(양수)와 같아야 한다
       const areas = buildZoneFloorAreaById(
         [{ id: 'Z1', declaredArea: bad }], [floorOf('Z1', square(10))]);
       expect(areas.Z1).toBe(100);
     });
 
-  it('숫자 문자열은 선언 면적으로 인정한다', () => {
+  it('숫자 문자열도 면적으로 인정한다', () => {
     expect(buildZoneFloorAreaById([{ id: 'Z1', area: '75.5' }], []).Z1).toBe(75.5);
   });
 
@@ -60,21 +60,21 @@ describe('buildZoneFloorAreaById', () => {
   });
 
   it.each([
-    ['기하가 임계값 미만', square(0.5)],   // 0.25㎡
+    ['기하가 하한 미만', square(0.5)],   // 0.25㎡
     ['정점이 부족', [[0, 0, 0], [1, 0, 0]]],
     ['정점 없음', []],
-  ])('⚠️ %s 이면 최후 기본값으로 (0 을 내면 나눗셈이 깨진다)', (_why, verts) => {
+  ])('⚠️ %s 이면 하한으로 (0 을 내면 나눗셈이 깨진다)', (_why, verts) => {
     expect(buildZoneFloorAreaById([{ id: 'Z1' }], [floorOf('Z1', verts)]).Z1)
-      .toBe(FALLBACK_ZONE_AREA);
+      .toBe(MIN_ZONE_AREA);
   });
 
-  it('임계값 경계에서 기하를 인정한다', () => {
-    const areas = buildZoneFloorAreaById([{ id: 'Z1' }], [floorOf('Z1', square(1))]);
-    expect(areas.Z1).toBe(MIN_GEOMETRY_AREA);
+  it('하한 경계(1㎡)에서 기하를 인정한다', () => {
+    expect(buildZoneFloorAreaById([{ id: 'Z1' }], [floorOf('Z1', square(1))]).Z1)
+      .toBe(MIN_ZONE_AREA);
   });
 
-  it('면이 없는 존도 기본값을 받는다', () => {
-    expect(buildZoneFloorAreaById([{ id: 'Z1' }], []).Z1).toBe(FALLBACK_ZONE_AREA);
+  it('면이 없는 존은 하한을 받는다', () => {
+    expect(buildZoneFloorAreaById([{ id: 'Z1' }], []).Z1).toBe(MIN_ZONE_AREA);
   });
 
   it('⚠️ 프로토타입 이름 존에서도 안전하다', () => {
@@ -92,7 +92,7 @@ describe('buildZoneFloorAreaById', () => {
   it('존에 안 붙은 면은 무시한다', () => {
     const areas = buildZoneFloorAreaById([{ id: 'Z1' }],
       [{ id: 'F', type: 'Floor', vertices: square(10) }]);   // zone 없음
-    expect(areas.Z1).toBe(FALLBACK_ZONE_AREA);
+    expect(areas.Z1).toBe(MIN_ZONE_AREA);
   });
 });
 
@@ -191,5 +191,44 @@ describe('deriveFloorEditorModel', () => {
     for (const v of Object.values(m)) {
       expect(typeof v).not.toBe('function');
     }
+  });
+});
+
+// ── 백엔드 면적 계약과 일치 ──────────────────────────────
+// ⚠️ 순서가 어긋나면 화면 면적과 시뮬레이션 면적이 갈린다.
+//   declaredArea → geometricArea → area → 바닥/슬래브 → 천장/지붕 → 1㎡
+
+import reference from '../../utils/__tests__/backendGeometryReference.json';
+
+describe('백엔드 compute_zone_floor_areas 와 일치', () => {
+  it.each(reference.zoneAreas)('$label', ({ zones, surfaces, expected }) => {
+    expect(buildZoneFloorAreaById(zones, surfaces)).toEqual(expected);
+  });
+});
+
+describe('백엔드가 고친 결함을 프런트도 따른다', () => {
+  it('⚠️ 최후 하한이 1㎡ 다 (100㎡ 가 아니다)', () => {
+    // 100㎡ 폴백은 실면적 ~5㎡ 샤프트에 100㎡ 분 내부발열을 주입해
+    // **한겨울에도 냉방이 도는** 왜곡을 만들었다(백엔드가 이미 고친 결함).
+    expect(buildZoneFloorAreaById([{ id: 'Z1' }], []).Z1).toBe(1.0);
+  });
+
+  it('⚠️ geometricArea 를 area 보다 우선한다', () => {
+    // 파서가 층간면 귀속을 보정한 값이다. 빠뜨리면 101 화장실이
+    // 12.42 vs 24.84 로 **2배** 갈린다.
+    expect(buildZoneFloorAreaById([{ id: 'Z1', geometricArea: 12.42, area: 24.84 }], []).Z1)
+      .toBe(12.42);
+  });
+
+  it('⚠️ 바닥이 없으면 천장/지붕으로 대체한다', () => {
+    // 바닥면이 누락된 화장실·샤프트가 실제로 있다
+    const areas = buildZoneFloorAreaById([{ id: 'Z1' }],
+      [{ id: 'C', zone: 'Z1', type: 'Ceiling', vertices: square(7) }]);
+    expect(areas.Z1).toBe(49);
+  });
+
+  it('선언 면적이 0 이면 area 로 넘어간다', () => {
+    expect(buildZoneFloorAreaById([{ id: 'Z1', declaredArea: 0, area: 55.5 }], []).Z1)
+      .toBe(55.5);
   });
 });
