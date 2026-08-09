@@ -10,8 +10,13 @@ on:
   workflow_dispatch:      # 병합 전에 브랜치에서 직접 돌려 보기 위해
 
 env:
-  # 참조값을 만든 버전과 같아야 한다 — 필드 순서가 달라지면 골든 IDF 가 어긋난다.
-  EP_VERSION: 25.2.0
+  # ⚠️ 이름이 `EP_VERSION` 이면 안 된다. 애플리케이션이
+  # `os.environ.get("EP_VERSION", "25.2")` 로 **IDF 의 Version 객체**를 정하는데,
+  # 워크플로 env 가 그 프로세스로 새어 들어가 골든 IDF 가 `25.2` → `25.2.0` 으로
+  # 바뀐다. 첫 CI 실행이 이 충돌을 잡았다.
+  #
+  # 참조값을 만든 배포판과 같아야 한다 — 필드 순서가 달라지면 골든이 어긋난다.
+  EP_RELEASE: 25.2.0
   EP_SHA: cf7368216c
 
 jobs:
@@ -58,13 +63,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /usr/local/EnergyPlus-25-2-0
-          key: energyplus-idd-${{ env.EP_VERSION }}-${{ runner.os }}
+          key: energyplus-idd-${{ env.EP_RELEASE }}-${{ runner.os }}
 
       - name: Energy+.idd 내려받기
         if: steps.idd-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          url="https://github.com/NREL/EnergyPlus/releases/download/v${EP_VERSION}/EnergyPlus-${EP_VERSION}-${EP_SHA}-Linux-Ubuntu24.04-x86_64.tar.gz"
+          url="https://github.com/NREL/EnergyPlus/releases/download/v${EP_RELEASE}/EnergyPlus-${EP_RELEASE}-${EP_SHA}-Linux-Ubuntu24.04-x86_64.tar.gz"
           curl -fsSL "$url" -o /tmp/ep.tar.gz
           sudo mkdir -p /usr/local/EnergyPlus-25-2-0
           # 4.3MB 스키마 하나만 꺼낸다 (전체 설치는 수백 MB).

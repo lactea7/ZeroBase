@@ -21,7 +21,7 @@ on:
         default: tier-b
 
 env:
-  EP_VERSION: 25.2.0
+  EP_RELEASE: 25.2.0
   EP_SHA: cf7368216c
 
 jobs:
@@ -44,13 +44,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /opt/EnergyPlus
-          key: energyplus-${{ env.EP_VERSION }}-${{ runner.os }}
+          key: energyplus-${{ env.EP_RELEASE }}-${{ runner.os }}
 
       - name: EnergyPlus 설치
         if: steps.ep-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          url="https://github.com/NREL/EnergyPlus/releases/download/v${EP_VERSION}/EnergyPlus-${EP_VERSION}-${EP_SHA}-Linux-Ubuntu24.04-x86_64.tar.gz"
+          url="https://github.com/NREL/EnergyPlus/releases/download/v${EP_RELEASE}/EnergyPlus-${EP_RELEASE}-${EP_SHA}-Linux-Ubuntu24.04-x86_64.tar.gz"
           curl -fsSL "$url" -o /tmp/ep.tar.gz
           sudo mkdir -p /opt/EnergyPlus
           sudo tar -xzf /tmp/ep.tar.gz -C /opt/EnergyPlus --strip-components=1
