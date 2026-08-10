@@ -179,13 +179,31 @@ def build_window_geometries(surface: dict, wall_verts: list) -> list:
     return result
 
 
+#: gbXML 이 **명시적으로** 지면 접촉이라고 선언한 표면 타입.
+#
+# ⚠️ 예전에는 이 타입들을 경계조건 판정에서 아예 안 봤다. 짝이 없으면 무조건
+# `Outdoors + SunExposed + WindExposed` 로 떨어져, **지면에 묻힌 슬래브가 햇빛과
+# 바람을 받았다.** 실측: 회의실.xml 의 `SlabOnGrade` 41면 1,107㎡(IDF 표면적의
+# 10.5%), 운동시설.xml 의 `UndergroundSlab` 12면 1,672㎡(**35.8%**).
+#
+# ⚠️ `promoteGroundFloors` 와 혼동하지 말 것. 그쪽은 자기참조 최하층 바닥을 보고
+# **추정**하는 것이라 opt-in 이 맞다. 여기는 gbXML 이 **선언**한 정보이므로
+# 조건 없이 따른다.
+#
+# ⚠️ `RaisedFloor` 는 넣지 않는다 — 필로티·주차장 위 바닥이라 **외기 노출이 맞다.**
+GROUND_CONTACT_TYPES = (
+    "slabongrade", "undergroundslab", "undergroundwall", "undergroundceiling",
+)
+
+
 @dataclass
 class GeometryResult:
     """표면 emit 결과. 로그 문자열이 아니라 값으로 돌려준다."""
     skipped: int = 0                 # 존에 안 붙은 면(차양·지형)
     zone_to_zone: int = 0            # 양방향 쌍을 만든 인접면
     air_boundary: int = 0            # AirBoundary 로 처리한 개방 경계
-    ground_promoted: int = 0         # 지면 접촉으로 승격한 최하층 바닥
+    ground_promoted: int = 0         # 지면 접촉으로 **승격**한 최하층 바닥(추정)
+    ground_declared: int = 0         # gbXML 이 지면 접촉이라 **선언**한 면
     #: 존 → 그 존에 붙은 창 이름들. 내부 블라인드 제어를 존 단위로 걸 때 쓴다.
     windows_by_zone: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -283,10 +301,16 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
             result.ground_promoted += 1
             continue
 
+        # ⚠️ gbXML 이 지면 접촉이라고 **선언**한 면은 조건 없이 Ground 다.
+        # 이건 추정이 아니라 입력에 적힌 사실이고, 안 읽으면 묻힌 슬래브가
+        # 햇빛·바람을 받는다.
+        if any(g in t for g in GROUND_CONTACT_TYPES):
+            obc, sun, wind = "Ground", "NoSun", "NoWind"
+            result.ground_declared += 1
         # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직
         # selfAdjacent: 파서가 자기참조 인접을 걷어낸 면. 타입에 'interior'가 없는
         # Air 같은 면이 여기서 외기 노출(일사·풍압)로 빠지면 없던 외피가 생긴다.
-        if "interior" in t or adj_zone_raw or s.get("selfAdjacent"):
+        elif "interior" in t or adj_zone_raw or s.get("selfAdjacent"):
             # adjacentZone이 있지만 유효하지 않은 Zone → Adiabatic fallback
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
         else:

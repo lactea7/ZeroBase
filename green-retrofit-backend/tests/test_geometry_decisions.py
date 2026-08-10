@@ -344,3 +344,73 @@ def test_enlarging_wwr_falls_back_to_a_synthetic_window(record, tmp_path):
     wall_x = [p[0] for p in SOUTH_WALL]
     for p in windows[0].verts:
         assert min(wall_x) - 1e-6 <= p[0] <= max(wall_x) + 1e-6
+
+
+# ── gbXML 이 선언한 지면 접촉 ────────────────────────────
+# ⚠️ 예전에는 이 타입들을 경계조건 판정에서 **아예 안 봤다.** 짝이 없으면 무조건
+# 외기 노출로 떨어져 **지면에 묻힌 슬래브가 햇빛과 바람을 받았다.**
+# 실측: 회의실.xml `SlabOnGrade` 41면(IDF 표면적의 10.5%),
+#       운동시설.xml `UndergroundSlab` 12면(35.8%).
+
+@pytest.mark.parametrize("gbxml_type", [
+    "SlabOnGrade", "UndergroundSlab", "UndergroundWall", "UndergroundCeiling",
+    "slabongrade",          # 대소문자 무관
+])
+def test_declared_ground_contact_is_never_sun_exposed(record, tmp_path, gbxml_type):
+    surfaces, _w = record(_payload([
+        _wall("G1", FLOOR, type=gbxml_type)]), tmp_path)
+    s = next(x for x in surfaces if x.id == "G1")
+    assert (s.boundary, s.sun, s.wind) == ("Ground", "NoSun", "NoWind")
+
+
+def test_ground_contact_does_not_need_the_opt_in_flag():
+    """⚠️ `promoteGroundFloors` 와 혼동하면 안 된다.
+
+    그쪽은 자기참조 최하층 바닥을 보고 **추정**하는 것이라 opt-in 이 맞다.
+    여기는 gbXML 이 **선언**한 정보이므로 조건 없이 따라야 한다.
+    """
+    from src.simulation.geometry import GROUND_CONTACT_TYPES
+    src = open(os.path.join(BACKEND, "src", "simulation", "geometry.py"),
+               encoding="utf-8").read()
+    # 선언 기반 판정이 promote_ground_floors 아래에 들어가 있으면 안 된다
+    decl = src.index("GROUND_CONTACT_TYPES)")
+    promote = src.index("if promote_ground_floors")
+    assert decl > promote, "선언 기반 판정이 opt-in 분기보다 앞에 있으면 안 된다"
+    assert len(GROUND_CONTACT_TYPES) >= 4
+
+
+def test_declared_ground_wins_over_self_adjacent(record, tmp_path):
+    """자기참조로 걷어낸 면이라도 타입이 지면 접촉이면 Ground 다."""
+    surfaces, _w = record(_payload([
+        _wall("G1", FLOOR, type="SlabOnGrade", selfAdjacent=True)]), tmp_path)
+    assert next(x for x in surfaces if x.id == "G1").boundary == "Ground"
+
+
+def test_raised_floor_stays_outdoors(record, tmp_path):
+    """⚠️ `RaisedFloor` 는 필로티·주차장 위 바닥이라 **외기 노출이 맞다.**
+    지면 접촉으로 잘못 넣으면 겨울 열손실이 사라진다."""
+    surfaces, _w = record(_payload([_wall("R1", FLOOR, type="RaisedFloor")]), tmp_path)
+    s = next(x for x in surfaces if x.id == "R1")
+    assert (s.boundary, s.sun) == ("Outdoors", "SunExposed")
+
+
+def test_explicit_override_still_wins_over_declared_type(record, tmp_path):
+    """ASHRAE 140 처럼 표면별 지정이 필요한 경우가 있다."""
+    surfaces, _w = record(_payload([
+        _wall("G1", FLOOR, type="SlabOnGrade",
+              boundaryCondition="Outdoors", sunExposure="NoSun", windExposure="NoWind")]),
+        tmp_path)
+    s = next(x for x in surfaces if x.id == "G1")
+    assert (s.boundary, s.sun, s.wind) == ("Outdoors", "NoSun", "NoWind")
+
+
+def test_interzone_pairing_still_wins(record, tmp_path):
+    """양쪽 존이 유효하면 지면이 아니라 인접면이다 — 지하층 사이 슬래브."""
+    zones = [{"id": "Z1", "floor": 1, "height": 3.0, "area": 20.0,
+              "activityId": None, "isConditioned": True},
+             {"id": "Z2", "floor": 2, "height": 3.0, "area": 20.0,
+              "activityId": None, "isConditioned": True}]
+    surfaces, _w = record(_payload([
+        {"id": "P1", "type": "UndergroundSlab", "zone": "Z1", "adjacentZone": "Z2",
+         "vertices": FLOOR, "uValue": 0.5, "area": 20.0}], zones=zones), tmp_path)
+    assert [x for x in surfaces if x.boundary == "Surface"]

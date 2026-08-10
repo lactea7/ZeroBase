@@ -1118,6 +1118,8 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         print(f"⏭️ Zone 미소속 Surface {_geo.skipped}개 제외 (차양/지형면)")
     if _geo.zone_to_zone:
         print(f"🔗 Zone-to-Zone 경계 Surface {_geo.zone_to_zone}개 양방향 쌍 생성 완료")
+    if _geo.ground_declared:
+        print(f"🌍 gbXML 이 지면 접촉으로 선언한 면 {_geo.ground_declared}개를 Ground 로 처리")
     if _geo.ground_promoted:
         print(f"🌍 최하층 자기참조 바닥 {_geo.ground_promoted}개를 Ground 경계로 승격")
     if _geo.air_boundary:
