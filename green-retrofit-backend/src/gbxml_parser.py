@@ -835,6 +835,10 @@ def parse_gbxml_to_json(filepath: str):
         if "exteriorwall" in surf_type_lower: mapped_type = "ExteriorWall"
         elif "interiorwall" in surf_type_lower or "internalwall" in surf_type_lower: mapped_type = "InteriorWall"
         elif "roof" in surf_type_lower: mapped_type = "Roof"
+        # ⚠️ `UndergroundCeiling` 은 "ceiling" 을 품고 있다. 일반 천장 분기가 먼저
+        # 걸리면 지면 접촉 선언이 통째로 사라져 `geometry.py` 의 Ground 판정에
+        # 도달하지 못한다(묻힌 천장이 다시 햇빛·바람을 받는다).
+        elif "undergroundceiling" in surf_type_lower: mapped_type = "UndergroundCeiling"
         elif "ceiling" in surf_type_lower: mapped_type = "Ceiling"
         elif "interiorfloor" in surf_type_lower or "internalfloor" in surf_type_lower: mapped_type = "InteriorFloor"
         elif "exteriorfloor" in surf_type_lower: mapped_type = "ExteriorFloor"
@@ -849,7 +853,8 @@ def parse_gbxml_to_json(filepath: str):
         # Roof/Floor 타입에 방향 자동 배정
         if mapped_type == "Roof":
             direction = "Roof"
-        elif mapped_type in ("Floor", "SlabOnGrade", "UndergroundSlab", "ExteriorFloor", "InteriorFloor", "Ceiling"):
+        elif mapped_type in ("Floor", "SlabOnGrade", "UndergroundSlab", "ExteriorFloor",
+                             "InteriorFloor", "Ceiling", "UndergroundCeiling"):
             direction = "Floor"
         
         surface_data = {

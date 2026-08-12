@@ -291,11 +291,21 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
             result.zone_to_zone += 1
             continue
 
+        # ⚠️ 부분 문자열이 아니라 **정확 일치**다. 파서가 타입을 이미 정규화해서
+        # 넘기므로 느슨하게 볼 이유가 없고, `in` 매칭은 새 타입이 생겼을 때
+        # 조용히 오분류된다.
+        declared_ground = t in GROUND_CONTACT_TYPES
+
         # 지면 접촉 승격(옵션): 자기참조로 걷어낸 최하층 바닥을 Ground 로 둔다.
         # 익스포터가 SlabOnGrade 대신 자기참조 InteriorFloor 로 내보낸 경우를
         # 되살리는 용도이며, 기본값은 꺼져 있다 — 지하층·필로티·외기노출 바닥을
         # 오분류할 수 있어 사용자가 명시적으로 켜야 한다.
-        if promote_ground_floors and _is_slab_on_grade(s, s.get("type", "")):
+        #
+        # ⚠️ **선언된 면은 여기 들어오면 안 된다.** 결과 IDF 는 어차피 `Ground` 로
+        # 같지만, `SlabOnGrade` + selfAdjacent + z≈0 인 면이 `ground_promoted` 로
+        # 세어져 **선언된 사실이 추정으로 기록된다.** 카운터와 로그가 거짓이 된다.
+        if not declared_ground and promote_ground_floors \
+                and _is_slab_on_grade(s, s.get("type", "")):
             idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
                             "Ground", "NoSun", "NoWind", verts)
             result.ground_promoted += 1
@@ -304,7 +314,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         # ⚠️ gbXML 이 지면 접촉이라고 **선언**한 면은 조건 없이 Ground 다.
         # 이건 추정이 아니라 입력에 적힌 사실이고, 안 읽으면 묻힌 슬래브가
         # 햇빛·바람을 받는다.
-        if any(g in t for g in GROUND_CONTACT_TYPES):
+        if declared_ground:
             obc, sun, wind = "Ground", "NoSun", "NoWind"
             result.ground_declared += 1
         # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직

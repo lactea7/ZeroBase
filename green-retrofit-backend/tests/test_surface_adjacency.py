@@ -188,3 +188,33 @@ def test_real_file_self_adjacent_count():
     bad = [s for s in result["surfaces"]
            if s.get("adjacentZone") and s.get("adjacentZone") == s.get("zone")]
     assert bad == [], f"자기 자신과 인접한 면이 남아있다: {[s['id'] for s in bad][:5]}"
+
+
+# ── 지면 접촉 선언이 파서를 통과하는가 ────────────────────────────────────────
+#
+# ⚠️ `geometry.py` 의 Ground 판정은 **파서가 넘긴 타입 문자열**로만 동작한다.
+# 파서가 타입을 뭉개면 그 분기는 실제 파일에서 영원히 도달하지 않는다 —
+# 실제로 `UndergroundCeiling` 이 그랬다(`ceiling` 분기가 먼저 걸렸다).
+# geometry 단위시험은 payload 에 타입을 직접 넣어 이 결함을 못 잡는다.
+
+import pytest
+
+
+@pytest.mark.parametrize("stype", [
+    "SlabOnGrade", "UndergroundSlab", "UndergroundWall", "UndergroundCeiling",
+])
+def test_declared_ground_types_survive_the_parser(stype):
+    """선언된 지면 접촉 타입은 파서를 지나도 그대로여야 한다."""
+    from src.simulation.geometry import GROUND_CONTACT_TYPES
+
+    result = _parse(SURFACE.format(sid="g1", stype=stype, adj=_adj("sp-a"), z=0))
+    parsed = _by_id(result, "g1")["type"]
+    assert parsed == stype, f"{stype} 이 '{parsed}' 로 뭉개졌다"
+    # 파서 출력이 geometry 의 판정 목록과 실제로 맞물리는지까지 확인한다.
+    assert parsed.lower() in GROUND_CONTACT_TYPES
+
+
+def test_plain_ceiling_is_still_mapped_to_ceiling():
+    """`UndergroundCeiling` 분기를 앞세운 것이 일반 천장을 가로채면 안 된다."""
+    result = _parse(SURFACE.format(sid="c1", stype="Ceiling", adj=_adj("sp-a"), z=3))
+    assert _by_id(result, "c1")["type"] == "Ceiling"

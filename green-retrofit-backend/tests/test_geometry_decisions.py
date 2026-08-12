@@ -363,20 +363,37 @@ def test_declared_ground_contact_is_never_sun_exposed(record, tmp_path, gbxml_ty
     assert (s.boundary, s.sun, s.wind) == ("Ground", "NoSun", "NoWind")
 
 
-def test_ground_contact_does_not_need_the_opt_in_flag():
+def test_ground_contact_does_not_need_the_opt_in_flag(record, tmp_path):
     """⚠️ `promoteGroundFloors` 와 혼동하면 안 된다.
 
     그쪽은 자기참조 최하층 바닥을 보고 **추정**하는 것이라 opt-in 이 맞다.
-    여기는 gbXML 이 **선언**한 정보이므로 조건 없이 따라야 한다.
+    여기는 gbXML 이 **선언**한 정보이므로 플래그 없이 따라야 한다.
     """
-    from src.simulation.geometry import GROUND_CONTACT_TYPES
-    src = open(os.path.join(BACKEND, "src", "simulation", "geometry.py"),
-               encoding="utf-8").read()
-    # 선언 기반 판정이 promote_ground_floors 아래에 들어가 있으면 안 된다
-    decl = src.index("GROUND_CONTACT_TYPES)")
-    promote = src.index("if promote_ground_floors")
-    assert decl > promote, "선언 기반 판정이 opt-in 분기보다 앞에 있으면 안 된다"
-    assert len(GROUND_CONTACT_TYPES) >= 4
+    surfaces, _w = record(_payload([
+        _wall("G1", FLOOR, type="SlabOnGrade")]), tmp_path)
+    assert next(x for x in surfaces if x.id == "G1").boundary == "Ground"
+
+
+def test_declared_ground_is_counted_as_declared_not_promoted(record, tmp_path):
+    """⚠️ 구조가 아니라 **출처(provenance)** 를 검사한다.
+
+    선언 타입 + 자기참조 + z≈0 은 opt-in 추정 조건도 **동시에** 만족한다.
+    추정 분기가 먼저 걸리면 결과 IDF 는 같아도 `ground_promoted` 로 세어져
+    "gbXML 이 적어 준 사실"이 "우리가 찍은 값"으로 기록된다.
+    """
+    from src.simulation.geometry import emit_surfaces
+
+    class _FakeIdf:
+        def __init__(self): self.surfaces = []
+        def add_air_boundary_construction(self, *a, **k): pass
+        def add_surface(self, sid, *a, **k): self.surfaces.append(sid)
+
+    s = {"id": "G1", "type": "SlabOnGrade", "zone": "Z1", "selfAdjacent": True,
+         "vertices": [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]}
+    idf = _FakeIdf()
+    r = emit_surfaces(idf, [s], valid_zone_ids={"Z1"}, valid_afn_zones=set(),
+                      promote_ground_floors=True)   # opt-in 을 켜도
+    assert (r.ground_declared, r.ground_promoted) == (1, 0)
 
 
 def test_declared_ground_wins_over_self_adjacent(record, tmp_path):
@@ -386,12 +403,19 @@ def test_declared_ground_wins_over_self_adjacent(record, tmp_path):
     assert next(x for x in surfaces if x.id == "G1").boundary == "Ground"
 
 
-def test_raised_floor_stays_outdoors(record, tmp_path):
-    """⚠️ `RaisedFloor` 는 필로티·주차장 위 바닥이라 **외기 노출이 맞다.**
-    지면 접촉으로 잘못 넣으면 겨울 열손실이 사라진다."""
+def test_raised_floor_is_not_declared_ground(record, tmp_path):
+    """⚠️ `RaisedFloor` 는 **선언된 지면 접촉이 아니다.** 지면으로 넣으면 필로티·
+    주차장 위 바닥의 겨울 열손실이 통째로 사라진다.
+
+    ⚠️ 예전 이름은 `test_raised_floor_stays_outdoors` 였고 `Outdoors + SunExposed`
+    를 고정했다. **그건 과했다** — `RaisedFloor` 는 타입만으로 외기·층간·플레넘을
+    구분할 수 없다. 실제로 회의실.xml 의 `RaisedFloor` 64면은 z 14.83~74.83 에
+    있어 **하나도 필로티가 아니고 전부 층간 슬래브다.** 짝없는 층간 바닥 규칙이
+    이 면들을 Adiabatic 으로 가져갈 수 있어야 하므로, 여기서 고정할 것은
+    "지면이 아니다" 뿐이다.
+    """
     surfaces, _w = record(_payload([_wall("R1", FLOOR, type="RaisedFloor")]), tmp_path)
-    s = next(x for x in surfaces if x.id == "R1")
-    assert (s.boundary, s.sun) == ("Outdoors", "SunExposed")
+    assert next(x for x in surfaces if x.id == "R1").boundary != "Ground"
 
 
 def test_explicit_override_still_wins_over_declared_type(record, tmp_path):

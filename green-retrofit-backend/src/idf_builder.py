@@ -67,14 +67,12 @@ def _get_idd_index():
     begin_ext = re.compile(r"^\s+\\begin-extensible")
 
     cur = None
-    pending_begin_ext = False
     with open(idd_path, "r", encoding="utf-8", errors="ignore") as f:
         for raw in f:
             line = raw.rstrip("\n")
             m = obj_header.match(line)
             if m:
                 cur = {"fields": [], "min": 0, "ext_size": 0, "ext_start": None}
-                pending_begin_ext = False
                 index[m.group(1).lower()] = cur
                 continue
             if cur is None:
@@ -226,11 +224,15 @@ class IdfBuilder:
             )
 
         ext_start, ext_size = idx.get("ext_start"), idx.get("ext_size") or 0
-        if extensible and (ext_start is None or ext_size <= 0):
+        # ⚠️ `extensible` 은 **`is not None`** 으로 본다. 빈 리스트는 falsy 라
+        # `if extensible:` 로 보면 확장 객체 검증도 침범 검사도 통째로 건너뛴다 —
+        # 호출자가 "반복 값을 넘기겠다"고 선언한 사실 자체는 빈 목록이어도 같다.
+        has_ext = extensible is not None
+        if has_ext and (ext_start is None or ext_size <= 0):
             raise ValueError(
                 f"'{obj_type}' 은 확장(extensible) 객체가 아닌데 반복 값을 받았습니다.")
         # ⚠️ 명시 필드가 반복 시작 위치를 침범하면 값이 밀린다 — 조기에 잡는다.
-        if extensible and any(pos[k] >= ext_start for k in field_dict):
+        if has_ext and any(pos[k] >= ext_start for k in field_dict):
             bad = [k for k in field_dict if pos[k] >= ext_start]
             raise ValueError(
                 f"'{obj_type}' 반복 구간(index {ext_start}~) 필드는 extensible 로 "
@@ -240,9 +242,21 @@ class IdfBuilder:
             last = 0
         else:
             last = max(pos[k] for k in field_dict) + 1
-        length = max(last, idx.get("min", 0))
-        if extensible:
-            length = max(length, ext_start)
+        min_fields = idx.get("min", 0)
+        if has_ext:
+            # ⚠️ 고정 구간은 `ext_start` 에서 **정확히** 끝나야 한다.
+            #
+            # 예전엔 `max(last, min-fields, ext_start)` 였다. `\min-fields` 는 반복
+            # 값까지 **포함한** 최소 개수라서, `min-fields > ext_start` 인 객체에서는
+            # 고정 구간이 반복 시작 위치를 지나 빈칸으로 채워지고 **반복 값이 통째로
+            # 밀린다.** `WindowShadingControl` 은 `min-fields 0` 이라 우연히 맞았을
+            # 뿐이다 — `BuildingSurface:Detailed`(ext_start 11 / min 20)는 정점이
+            # 9칸 밀리고 `Schedule:Compact`(2 / 5)는 3칸 밀린다.
+            # 명시 필드가 `ext_start` 이상이면 위에서 이미 거부했으므로
+            # `ext_start >= last` 는 보장된다.
+            length = ext_start
+        else:
+            length = max(last, min_fields)
         fields = []
         for i in range(length):
             v = field_dict.get(names[i], "")
@@ -254,6 +268,14 @@ class IdfBuilder:
                 raise ValueError(
                     f"'{obj_type}' 반복 묶음 크기는 {ext_size} 인데 {len(values)} 개를 받았습니다.")
             fields.extend("" if v is None else v for v in values)
+
+        # `min-fields` 는 반복 값을 포함한 총 개수다. 모자라면 빈칸으로 메우는 게
+        # 아니라 **거부**한다 — 반복 구간을 빈칸으로 채우면 EnergyPlus 가 좌표
+        # 없는 정점을 읽는다(정점 3개 미만인 표면 등).
+        if has_ext and len(fields) < min_fields:
+            raise ValueError(
+                f"'{obj_type}' 은 최소 {min_fields} 개 필드가 필요한데 "
+                f"{len(fields)} 개뿐입니다 (반복 묶음 {len(extensible)}개).")
 
         return self.add(obj_type, fields)
 
