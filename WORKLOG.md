@@ -58,7 +58,7 @@ EPlusSimple 비교가 다시 필요하면:
 
 커밋 `e573c88`. 브랜치 `fix/review-round2-geometry` — **main 미병합.**
 (`7f28b32`·`ee931c7` 는 이미 main `a844170` 에 들어와 있다.)
-백엔드 **712 passed + 3 xfailed**. 골든 IDF 불변.
+백엔드 **724 passed + 3 xfailed**. 골든 IDF 불변.
 
 세션 전체 요약은 저장소 루트 `working.md` 및 구글 드라이브 사본에 있다:
 https://drive.google.com/file/d/16FyeJA4ATWUVWJpDNQG6i8YDntPzaR_x/view
@@ -70,7 +70,8 @@ https://drive.google.com/file/d/16FyeJA4ATWUVWJpDNQG6i8YDntPzaR_x/view
 | `7f28b32` | `WindowShadingControl` IDD 확장 필드 — 창 10개 초과 존에서 시뮬레이션이 통째로 죽던 문제 | 회의실 9개 존(최대 251창) 복구 |
 | `ee931c7` | gbXML 이 **선언한** 지면 접촉면(`SlabOnGrade` 등)을 경계조건 판정에서 안 읽던 문제 | 운동시설 난방 39.61→**23.48** (−40.7%), 회의실 18.83→**17.27** (−8.3%) |
 
-⚠️ `RaisedFloor` 는 제외했다 — 필로티라 외기 노출이 맞다.
+⚠️ `RaisedFloor` 는 지면 접촉 목록에서 제외했다 — 이건 지금도 맞다.
+   **다만 "그러니 외기 노출이 맞다"까지 간 건 틀렸다**(아래 round-2 참조).
 ⚠️ `promoteGroundFloors`(추정, opt-in)와 성격이 다르다 — 이건 gbXML 이 **선언**한 사실이다.
 
 ### codex round-2 검토 완료 (`e573c88`, 브랜치 `fix/review-round2-geometry`)
