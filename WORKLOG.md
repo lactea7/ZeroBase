@@ -54,7 +54,45 @@ EPlusSimple 비교가 다시 필요하면:
 
 ---
 
-## 지금 상태 요약 (2026-08-07 기준)
+## 지금 상태 요약 (2026-08-13 기준)
+
+커밋 `ee931c7`. 브랜치 `fix/self-adjacent-surfaces` — **main 미병합.**
+백엔드 **712 passed + 3 xfailed**. 골든 IDF 불변.
+
+세션 전체 요약은 저장소 루트 `working.md` 및 구글 드라이브 사본에 있다:
+https://drive.google.com/file/d/16FyeJA4ATWUVWJpDNQG6i8YDntPzaR_x/view
+
+### 이번에 고친 것
+
+| 커밋 | 내용 | 영향 |
+|---|---|---|
+| `7f28b32` | `WindowShadingControl` IDD 확장 필드 — 창 10개 초과 존에서 시뮬레이션이 통째로 죽던 문제 | 회의실 9개 존(최대 251창) 복구 |
+| `ee931c7` | gbXML 이 **선언한** 지면 접촉면(`SlabOnGrade` 등)을 경계조건 판정에서 안 읽던 문제 | 운동시설 난방 39.61→**23.48** (−40.7%), 회의실 18.83→**17.27** (−8.3%) |
+
+⚠️ `RaisedFloor` 는 제외했다 — 필로티라 외기 노출이 맞다.
+⚠️ `promoteGroundFloors`(추정, opt-in)와 성격이 다르다 — 이건 gbXML 이 **선언**한 사실이다.
+
+### 다음에 바로 할 일
+
+0. **짝없는 층간 바닥/천장 규칙 확정** — 측정 영향 최대(회의실 난방 −41.3%, 냉방 +9%).
+   현재 `Outdoors + SunExposed` 는 확실히 틀렸다.
+   ⚠️ **착수 전 판단 필요**: Adiabatic 으로 둘지, 층 정보로 짝을 찾을지.
+   회의실은 60개 존 중 **57개에 천장 면이 아예 없어** 이을 상대가 없다.
+1. **WWR 90% 상한 → 고정 여백** — 용호동 창면적 8.9% 손실이 0 이 된다.
+   EnergyPlus 가 99% 창을 받는 건 실측 확인됨(기술적 제약 아님).
+2. **개구부를 호스트 안으로 밀어넣기** — 회의실 397/1,183(34%)이 벽 밖.
+   ⚠️ 현재 WWR 축소는 개구부 **자기 중심**으로 줄여서 이걸 못 고친다.
+3. **canonical boundary** — `InterZone Surface Tilts/Classes do not match` 용호동 14 · 회의실 4.
+4. `severity: block` 을 백엔드 `/api/simulate` 에서도 강제 (지금은 프런트 버튼만 비활성)
+5. `7f28b32`·`ee931c7` codex round-2 검토 (운영 규칙상 밀린 것)
+
+**EPlusSimple 식 단순 등가 형상 모드는 보류 결정.** 근거는 `working.md` 5장.
+요지: 측정된 최대 오차 두 건이 좌표 품질이 아니라 **인접 의미 해석** 문제라
+단순 모드로도 안 풀린다. 없는 면은 다시 그려도 생기지 않는다.
+
+---
+
+## 지난 상태 요약 (2026-08-07 기준)
 
 커밋 `b893cdb`. 브랜치 `fix/afn-infiltration` — 원격 푸시됨(`lactea7/ZeroBase`), **main 미병합**.
 백엔드 테스트 **634 passed + 3 xfailed**(남은 xfail 은 ASHRAE 140 공표범위 경계 건).
