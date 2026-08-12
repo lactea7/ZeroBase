@@ -56,7 +56,8 @@ EPlusSimple 비교가 다시 필요하면:
 
 ## 지금 상태 요약 (2026-08-13 기준)
 
-커밋 `ee931c7`. 브랜치 `fix/self-adjacent-surfaces` — **main 미병합.**
+커밋 `e573c88`. 브랜치 `fix/review-round2-geometry` — **main 미병합.**
+(`7f28b32`·`ee931c7` 는 이미 main `a844170` 에 들어와 있다.)
 백엔드 **712 passed + 3 xfailed**. 골든 IDF 불변.
 
 세션 전체 요약은 저장소 루트 `working.md` 및 구글 드라이브 사본에 있다:
@@ -72,19 +73,52 @@ https://drive.google.com/file/d/16FyeJA4ATWUVWJpDNQG6i8YDntPzaR_x/view
 ⚠️ `RaisedFloor` 는 제외했다 — 필로티라 외기 노출이 맞다.
 ⚠️ `promoteGroundFloors`(추정, opt-in)와 성격이 다르다 — 이건 gbXML 이 **선언**한 사실이다.
 
+### codex round-2 검토 완료 (`e573c88`, 브랜치 `fix/review-round2-geometry`)
+
+밀려 있던 `7f28b32`·`ee931c7` 검토를 돌렸고 **실질 결함 3건**이 나와 고쳤다.
+**724 passed + 3 xfailed**, 골든 IDF 불변, 실제 파일 4개 선언지면 판정 불변.
+
+| 결함 | 왜 안 보였나 |
+|---|---|
+| `\min-fields` 가 확장 필드 블록을 밀었다 (`BuildingSurface:Detailed` 9칸, `Schedule:Compact` 3칸) | 확장 객체를 `WindowShadingControl` 하나만 썼고 그게 `min-fields 0` 이라 우연히 맞았다 |
+| `UndergroundCeiling` 이 파서에서 `Ceiling` 으로 뭉개져 Ground 분기 도달 불가 | 시험이 payload 에 타입을 직접 넣어 파서를 건너뛰었다 |
+| 선언(`GROUND_CONTACT_TYPES`)이 opt-in 추정보다 **뒤**라 `ground_promoted` 로 오기록 | 결과 IDF 가 같아 카운터·로그만 거짓이었다 |
+
+`test_raised_floor_stays_outdoors` 는 **틀린 정책을 고정하고 있어** 폐기했다 —
+아래 0번의 전제가 여기서 나왔다.
+
 ### 다음에 바로 할 일
 
-0. **짝없는 층간 바닥/천장 규칙 확정** — 측정 영향 최대(회의실 난방 −41.3%, 냉방 +9%).
-   현재 `Outdoors + SunExposed` 는 확실히 틀렸다.
-   ⚠️ **착수 전 판단 필요**: Adiabatic 으로 둘지, 층 정보로 짝을 찾을지.
-   회의실은 60개 존 중 **57개에 천장 면이 아예 없어** 이을 상대가 없다.
+0. **짝없는 층간 바닥 = `Adiabatic` (방침 확정됨, 착수만 남음)**
+   측정 영향 최대(회의실 난방 −41.3%, 냉방 +9%). 현재 `Outdoors + SunExposed` 는 틀렸다.
+
+   실측 근거 — 회의실.xml `RaisedFloor` 64면의 z 분포:
+   `14.83(20) 26.83(19) 38.83(6) 54.75(6) 62.83(2) 74.75(10) 74.83(1)`
+   **z=0 이 하나도 없다 → 필로티가 아니라 전부 층간 슬래브다.**
+   `Ceiling` 타입 면이 파일에 아예 없어 이을 상대가 없다.
+
+   ⚠️ **`RaisedFloor` 전체를 Adiabatic 으로 두면 안 된다** (codex 지적). 진짜
+   필로티까지 단열돼 겨울 열손실이 사라진다. 판정에 넣을 조건:
+   유효 adjacentZone 없음 · 실제 수평면 · 지면접촉 선언 아님 ·
+   **아래(천장이면 위)에 XY 투영이 유의미하게 겹치는 존이 존재** · 외기 명시 없음.
+   z>0 만으로는 언덕·단차·캔틸레버를 구분 못 한다.
+
+   ⚠️ **함정**: 파서가 `RaisedFloor` 를 `Floor` 로 매핑한다(`"floor" in type`).
+   geometry 에 도달할 땐 타입이 `Floor` 다 — 회의실 64, ARK 100. 대상은
+   `RaisedFloor` 한정이 아니라 짝없는 `Floor`/`InteriorFloor`/`Ceiling` 이고,
+   바닥은 아래 존을, 천장은 위 존을 찾는다. `ExteriorFloor` 는 자동 제외.
+
+   ⚠️ Adiabatic 이 깨지는 경우(오차 방향): 아래가 비난방 주차장·창고면 난방 과소,
+   아래가 더 찬 냉방존이면 냉방 과대, 기계실·주방이면 난방 과대·냉방 과소.
+   → 무조건이 아니라 **"짝을 복원할 수 없을 때의 명시적 저신뢰 fallback"** 으로.
 1. **WWR 90% 상한 → 고정 여백** — 용호동 창면적 8.9% 손실이 0 이 된다.
    EnergyPlus 가 99% 창을 받는 건 실측 확인됨(기술적 제약 아님).
 2. **개구부를 호스트 안으로 밀어넣기** — 회의실 397/1,183(34%)이 벽 밖.
    ⚠️ 현재 WWR 축소는 개구부 **자기 중심**으로 줄여서 이걸 못 고친다.
 3. **canonical boundary** — `InterZone Surface Tilts/Classes do not match` 용호동 14 · 회의실 4.
 4. `severity: block` 을 백엔드 `/api/simulate` 에서도 강제 (지금은 프런트 버튼만 비활성)
-5. `7f28b32`·`ee931c7` codex round-2 검토 (운영 규칙상 밀린 것)
+5. 지면접촉 선언 타입인데 **유효한 두 존을 함께 가진** 면을 semantic warning 으로
+   남기기 (codex 제안 — 지금은 인접 쌍이 이겨서 조용히 지나간다)
 
 **EPlusSimple 식 단순 등가 형상 모드는 보류 결정.** 근거는 `working.md` 5장.
 요지: 측정된 최대 오차 두 건이 좌표 품질이 아니라 **인접 의미 해석** 문제라
