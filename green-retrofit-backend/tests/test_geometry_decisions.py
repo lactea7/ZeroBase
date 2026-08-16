@@ -438,3 +438,179 @@ def test_interzone_pairing_still_wins(record, tmp_path):
         {"id": "P1", "type": "UndergroundSlab", "zone": "Z1", "adjacentZone": "Z2",
          "vertices": FLOOR, "uValue": 0.5, "area": 20.0}], zones=zones), tmp_path)
     assert [x for x in surfaces if x.boundary == "Surface"]
+
+
+# ── 짝없는 층간 바닥·천장 (Adiabatic fallback) ────────────────────────────────
+#
+# ⚠️ 예전엔 여기가 통째로 `Outdoors + SunExposed` 였다. 실측: 회의실.xml 의
+# `RaisedFloor` 64면(파서가 `Floor` 로 매핑)이 전부 z 13.5~31.8 의 층간 슬래브인데
+# 겨울 외기와 햇빛을 받았다. 영향은 난방 −41.3%, 냉방 +9%.
+#
+# ⚠️ 그렇다고 타입만 보고 뒤집으면 **진짜 필로티까지 단열**돼 겨울 열손실이 사라진다.
+# 그래서 "반대편에 존이 실재하는가"를 기하로 확인한다.
+
+def _slab(sid, z, zone="Z1", stype="Floor", x0=0, x1=4, y0=0, y1=5):
+    return {"id": sid, "type": stype, "zone": zone, "uValue": 0.5, "area": 20.0,
+            "vertices": [(x0, y0, z), (x0, y1, z), (x1, y1, z), (x1, y0, z)]}
+
+
+def _box_walls(prefix, z0, z1, zone, x0=0, x1=4, y0=0, y1=5):
+    """존의 수직 범위와 평면 윤곽을 정의하는 벽 네 장."""
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    out = []
+    for i, (ax, ay) in enumerate(corners):
+        bx, by = corners[(i + 1) % 4]
+        out.append({"id": f"{prefix}{i}", "type": "InteriorWall", "zone": zone,
+                    "uValue": 0.5, "area": 10.0,
+                    "vertices": [(ax, ay, z1), (ax, ay, z0), (bx, by, z0), (bx, by, z1)]})
+    return out
+
+
+_TWO_STOREY_ZONES = [
+    {"id": "Z1", "floor": 2, "height": 3.0, "area": 20.0, "activityId": None,
+     "isConditioned": True},
+    {"id": "Z0", "floor": 1, "height": 3.0, "area": 20.0, "activityId": None,
+     "isConditioned": True},
+]
+
+
+def test_unpaired_floor_over_a_zone_is_adiabatic(record, tmp_path):
+    """아래에 존이 실재하는 짝없는 바닥 → 외기가 아니라 단열 경계."""
+    surfaces, _ = record(_payload(
+        [_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
+        + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "F1")
+    assert (s.boundary, s.sun, s.wind) == ("Adiabatic", "NoSun", "NoWind")
+
+
+def test_lowest_floor_stays_outdoors(record, tmp_path):
+    """⚠️ 아래에 아무것도 없으면 그대로 외기다 — 필로티의 겨울 열손실을 지키는 선."""
+    surfaces, _ = record(_payload(
+        [_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "F1")
+    assert (s.boundary, s.sun) == ("Outdoors", "SunExposed")
+
+
+def test_floor_overhanging_past_the_zone_below_stays_outdoors(record, tmp_path):
+    """⚠️ **z 부호만으로 판정하면 안 되는 이유.**
+
+    아래 존이 존재하고 높이도 맞지만 XY 로는 어긋나 있다(캔틸레버·셋백).
+    실측: 회의실.xml 의 짝없는 바닥 64면 중 **27면이 실제로 이 경우**다 —
+    하부 층 윤곽이 그 아래까지 뻗지 않는다.
+    """
+    surfaces, _ = record(_payload(
+        [_slab("F1", 3.0, x0=100, x1=104)]
+        + _box_walls("w1_", 3.0, 6.0, "Z1", x0=100, x1=104)
+        + _box_walls("w0_", 0.0, 3.0, "Z0"),          # 아래 존은 x 0~4 에 있다
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "F1")
+    assert (s.boundary, s.sun) == ("Outdoors", "SunExposed")
+
+
+def test_floor_far_above_the_zone_below_stays_outdoors(record, tmp_path):
+    """⚠️ 사이가 한 층 넘게 비면 이웃이 아니다 — 그 사이는 실제로 바깥이다."""
+    surfaces, _ = record(_payload(
+        [_slab("F1", 30.0)] + _box_walls("w1_", 30.0, 33.0, "Z1")
+        + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "F1")
+    assert s.boundary == "Outdoors"
+
+
+def test_unpaired_ceiling_under_a_zone_is_adiabatic(record, tmp_path):
+    """천장은 **위**를 본다 — 바닥과 방향이 반대여야 한다."""
+    surfaces, _ = record(_payload(
+        [_slab("C1", 3.0, zone="Z0", stype="Ceiling")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "C1")
+    assert (s.boundary, s.sun, s.wind) == ("Adiabatic", "NoSun", "NoWind")
+
+
+def test_ceiling_does_not_look_downward(record, tmp_path):
+    """⚠️ 방향을 안 나누면 최상층 천장이 아래 존을 보고 단열이 된다."""
+    surfaces, _ = record(_payload(
+        [_slab("C1", 6.0, zone="Z1", stype="Ceiling")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "C1").boundary == "Outdoors"
+
+
+def test_roof_is_never_reclassified(record, tmp_path):
+    """⚠️ `Roof` 는 하늘 노출을 **선언**한 것이다 — `SlabOnGrade` 와 같은 급의 정보다.
+
+    (`Floor` 는 아무것도 선언하지 않는다. 그래서 바닥만 추론 대상이다.)
+    """
+    surfaces, _ = record(_payload(
+        [_slab("R1", 3.0, stype="Roof")] + _box_walls("w1_", 3.0, 6.0, "Z1")
+        + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "R1")
+    assert (s.boundary, s.sun) == ("Outdoors", "SunExposed")
+
+
+def test_exterior_floor_is_never_reclassified(record, tmp_path):
+    """`ExteriorFloor` 도 선언이다 — 아래에 존이 있어도 뒤집지 않는다."""
+    surfaces, _ = record(_payload(
+        [_slab("F1", 3.0, stype="ExteriorFloor")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "F1").boundary == "Outdoors"
+
+
+def test_declared_ground_wins_over_the_interstitial_rule(record, tmp_path):
+    """지면 접촉 선언이 먼저다 — 아래 존이 있어도 Ground 다."""
+    surfaces, _ = record(_payload(
+        [_slab("G1", 3.0, stype="SlabOnGrade")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "G1").boundary == "Ground"
+
+
+def test_explicit_override_still_wins(record, tmp_path):
+    """ASHRAE 140 처럼 표면별 지정이 있으면 그게 최종이다."""
+    surfaces, _ = record(_payload(
+        [dict(_slab("F1", 3.0), boundaryCondition="Outdoors", sunExposure="NoSun")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "F1")
+    assert (s.boundary, s.sun) == ("Outdoors", "NoSun")
+
+
+def test_interstitial_conversions_are_counted(tmp_path):
+    """⚠️ 저신뢰 fallback 이므로 **몇 면을 그렇게 했는지 값으로 나와야** 한다."""
+    from src.simulation.geometry import emit_surfaces
+
+    class _FakeIdf:
+        def add_air_boundary_construction(self, *a, **k): pass
+        def add_surface(self, *a, **k): pass
+
+    payload = ([_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
+               + _box_walls("w0_", 0.0, 3.0, "Z0"))
+    r = emit_surfaces(_FakeIdf(), payload, valid_zone_ids={"Z1", "Z0"},
+                      valid_afn_zones=set())
+    assert r.interstitial_adiabatic == 1
+
+
+def test_tilted_floor_is_not_treated_as_interstitial(tmp_path):
+    """경사로는 수평면이 아니다 — 층간 슬래브 규칙의 대상이 아니다."""
+    from src.simulation.geometry import _is_horizontal
+    assert _is_horizontal([(0, 0, 3), (0, 5, 3), (4, 5, 3), (4, 0, 3)])
+    assert not _is_horizontal([(0, 0, 0), (0, 5, 3), (4, 5, 3), (4, 0, 0)])
+
+
+def test_interstitial_fallback_is_reported_in_the_response():
+    """⚠️ 조용히 처리하면 안 된다 — 결과를 검증하려면 사용자가 봐야 하는 가정이다.
+
+    (소스 정규식 검사인 이유: `assumptions` 는 전체 시뮬레이션이 끝나야 생기고
+    회의실 기준 5분 넘게 걸린다. 기존 `interior_blind` 항목도 같은 방식이다.)
+    """
+    import re
+    src = open(os.path.join(BACKEND, "src", "ep_simulator.py"), encoding="utf-8").read()
+    m = re.search(r'"key":\s*"interstitial_floors".*?"confidence":\s*"(\w+)"', src, re.S)
+    assert m, "assumptions 에 interstitial_floors 항목이 없다"
+    assert m.group(1) == "low", "기하로 추정한 값이므로 confidence 는 low 여야 한다"
+    assert "_geo.interstitial_adiabatic" in m.group(0), \
+        "실제 전환 개수가 아니라 고정 문구를 보고하고 있다"

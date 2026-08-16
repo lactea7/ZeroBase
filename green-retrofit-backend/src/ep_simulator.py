@@ -1124,6 +1124,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         print(f"🌍 최하층 자기참조 바닥 {_geo.ground_promoted}개를 Ground 경계로 승격")
     if _geo.air_boundary:
         print(f"💨 개방 경계(Air) Surface {_geo.air_boundary}개를 AirBoundary 로 처리")
+    if _geo.interstitial_adiabatic:
+        print(f"🧱 짝 없는 층간 바닥·천장 {_geo.interstitial_adiabatic}개를 "
+              f"단열 경계로 처리 (위/아래에 실재하는 실을 확인)")
 
     idf.finalize_hvac()
 
@@ -1262,6 +1265,21 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             "note": ("gbXML 에는 차양 정보가 없어 일반 사무실 수준의 내부 블라인드를 "
                      "가정했습니다. 문헌의 하강 문턱값은 50~377 W/㎡ 로 폭이 넓습니다. "
                      "차양이 실제로 없다면 난방이 줄고 냉방이 늘어납니다."),
+            "confidence": "low",
+        }, {
+            "key": "interstitial_floors",
+            "label": "짝 없는 층간 바닥·천장",
+            "value": (f"{_geo.interstitial_adiabatic}개 면을 단열 경계로 처리"
+                      if _geo.interstitial_adiabatic else "해당 없음"),
+            # ⚠️ **추정이지 복원이 아니다.** gbXML 이 인접을 안 적었는데 위/아래에
+            # 존이 실재하는 면들이다. 예전엔 외기 노출로 떨어져 층간 슬래브가 겨울
+            # 외기와 햇빛을 받았다(회의실 실측 난방 −41.3%). 단열로 두는 건 "아래층도
+            # 비슷하게 냉난방된다"는 가정이고, 아래가 비난방 주차장이면 난방을
+            # 과소평가한다. 조용히 처리하면 안 되는 값이다.
+            "note": ("gbXML 이 인접 공간을 적지 않았지만 위·아래에 다른 실이 실재하는 "
+                     "바닥·천장입니다. 외기 노출로 두면 건물 내부 슬래브가 겨울 외기와 "
+                     "일사를 받으므로 단열 경계로 가정했습니다. 위·아래 실의 냉난방 "
+                     "조건이 크게 다르면(예: 비난방 주차장 위) 오차가 커집니다."),
             "confidence": "low",
         }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
                                     building_ach, use_afn,

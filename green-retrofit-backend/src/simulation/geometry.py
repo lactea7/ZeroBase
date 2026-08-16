@@ -196,6 +196,39 @@ GROUND_CONTACT_TYPES = (
 )
 
 
+#: 짝이 없을 때 **아래쪽**에 이웃이 있는지 보는 타입(바닥 계열).
+#
+# ⚠️ `RaisedFloor` 를 노려 봤자 소용없다 — 파서가 `"floor" in type` 으로 잡아
+# **`Floor` 로 매핑**하기 때문에 여기 도달할 땐 이미 `Floor` 다. 실제로 회의실.xml
+# 의 `RaisedFloor` 64면이 전부 `Floor` 로 들어온다. 그래도 payload 를 직접 넣는
+# 경로(벤치마크·시험)를 위해 원래 이름도 함께 둔다.
+#
+# ⚠️ `InteriorFloor`·`InteriorCeiling` 은 **일부러 뺐다.** 이름에 `interior` 가
+# 있어서 위쪽 분기가 먼저 Adiabatic 으로 처리한다 — 여기 적어 두면 이 규칙이
+# 그것들까지 담당하는 것처럼 읽히지만 실제로는 도달하지 않는 죽은 항목이다.
+#
+# ⚠️ `ExteriorFloor` 는 **넣지 않는다.** 그건 gbXML 이 외기 노출이라고 선언한 것이다.
+INTERSTITIAL_FLOOR_TYPES = ("floor", "raisedfloor")
+
+#: 짝이 없을 때 **위쪽**에 이웃이 있는지 보는 타입(천장 계열).
+#
+# ⚠️ `Roof` 는 **넣지 않는다.** `SlabOnGrade` 가 지면 접촉을 선언하듯 `Roof` 는
+# 하늘 노출을 선언한다 — 선언은 따른다. (`Floor` 는 아무것도 선언하지 않는다.
+# 그래서 바닥만 추론 대상이다.) ARK 파일에 건물 중간 높이의 `Roof` 가 107면
+# 있는 건 별개 문제이고, 여기서 조용히 뒤집지 않는다.
+INTERSTITIAL_CEILING_TYPES = ("ceiling",)
+
+#: 이웃 존의 반대편 끝과 이만큼 이내로 붙어 있어야 "층층이 쌓였다"고 본다(m).
+# 실측: 회의실 64면의 간격은 0.00~2.44m(아래 존 벽이 슬래브까지 안 올라온 경우
+# 포함), ARK 84면은 −0.15~0.00m. 한 층(약 3.5m)을 넘으면 사이에 빈 공간이 있다는
+# 뜻이므로 이웃으로 치지 않는다.
+INTERSTITIAL_MAX_GAP = 3.0
+
+#: 면적의 이만큼이 이웃 존 윤곽 안에 들어와야 인정한다.
+# ⚠️ 캔틸레버·처마처럼 일부만 걸친 면을 통째로 단열로 만들지 않기 위한 하한이다.
+INTERSTITIAL_MIN_OVERLAP = 0.5
+
+
 @dataclass
 class GeometryResult:
     """표면 emit 결과. 로그 문자열이 아니라 값으로 돌려준다."""
@@ -204,6 +237,10 @@ class GeometryResult:
     air_boundary: int = 0            # AirBoundary 로 처리한 개방 경계
     ground_promoted: int = 0         # 지면 접촉으로 **승격**한 최하층 바닥(추정)
     ground_declared: int = 0         # gbXML 이 지면 접촉이라 **선언**한 면
+    #: 짝은 없지만 위/아래에 존이 실재해 Adiabatic 으로 둔 층간 바닥·천장.
+    #: ⚠️ **저신뢰 fallback 이다.** 개수를 값으로 돌려 호출자가 사용자에게
+    #: 알릴 수 있게 한다 — 조용히 처리하면 안 된다.
+    interstitial_adiabatic: int = 0
     #: 존 → 그 존에 붙은 창 이름들. 내부 블라인드 제어를 존 단위로 걸 때 쓴다.
     windows_by_zone: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -216,6 +253,157 @@ def _ep_type(surface_type: str) -> str:
     if "floor" in t or "slab" in t:
         return "Floor"
     return "Wall"
+
+
+def _convex_hull_xy(points) -> List[tuple]:
+    """XY 평면 볼록 껍질(Andrew monotone chain).
+
+    ⚠️ **볼록 껍질은 존 윤곽의 과대 근사다.** ㄱ자·ㄷ자 평면에서는 실제로 비어
+    있는 안뜰까지 덮는다. 그래서 이 함수로 판정하면 오차 방향이 **Adiabatic 쪽으로
+    치우친다** — 안뜰 위 바닥이 외기 노출인데 단열로 잡힐 수 있다.
+    받아들인 이유: 여기서 필요한 건 "아래에 건물이 있나"이지 정확한 면적이 아니고,
+    반대 방향 오류(층간 바닥이 햇빛·바람을 받는 것)가 훨씬 크기 때문이다.
+    """
+    pts = sorted(set((round(p[0], 6), round(p[1], 6)) for p in points))
+    if len(pts) <= 2:
+        return pts
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _point_in_polygon(x: float, y: float, poly: List[tuple]) -> bool:
+    """XY 평면 ray casting. 경계 위 점의 처리는 정의하지 않는다(표본점이라 무해)."""
+    if len(poly) < 3:
+        return False
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xin = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < xin:
+                inside = not inside
+    return inside
+
+
+def _overlap_fraction(target: List[tuple], other: List[tuple], *, grid: int = 6) -> float:
+    """`target` 중 `other` 안에 들어가는 비율(격자 표본).
+
+    ⚠️ 다각형 클리핑을 안 쓴 이유: 존 윤곽이 오목할 수 있어 Sutherland–Hodgman 이
+    맞지 않고, 정확한 면적이 아니라 **"대체로 겹치나"** 만 필요하다. 표본이라
+    경계에서 한두 점이 흔들려도 판정(0.5 하한)이 뒤집히지 않는다.
+    """
+    if len(target) < 3 or len(other) < 3:
+        return 0.0
+    xs = [p[0] for p in target]
+    ys = [p[1] for p in target]
+    if max(xs) - min(xs) <= 0 or max(ys) - min(ys) <= 0:
+        return 0.0
+    inside_target = 0
+    inside_both = 0
+    for i in range(grid):
+        x = min(xs) + (max(xs) - min(xs)) * (i + 0.5) / grid
+        for j in range(grid):
+            y = min(ys) + (max(ys) - min(ys)) * (j + 0.5) / grid
+            if not _point_in_polygon(x, y, target):
+                continue
+            inside_target += 1
+            if _point_in_polygon(x, y, other):
+                inside_both += 1
+    if inside_target == 0:
+        return 0.0
+    return inside_both / inside_target
+
+
+def _zone_extents(surfaces: List[Dict[str, Any]], valid_zone_ids) -> Dict[str, tuple]:
+    """존별 (z_min, z_max, XY 볼록껍질). **모든** 면의 꼭짓점에서 뽑는다.
+
+    ⚠️ 바닥·천장만 보면 안 된다. 회의실.xml 은 최하층(z 8.99) 존들에 바닥 면이
+    **아예 없어서** 그 존들이 통째로 안 보이고, 바로 위 층 바닥 20면이 "아래에
+    아무것도 없다"로 오판된다. 벽 꼭짓점이 z 범위와 평면 윤곽을 둘 다 준다.
+    """
+    acc: Dict[str, list] = {}
+    for s in surfaces:
+        zone = (s.get("zone") or "").replace(" ", "_")
+        if zone == "Unknown" or zone not in valid_zone_ids:
+            continue
+        verts = s.get("vertices")
+        if not verts:
+            continue
+        acc.setdefault(zone, []).extend(verts)
+    out = {}
+    for zone, pts in acc.items():
+        zs = [p[2] for p in pts]
+        out[zone] = (min(zs), max(zs), _convex_hull_xy(pts))
+    return out
+
+
+def _is_horizontal(verts) -> bool:
+    """법선이 거의 수직인가(=수평면인가). 경사로·비스듬한 면은 대상이 아니다."""
+    if not verts or len(verts) < 3:
+        return False
+    nx = ny = nz = 0.0
+    for i in range(len(verts)):
+        v1, v2 = verts[i], verts[(i + 1) % len(verts)]
+        nx += (v1[1] - v2[1]) * (v1[2] + v2[2])
+        ny += (v1[2] - v2[2]) * (v1[0] + v2[0])
+        nz += (v1[0] - v2[0]) * (v1[1] + v2[1])
+    mag = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if mag <= 0:
+        return False
+    return abs(nz) / mag > 0.95
+
+
+def _stacked_neighbor(surface: Dict[str, Any], zone_id: str, look_below: bool,
+                      extents: Dict[str, tuple]) -> Optional[str]:
+    """이 수평면의 반대편에 실재하는 이웃 존. 없으면 None.
+
+    ⚠️ **z 부호만으로 판정하면 안 된다**(codex 지적). 높이가 0 보다 크다는 사실은
+    언덕 위 필로티·단차·캔틸레버와 층간 슬래브를 구분하지 못한다. 그래서 세 가지를
+    **모두** 요구한다: ① 반대편에 존이 실재하고 ② 그 존의 맞닿는 끝이 한 층 이내로
+    붙어 있으며 ③ XY 투영이 절반 이상 겹친다.
+    """
+    verts = surface.get("vertices") or []
+    if not _is_horizontal(verts):
+        return None
+    z = sum(p[2] for p in verts) / len(verts)
+    poly = _convex_hull_xy(verts)
+    if len(poly) < 3:
+        return None
+
+    best = None
+    best_gap = None
+    for other, (lo, hi, hull) in extents.items():
+        if other == zone_id:
+            continue
+        if look_below:
+            # 아래 존: 이 면보다 아래에서 시작해, 윗면이 이 면 근처까지 올라와야 한다.
+            if not (lo < z - 1e-6 and z - INTERSTITIAL_MAX_GAP <= hi <= z + 0.3):
+                continue
+            gap = abs(z - hi)
+        else:
+            if not (hi > z + 1e-6 and z - 0.3 <= lo <= z + INTERSTITIAL_MAX_GAP):
+                continue
+            gap = abs(lo - z)
+        if _overlap_fraction(poly, hull) < INTERSTITIAL_MIN_OVERLAP:
+            continue
+        if best_gap is None or gap < best_gap:
+            best, best_gap = other, gap
+    return best
 
 
 def _is_slab_on_grade(surface: Dict[str, Any], surface_type: str) -> bool:
@@ -240,6 +428,9 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
     result = GeometryResult()
     # 개방 경계(Air 표면)용 공유 AirBoundary construction (콘크리트 벽 대신 공기혼합)
     idf.add_air_boundary_construction("AirBoundary_Const")
+
+    # 짝없는 층간 바닥·천장 판정에 쓸 존별 수직 범위·평면 윤곽. 루프 밖에서 한 번만.
+    extents = _zone_extents(surfaces, valid_zone_ids)
 
     for s in surfaces:
         z_id = s['zone'].replace(" ", "_")
@@ -323,6 +514,22 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         elif "interior" in t or adj_zone_raw or s.get("selfAdjacent"):
             # adjacentZone이 있지만 유효하지 않은 Zone → Adiabatic fallback
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
+        # ⚠️ **짝없는 층간 바닥·천장.** gbXML 이 인접을 안 적었지만 위/아래에 존이
+        # 실재하는 면이다. 예전엔 여기가 통째로 `Outdoors + SunExposed` 로 떨어져
+        # **건물 14층 높이의 층간 슬래브가 겨울 외기와 햇빛을 받았다.**
+        # 실측 영향: 회의실 난방 −41.3%, 냉방 +9%.
+        #
+        # ⚠️ **타입만으로 결정하지 않는다.** 회의실의 `RaisedFloor` 64면은 전부
+        # 층간 슬래브지만, 같은 타입이 진짜 필로티인 파일도 있다. 반대편에 존이
+        # 실재하는지를 기하로 확인한다(`_stacked_neighbor`).
+        #
+        # ⚠️ 이건 **저신뢰 fallback 이지 복원이 아니다.** 아래층이 비슷하게 냉난방된다는
+        # 가정이 깔려 있고, 아래가 비난방 주차장이면 난방을 과소평가, 더 찬 냉방존이면
+        # 냉방을 과대평가한다. 짝을 실제로 이어 붙이는 건 canonical boundary 작업이다.
+        elif (t in INTERSTITIAL_FLOOR_TYPES or t in INTERSTITIAL_CEILING_TYPES) \
+                and _stacked_neighbor(s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents):
+            obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
+            result.interstitial_adiabatic += 1
         else:
             obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
 
