@@ -695,3 +695,40 @@ def test_thin_diagonal_floor_is_not_lost(record, tmp_path):
         [corridor] + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
         zones=_TWO_STOREY_ZONES), tmp_path)
     assert next(x for x in surfaces if x.id == "F1").boundary == "Adiabatic"
+
+
+# ── 접촉 vs 추정 분리 (round-2 codex 지적) ───────────────────────────────────
+#
+# ⚠️ codex: "슬래브 두께를 찾는 규칙이 3m 떨어진 공간까지 인정하면 비난방 플레넘·
+# 필로티까지 단열이 된다." 일반론으로는 맞다. 실제 파일에서는 회의실 37면의 간격이
+# 1.2~2.4m 이고, 그 띠에 **파사드 92면(1,532㎡)이 걸쳐 있다** — 외피 안쪽이라
+# 햇빛·바람이 닿지 않는다. 그래서 처리는 유지하되 **신뢰도를 갈라 보고**한다.
+
+def test_contact_and_inferred_are_counted_separately():
+    from src.simulation.geometry import emit_surfaces, INTERSTITIAL_CONTACT_GAP
+
+    class _FakeIdf:
+        def add_air_boundary_construction(self, *a, **k): pass
+        def add_surface(self, *a, **k): pass
+
+    def _count(top_of_lower):
+        payload = ([_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
+                   + _box_walls("w0_", 0.0, top_of_lower, "Z0"))
+        r = emit_surfaces(_FakeIdf(), payload, valid_zone_ids={"Z1", "Z0"},
+                          valid_afn_zones=set())
+        return r.interstitial_adiabatic, r.interstitial_contact
+
+    # 맞닿음: 아래 존 윗면이 바닥에 붙어 있다
+    assert _count(3.0) == (1, 1)
+    # 추정: 사이에 1.5m 미모델링 띠가 있다 — 같은 처리를 하되 접촉으로 세지 않는다
+    assert _count(1.5) == (1, 0)
+    assert INTERSTITIAL_CONTACT_GAP < 1.5
+
+
+def test_interstitial_split_is_reported_to_the_user():
+    """⚠️ 합쳐서 보고하면 **추정을 접촉으로 제시**하는 셈이다."""
+    import re
+    src = open(os.path.join(BACKEND, "src", "ep_simulator.py"), encoding="utf-8").read()
+    m = re.search(r'"key":\s*"interstitial_floors".*?"confidence"', src, re.S)
+    assert m and "_geo.interstitial_contact" in m.group(0), \
+        "assumptions 가 맞닿음/추정을 구분해 보고하지 않는다"

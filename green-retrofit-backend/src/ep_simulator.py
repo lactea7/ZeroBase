@@ -1125,8 +1125,9 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     if _geo.air_boundary:
         print(f"💨 개방 경계(Air) Surface {_geo.air_boundary}개를 AirBoundary 로 처리")
     if _geo.interstitial_adiabatic:
-        print(f"🧱 짝 없는 층간 바닥·천장 {_geo.interstitial_adiabatic}개를 "
-              f"단열 경계로 처리 (위/아래에 실재하는 실을 확인)")
+        _inferred = _geo.interstitial_adiabatic - _geo.interstitial_contact
+        print(f"🧱 짝 없는 층간 바닥·천장 {_geo.interstitial_adiabatic}개를 단열 경계로 "
+              f"처리 (맞닿음 {_geo.interstitial_contact} / 추정 {_inferred})")
 
     idf.finalize_hvac()
 
@@ -1269,7 +1270,11 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
         }, {
             "key": "interstitial_floors",
             "label": "짝 없는 층간 바닥·천장",
-            "value": (f"{_geo.interstitial_adiabatic}개 면을 단열 경계로 처리"
+            # ⚠️ 접촉과 추정을 **합쳐서 보고하면 안 된다.** 간격이 0.3m 를 넘는 면은
+            # 사이에 미모델링 띠가 있는 추정이고, 회의실은 37면이 **전부** 그쪽이다.
+            "value": (f"{_geo.interstitial_adiabatic}개 면을 단열 경계로 처리 "
+                      f"(맞닿음 {_geo.interstitial_contact}개 / 추정 "
+                      f"{_geo.interstitial_adiabatic - _geo.interstitial_contact}개)"
                       if _geo.interstitial_adiabatic else "해당 없음"),
             # ⚠️ **추정이지 복원이 아니다.** gbXML 이 인접을 안 적었는데 위/아래에
             # 존이 실재하는 면들이다. 예전엔 외기 노출로 떨어져 층간 슬래브가 겨울
@@ -1278,8 +1283,10 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
             # 과소평가한다. 조용히 처리하면 안 되는 값이다.
             "note": ("gbXML 이 인접 공간을 적지 않았지만 위·아래에 다른 실이 실재하는 "
                      "바닥·천장입니다. 외기 노출로 두면 건물 내부 슬래브가 겨울 외기와 "
-                     "일사를 받으므로 단열 경계로 가정했습니다. 위·아래 실의 냉난방 "
-                     "조건이 크게 다르면(예: 비난방 주차장 위) 오차가 커집니다."),
+                     "일사를 받으므로 단열 경계로 가정했습니다. '추정'은 위·아래 실 "
+                     "사이에 모델링되지 않은 띠가 있어 맞닿음을 확인하지 못한 경우이며, "
+                     "위·아래 실의 냉난방 조건이 크게 다르면(예: 비난방 주차장 위) "
+                     "오차가 커집니다."),
             "confidence": "low",
         }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
                                     building_ach, use_afn,

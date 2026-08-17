@@ -219,10 +219,30 @@ INTERSTITIAL_FLOOR_TYPES = ("floor", "raisedfloor")
 INTERSTITIAL_CEILING_TYPES = ("ceiling",)
 
 #: 이웃 존의 반대편 끝과 이만큼 이내로 붙어 있어야 "층층이 쌓였다"고 본다(m).
-# 실측: 회의실 64면의 간격은 0.00~2.44m(아래 존 벽이 슬래브까지 안 올라온 경우
-# 포함), ARK 84면은 −0.15~0.00m. 한 층(약 3.5m)을 넘으면 사이에 빈 공간이 있다는
-# 뜻이므로 이웃으로 치지 않는다.
+#
+# ⚠️ codex 는 이 값이 너무 크다고 봤다 — "슬래브 두께·좌표 허용오차를 찾는 규칙이
+# 3m 떨어진 공간까지 인정하면 비난방 플레넘·필로티·설비층까지 단열이 된다."
+# 일반론으로는 맞는 지적이다. **그런데 실제 파일에서는 성립하지 않는다.**
+#
+# 회의실에서 전환된 37면의 간격은 1.2m(19) / 2.1m(12) / 2.4m(6) 로 **전부 0.3m 를
+# 넘는다.** 0.3m 로 좁히면 전환이 0 이 되고 난방 −26.1% 가 통째로 사라진다.
+# 그 띠에 무엇이 있는지 세어 보면 답이 나온다:
+#
+#     11.43~13.51m 띠에 걸친 면 → Shade 93면 (수직 92면 1,532㎡ = 파사드)
+#
+# **건물 외피가 그 띠를 지나간다.** 익스포터가 파사드를 존 없는 `Shade` 로
+# 내보냈고, 존 벽은 재실 높이(2.41m)까지만 올라온 것뿐이다. 층 간격 3.64m −
+# 존 높이 2.41m = 1.2m 가 바로 그 미모델링 띠다. 외피 안쪽이므로 그 위 바닥이
+# 햇빛·바람을 받을 수 없다.
+#
+# ⚠️ 다만 **간격이 접촉을 증명하지는 않는다**는 지적은 옳다. 그래서 값은 유지하되
+# `INTERSTITIAL_CONTACT_GAP` 으로 신뢰도를 갈라 사용자에게 따로 보고한다.
 INTERSTITIAL_MAX_GAP = 3.0
+
+#: 이 안쪽은 슬래브 두께·좌표 오차 수준이라 **실제로 맞닿았다**고 볼 수 있다.
+# 이보다 벌어진 것은 같은 처리를 하되 "추정"으로 분리해 센다 — 추정을 접촉으로
+# 제시하면 안 된다(codex 지적).
+INTERSTITIAL_CONTACT_GAP = 0.3
 
 #: 면적의 이만큼이 이웃 존 윤곽 안에 들어와야 인정한다.
 # ⚠️ 캔틸레버·처마처럼 일부만 걸친 면을 통째로 단열로 만들지 않기 위한 하한이다.
@@ -241,6 +261,10 @@ class GeometryResult:
     #: ⚠️ **저신뢰 fallback 이다.** 개수를 값으로 돌려 호출자가 사용자에게
     #: 알릴 수 있게 한다 — 조용히 처리하면 안 된다.
     interstitial_adiabatic: int = 0
+    #: 그중 이웃과 **실제로 맞닿은**(간격 ≤ `INTERSTITIAL_CONTACT_GAP`) 면.
+    #: ⚠️ 나머지는 사이에 미모델링 띠가 있는 **추정**이다. 둘을 합쳐서 보고하면
+    #: 추정을 접촉으로 제시하는 셈이 된다.
+    interstitial_contact: int = 0
     #: 존 → 그 존에 붙은 창 이름들. 내부 블라인드 제어를 존 단위로 걸 때 쓴다.
     windows_by_zone: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -420,8 +444,8 @@ def _is_horizontal(verts) -> bool:
 
 
 def _stacked_neighbor(surface: Dict[str, Any], zone_id: str, look_below: bool,
-                      extents: Dict[str, tuple]) -> Optional[str]:
-    """이 수평면의 반대편에 실재하는 이웃 존. 없으면 None.
+                      extents: Dict[str, tuple]) -> Optional[tuple]:
+    """이 수평면의 반대편에 실재하는 `(이웃 존, 간격)`. 없으면 None.
 
     ⚠️ **z 부호만으로 판정하면 안 된다**(codex 지적). 높이가 0 보다 크다는 사실은
     언덕 위 필로티·단차·캔틸레버와 층간 슬래브를 구분하지 못한다. 그래서 세 가지를
@@ -454,7 +478,7 @@ def _stacked_neighbor(surface: Dict[str, Any], zone_id: str, look_below: bool,
             continue
         if best_gap is None or gap < best_gap:
             best, best_gap = other, gap
-    return best
+    return None if best is None else (best, best_gap)
 
 
 def _is_slab_on_grade(surface: Dict[str, Any], surface_type: str) -> bool:
@@ -492,7 +516,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
             continue
 
         t = s.get("type", "").lower()
-        interstitial = False
+        interstitial = None      # 층간으로 판정됐다면 이웃과의 간격(m)
         ep_type = _ep_type(s.get("type", ""))
         verts = s.get('vertices', [])
         adj_zone_raw = s.get("adjacentZone")
@@ -578,9 +602,10 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         # 가정이 깔려 있고, 아래가 비난방 주차장이면 난방을 과소평가, 더 찬 냉방존이면
         # 냉방을 과대평가한다. 짝을 실제로 이어 붙이는 건 canonical boundary 작업이다.
         elif (t in INTERSTITIAL_FLOOR_TYPES or t in INTERSTITIAL_CEILING_TYPES) \
-                and _stacked_neighbor(s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents):
+                and (_neighbor := _stacked_neighbor(
+                    s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents)):
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
-            interstitial = True
+            interstitial = _neighbor[1]
         else:
             obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
 
@@ -601,8 +626,10 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         # (round-1 에서 `ground_promoted` 를 두고 지적받은 것과 같은 종류의 오류다.)
         if obc == "Ground" and declared_ground:
             result.ground_declared += 1
-        if obc == "Adiabatic" and interstitial:
+        if obc == "Adiabatic" and interstitial is not None:
             result.interstitial_adiabatic += 1
+            if interstitial <= INTERSTITIAL_CONTACT_GAP:
+                result.interstitial_contact += 1
 
         idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
                         obc, sun, wind, verts)
