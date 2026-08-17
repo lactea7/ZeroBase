@@ -732,3 +732,30 @@ def test_interstitial_split_is_reported_to_the_user():
     m = re.search(r'"key":\s*"interstitial_floors".*?"confidence"', src, re.S)
     assert m and "_geo.interstitial_contact" in m.group(0), \
         "assumptions 가 맞닿음/추정을 구분해 보고하지 않는다"
+
+
+def test_unconditioned_neighbour_is_flagged_not_hidden():
+    """⚠️ Adiabatic 의 전제가 가장 약한 자리다 — 비난방 주차장 위 바닥.
+
+    그렇다고 `Outdoors + SunExposed` 로 되돌리지는 않는다. 밀폐된 주차장 위
+    바닥에 일사를 때리는 건 더 틀렸다. 처리는 유지하고 **세어서 드러낸다.**
+    """
+    from src.simulation.geometry import emit_surfaces
+
+    class _FakeIdf:
+        def __init__(self): self.boundaries = []
+        def add_air_boundary_construction(self, *a, **k): pass
+        def add_surface(self, sid, ep, const, zone, obc, *a, **k):
+            self.boundaries.append((sid, obc))
+
+    payload = ([_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
+               + _box_walls("w0_", 0.0, 3.0, "Z0"))
+    idf = _FakeIdf()
+    r = emit_surfaces(idf, payload, valid_zone_ids={"Z1", "Z0"},
+                      valid_afn_zones=set(), unconditioned_zones={"Z0"})
+    assert r.interstitial_unconditioned == 1
+    assert dict(idf.boundaries)["F1"] == "Adiabatic", "처리를 되돌리면 안 된다"
+
+    r2 = emit_surfaces(_FakeIdf(), payload, valid_zone_ids={"Z1", "Z0"},
+                       valid_afn_zones=set())
+    assert r2.interstitial_unconditioned == 0

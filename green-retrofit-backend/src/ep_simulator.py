@@ -1092,10 +1092,15 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     # 가 호출 단위로 고정한다 — 골든 IDF 문자열 비교만으로는 안 지켜진다.
     valid_zone_ids = set(z['id'].replace(" ", "_") for z in zones)
     promote_ground_floors = bool(project_data.get("promoteGroundFloors"))
+    # ⚠️ 층간 바닥 판정이 이웃 존의 공조 여부를 봐야 한다. Adiabatic 의 전제
+    # ("반대편도 비슷한 온도")가 비공조 이웃에서 가장 약하다 — 드러내야 한다.
+    _unconditioned = {z['id'].replace(" ", "_") for z in zones
+                      if not z.get("isConditioned", True)}
     _geo = geometry.emit_surfaces(
         idf, surfaces,
         valid_zone_ids=valid_zone_ids, valid_afn_zones=valid_afn_zones,
-        promote_ground_floors=promote_ground_floors)
+        promote_ground_floors=promote_ground_floors,
+        unconditioned_zones=_unconditioned)
 
     # ── 내부 블라인드 (일사 제어) ──
     # ⚠️ ASHRAE 140 은 **차양 없음**을 사양으로 못 박는다(600 vs 610 의 차이가 바로
@@ -1286,7 +1291,10 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                      "일사를 받으므로 단열 경계로 가정했습니다. '추정'은 위·아래 실 "
                      "사이에 모델링되지 않은 띠가 있어 맞닿음을 확인하지 못한 경우이며, "
                      "위·아래 실의 냉난방 조건이 크게 다르면(예: 비난방 주차장 위) "
-                     "오차가 커집니다."),
+                     "오차가 커집니다."
+                     + (f" 이 중 {_geo.interstitial_unconditioned}개는 반대편이 "
+                        f"비공조 구역이라 겨울 열손실을 과소평가할 수 있습니다."
+                        if _geo.interstitial_unconditioned else "")),
             "confidence": "low",
         }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
                                     building_ach, use_afn,

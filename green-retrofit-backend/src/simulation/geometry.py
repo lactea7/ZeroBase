@@ -265,6 +265,11 @@ class GeometryResult:
     #: ⚠️ 나머지는 사이에 미모델링 띠가 있는 **추정**이다. 둘을 합쳐서 보고하면
     #: 추정을 접촉으로 제시하는 셈이 된다.
     interstitial_contact: int = 0
+    #: 그중 이웃이 **비공조 구역**인 면. Adiabatic 의 전제("반대편도 비슷한 온도")가
+    #: 가장 약한 자리다 — 비난방 주차장 위 바닥이면 겨울 열손실을 과소평가한다.
+    #: ⚠️ 그래도 `Outdoors + SunExposed` 로 두지는 않는다. 밀폐된 주차장 위 바닥에
+    #: 일사를 때리는 건 더 틀렸다. 처리는 유지하고 **드러내서** 사용자가 판단하게 한다.
+    interstitial_unconditioned: int = 0
     #: 존 → 그 존에 붙은 창 이름들. 내부 블라인드 제어를 존 단위로 걸 때 쓴다.
     windows_by_zone: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -498,7 +503,8 @@ def _is_slab_on_grade(surface: Dict[str, Any], surface_type: str) -> bool:
 
 def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
                   valid_zone_ids, valid_afn_zones,
-                  promote_ground_floors: bool = False) -> GeometryResult:
+                  promote_ground_floors: bool = False,
+                  unconditioned_zones=frozenset()) -> GeometryResult:
     """표면·창·AFN 균열을 IDF 에 넣는다."""
     result = GeometryResult()
     # 개방 경계(Air 표면)용 공유 AirBoundary construction (콘크리트 벽 대신 공기혼합)
@@ -516,7 +522,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
             continue
 
         t = s.get("type", "").lower()
-        interstitial = None      # 층간으로 판정됐다면 이웃과의 간격(m)
+        interstitial = None      # 층간으로 판정됐다면 (이웃 존, 간격)
         ep_type = _ep_type(s.get("type", ""))
         verts = s.get('vertices', [])
         adj_zone_raw = s.get("adjacentZone")
@@ -605,7 +611,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
                 and (_neighbor := _stacked_neighbor(
                     s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents)):
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
-            interstitial = _neighbor[1]
+            interstitial = _neighbor
         else:
             obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
 
@@ -627,9 +633,12 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         if obc == "Ground" and declared_ground:
             result.ground_declared += 1
         if obc == "Adiabatic" and interstitial is not None:
+            _nb_zone, _nb_gap = interstitial
             result.interstitial_adiabatic += 1
-            if interstitial <= INTERSTITIAL_CONTACT_GAP:
+            if _nb_gap <= INTERSTITIAL_CONTACT_GAP:
                 result.interstitial_contact += 1
+            if _nb_zone in unconditioned_zones:
+                result.interstitial_unconditioned += 1
 
         idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
                         obc, sun, wind, verts)
