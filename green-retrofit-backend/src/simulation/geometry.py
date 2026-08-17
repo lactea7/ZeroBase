@@ -246,10 +246,23 @@ class GeometryResult:
 
 
 def _ep_type(surface_type: str) -> str:
-    """gbXML 표면 타입 → EnergyPlus 표면 종류."""
+    """gbXML 표면 타입 → EnergyPlus 표면 종류.
+
+    ⚠️ **`Ceiling` 분기가 없어서 천장이 `Wall` 로 들어가고 있었다.** `roof` 도
+    `floor`/`slab` 도 아니면 전부 `Wall` 로 떨어지는 구조였다. 수평 천장이 벽으로
+    선언되면 EnergyPlus 가 기울기·면 종류로 하는 검사가 전부 어긋난다
+    (`InterZone Surface Tilts/Classes do not match`가 여기서도 나온다).
+    `ee931c7` 로 `UndergroundCeiling` 을 `Ground` 로 보내기 시작했는데 그것도
+    **`Ground` 벽**이었다.
+
+    ⚠️ `ceiling` 은 `floor` 보다 **먼저** 봐야 한다 — 순서를 바꾸면 그만이지만,
+    실제 파일 4개엔 `Ceiling` 타입이 하나도 없어서 골든 IDF 로는 안 잡힌다.
+    """
     t = (surface_type or "").lower()
     if "roof" in t:
         return "Roof"
+    if "ceiling" in t:
+        return "Ceiling"
     if "floor" in t or "slab" in t:
         return "Floor"
     return "Wall"
@@ -284,49 +297,87 @@ def _convex_hull_xy(points) -> List[tuple]:
     return lower[:-1] + upper[:-1]
 
 
-def _point_in_polygon(x: float, y: float, poly: List[tuple]) -> bool:
-    """XY 평면 ray casting. 경계 위 점의 처리는 정의하지 않는다(표본점이라 무해)."""
-    if len(poly) < 3:
-        return False
-    inside = False
-    n = len(poly)
-    for i in range(n):
+def _signed_area_xy(poly: List[tuple]) -> float:
+    s = 0.0
+    for i in range(len(poly)):
         x1, y1 = poly[i]
-        x2, y2 = poly[(i + 1) % n]
-        if (y1 > y) != (y2 > y):
-            xin = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
-            if x < xin:
-                inside = not inside
-    return inside
+        x2, y2 = poly[(i + 1) % len(poly)]
+        s += x1 * y2 - x2 * y1
+    return s / 2.0
 
 
-def _overlap_fraction(target: List[tuple], other: List[tuple], *, grid: int = 6) -> float:
-    """`target` 중 `other` 안에 들어가는 비율(격자 표본).
+def _ccw(poly: List[tuple]) -> List[tuple]:
+    """반시계 방향으로 맞춘다.
 
-    ⚠️ 다각형 클리핑을 안 쓴 이유: 존 윤곽이 오목할 수 있어 Sutherland–Hodgman 이
-    맞지 않고, 정확한 면적이 아니라 **"대체로 겹치나"** 만 필요하다. 표본이라
-    경계에서 한두 점이 흔들려도 판정(0.5 하한)이 뒤집히지 않는다.
+    ⚠️ `_clip_convex` 의 안/밖 판정은 **감김 방향에 의존한다.** 시계 방향이 섞여
+    들어오면 교차가 통째로 빈 다각형이 되어 겹침이 0 으로 나온다.
+    """
+    return poly if _signed_area_xy(poly) >= 0 else list(reversed(poly))
+
+
+def _polygon_area_xy(poly: List[tuple]) -> float:
+    """XY 다각형 면적(신발끈). 방향과 무관하게 양수."""
+    if len(poly) < 3:
+        return 0.0
+    return abs(_signed_area_xy(poly))
+
+
+def _clip_convex(subject: List[tuple], clip: List[tuple]) -> List[tuple]:
+    """Sutherland–Hodgman. **두 다각형이 모두 볼록**할 때만 옳다."""
+    out = list(subject)
+    n = len(clip)
+    for i in range(n):
+        if not out:
+            return []
+        ax, ay = clip[i]
+        bx, by = clip[(i + 1) % n]
+
+        def inside(p):
+            return (bx - ax) * (p[1] - ay) - (by - ay) * (p[0] - ax) >= -1e-12
+
+        clipped = []
+        for j in range(len(out)):
+            cur, prv = out[j], out[j - 1]
+            if inside(cur):
+                if not inside(prv):
+                    clipped.append(_edge_intersection(prv, cur, (ax, ay), (bx, by)))
+                clipped.append(cur)
+            elif inside(prv):
+                clipped.append(_edge_intersection(prv, cur, (ax, ay), (bx, by)))
+        out = [p for p in clipped if p is not None]
+    return out
+
+
+def _edge_intersection(p1, p2, a, b):
+    """선분 p1→p2 와 직선 a→b 의 교점."""
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = a
+    x4, y4 = b
+    den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(den) < 1e-15:
+        return None
+    t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
+    return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
+
+
+def _overlap_fraction(target: List[tuple], other: List[tuple]) -> float:
+    """`target` 중 `other` 와 겹치는 **면적 비율**.
+
+    ⚠️ 예전엔 6×6 격자 표본이었고 "존 윤곽이 오목해서 다각형 클리핑을 못 쓴다"고
+    적어 뒀었다. **그 근거가 틀렸다**(codex 지적) — 두 인자 모두 `_convex_hull_xy`
+    를 거쳐 들어오므로 **항상 볼록**이다. 정확한 교차면적을 구할 수 있는데 표본을
+    쓸 이유가 없었다.
+
+    격자 표본은 실제로 해를 끼쳤다: 가늘고 비스듬한 면에서 표본이 하나도 안 걸려
+    `0.0`(→ 외기 노출 유지)이 되고, 0.5 문턱 근처에서 표본 한두 개로 판정이 뒤집혔다.
     """
     if len(target) < 3 or len(other) < 3:
         return 0.0
-    xs = [p[0] for p in target]
-    ys = [p[1] for p in target]
-    if max(xs) - min(xs) <= 0 or max(ys) - min(ys) <= 0:
+    area = _polygon_area_xy(target)
+    if area <= 1e-12:
         return 0.0
-    inside_target = 0
-    inside_both = 0
-    for i in range(grid):
-        x = min(xs) + (max(xs) - min(xs)) * (i + 0.5) / grid
-        for j in range(grid):
-            y = min(ys) + (max(ys) - min(ys)) * (j + 0.5) / grid
-            if not _point_in_polygon(x, y, target):
-                continue
-            inside_target += 1
-            if _point_in_polygon(x, y, other):
-                inside_both += 1
-    if inside_target == 0:
-        return 0.0
-    return inside_both / inside_target
+    return _polygon_area_xy(_clip_convex(_ccw(target), _ccw(other))) / area
 
 
 def _zone_extents(surfaces: List[Dict[str, Any]], valid_zone_ids) -> Dict[str, tuple]:
@@ -441,6 +492,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
             continue
 
         t = s.get("type", "").lower()
+        interstitial = False
         ep_type = _ep_type(s.get("type", ""))
         verts = s.get('vertices', [])
         adj_zone_raw = s.get("adjacentZone")
@@ -507,7 +559,6 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         # 햇빛·바람을 받는다.
         if declared_ground:
             obc, sun, wind = "Ground", "NoSun", "NoWind"
-            result.ground_declared += 1
         # 외벽 또는 인접 Zone이 없는 내부면 → 기존 로직
         # selfAdjacent: 파서가 자기참조 인접을 걷어낸 면. 타입에 'interior'가 없는
         # Air 같은 면이 여기서 외기 노출(일사·풍압)로 빠지면 없던 외피가 생긴다.
@@ -529,7 +580,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         elif (t in INTERSTITIAL_FLOOR_TYPES or t in INTERSTITIAL_CEILING_TYPES) \
                 and _stacked_neighbor(s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents):
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
-            result.interstitial_adiabatic += 1
+            interstitial = True
         else:
             obc, sun, wind = "Outdoors", "SunExposed", "WindExposed"
 
@@ -543,6 +594,15 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
             sun = s["sunExposure"]
         if s.get("windExposure"):
             wind = s["windExposure"]
+
+        # ⚠️ **카운터는 덮어쓰기 뒤에 센다.** 예전엔 판정 분기 안에서 바로 올렸는데,
+        # 그러면 명시 지정으로 최종 `Outdoors` 가 된 면까지 "단열로 처리했다"고
+        # 기록됐다. 사용자에게 나가는 `assumptions` 숫자가 IDF 와 어긋난다.
+        # (round-1 에서 `ground_promoted` 를 두고 지적받은 것과 같은 종류의 오류다.)
+        if obc == "Ground" and declared_ground:
+            result.ground_declared += 1
+        if obc == "Adiabatic" and interstitial:
+            result.interstitial_adiabatic += 1
 
         idf.add_surface(s['id'], ep_type, f"Const_{s['id']}", z_id,
                         obc, sun, wind, verts)

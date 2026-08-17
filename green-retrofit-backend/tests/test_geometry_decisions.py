@@ -614,3 +614,84 @@ def test_interstitial_fallback_is_reported_in_the_response():
     assert m.group(1) == "low", "기하로 추정한 값이므로 confidence 는 low 여야 한다"
     assert "_geo.interstitial_adiabatic" in m.group(0), \
         "실제 전환 개수가 아니라 고정 문구를 보고하고 있다"
+
+
+# ── 표면 종류 매핑 (round-2 codex 지적) ──────────────────────────────────────
+
+def test_ceiling_is_not_emitted_as_a_wall(record, tmp_path):
+    """⚠️ `_ep_type` 에 `Ceiling` 분기가 없어 **수평 천장이 `Wall` 로 나갔다.**
+
+    `roof` 도 `floor`/`slab` 도 아니면 전부 `Wall` 로 떨어지는 구조였다. 실제 파일
+    4개엔 `Ceiling` 타입이 하나도 없어서 골든 IDF 로는 영원히 안 잡힌다.
+    """
+    surfaces, _ = record(_payload(
+        [_slab("C1", 3.0, zone="Z0", stype="Ceiling")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "C1").type == "Ceiling"
+
+
+def test_underground_ceiling_is_a_ground_ceiling_not_a_ground_wall(record, tmp_path):
+    """⚠️ `ee931c7` 이 이 타입을 `Ground` 로 보내기 시작했는데 **`Ground` 벽**이었다."""
+    surfaces, _ = record(_payload(
+        [_slab("U1", 3.0, stype="UndergroundCeiling")]
+        + _box_walls("w1_", 3.0, 6.0, "Z1"), zones=_TWO_STOREY_ZONES), tmp_path)
+    s = next(x for x in surfaces if x.id == "U1")
+    assert (s.type, s.boundary) == ("Ceiling", "Ground")
+
+
+# ── 카운터 vs 명시 지정 (round-2 codex 지적) ─────────────────────────────────
+
+def test_counters_do_not_claim_surfaces_that_override_took_back():
+    """⚠️ 카운터를 판정 분기 안에서 올리면, 명시 지정으로 최종 `Outdoors` 가 된
+    면까지 "단열로 처리했다"고 기록된다 — `assumptions` 숫자가 IDF 와 어긋난다.
+    (round-1 에서 `ground_promoted` 를 두고 지적받은 것과 같은 종류의 오류다.)
+    """
+    from src.simulation.geometry import emit_surfaces
+
+    class _FakeIdf:
+        def add_air_boundary_construction(self, *a, **k): pass
+        def add_surface(self, *a, **k): pass
+
+    payload = ([dict(_slab("F1", 3.0), boundaryCondition="Outdoors"),
+                dict(_slab("G1", 3.0, stype="SlabOnGrade"), boundaryCondition="Outdoors")]
+               + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"))
+    r = emit_surfaces(_FakeIdf(), payload, valid_zone_ids={"Z1", "Z0"},
+                      valid_afn_zones=set())
+    assert (r.interstitial_adiabatic, r.ground_declared) == (0, 0)
+
+
+# ── 겹침 계산 (round-2 codex 지적) ───────────────────────────────────────────
+
+def test_overlap_is_exact_area_not_a_sample():
+    """⚠️ 예전엔 6×6 격자 표본이었고 근거를 "존 윤곽이 오목해서"라고 적었다.
+    **틀렸다** — 두 인자 모두 볼록 껍질을 거쳐 들어오므로 항상 볼록이다.
+    """
+    from src.simulation.geometry import _overlap_fraction
+    unit = [(0, 0), (1, 0), (1, 1), (0, 1)]
+    assert _overlap_fraction(unit, unit) == pytest.approx(1.0)
+    # 정확히 사분면 하나만 겹친다 → 0.25. 표본이면 격자 위치에 따라 흔들린다.
+    assert _overlap_fraction(unit, [(0.5, 0.5), (1.5, 0.5), (1.5, 1.5), (0.5, 1.5)]) \
+        == pytest.approx(0.25)
+    assert _overlap_fraction(unit, [(9, 9), (10, 9), (10, 10), (9, 10)]) == 0.0
+
+
+def test_overlap_survives_reversed_winding():
+    """⚠️ 클리핑의 안/밖 판정은 감김 방향에 의존한다 — 뒤집힌 다각형이 섞여
+    들어오면 교차가 통째로 비어 겹침이 0 이 된다."""
+    from src.simulation.geometry import _overlap_fraction
+    unit = [(0, 0), (1, 0), (1, 1), (0, 1)]
+    assert _overlap_fraction(unit, list(reversed(unit))) == pytest.approx(1.0)
+    assert _overlap_fraction(list(reversed(unit)), unit) == pytest.approx(1.0)
+
+
+def test_thin_diagonal_floor_is_not_lost(record, tmp_path):
+    """⚠️ 격자 표본은 가늘고 비스듬한 면에서 표본이 하나도 안 걸려 조용히
+    외기 노출로 남겼다. 정확 교차면적은 그런 구멍이 없다."""
+    corridor = {"id": "F1", "type": "Floor", "zone": "Z1", "uValue": 0.5, "area": 2.0,
+                "vertices": [(0.1, 0.0, 3.0), (3.9, 3.6, 3.0),
+                             (3.8, 3.9, 3.0), (0.0, 0.3, 3.0)]}
+    surfaces, _ = record(_payload(
+        [corridor] + _box_walls("w1_", 3.0, 6.0, "Z1") + _box_walls("w0_", 0.0, 3.0, "Z0"),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "F1").boundary == "Adiabatic"

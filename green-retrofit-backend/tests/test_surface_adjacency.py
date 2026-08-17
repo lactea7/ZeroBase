@@ -218,3 +218,12 @@ def test_plain_ceiling_is_still_mapped_to_ceiling():
     """`UndergroundCeiling` 분기를 앞세운 것이 일반 천장을 가로채면 안 된다."""
     result = _parse(SURFACE.format(sid="c1", stype="Ceiling", adj=_adj("sp-a"), z=3))
     assert _by_id(result, "c1")["type"] == "Ceiling"
+
+
+def test_underground_ceiling_reaches_the_idf_as_a_ceiling():
+    """⚠️ 파서→IDF 왕복. 파서가 타입을 지켜도 `_ep_type` 이 `Wall` 로 바꾸면
+    결국 `Ground` **벽**이 된다 — 두 단계를 함께 고정해야 의미가 있다."""
+    from src.simulation.geometry import _ep_type
+    result = _parse(SURFACE.format(sid="u1", stype="UndergroundCeiling",
+                                   adj=_adj("sp-a"), z=3))
+    assert _ep_type(_by_id(result, "u1")["type"]) == "Ceiling"
