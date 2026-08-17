@@ -704,25 +704,62 @@ def test_thin_diagonal_floor_is_not_lost(record, tmp_path):
 # 1.2~2.4m 이고, 그 띠에 **파사드 92면(1,532㎡)이 걸쳐 있다** — 외피 안쪽이라
 # 햇빛·바람이 닿지 않는다. 그래서 처리는 유지하되 **신뢰도를 갈라 보고**한다.
 
-def test_contact_and_inferred_are_counted_separately():
+def _facade(prefix, z0, z1, x0=0, x1=4, y0=0, y1=5):
+    """존에 안 붙은 외피(파사드). gbXML 이 `Shade` 로 내보내는 그것이다.
+
+    ⚠️ 존이 없어 IDF 에는 안 들어간다. 그래도 **건물 외피가 어디까지 있는지**를
+    말해 주는 입력 형상이라 밀폐 판정의 근거가 된다.
+    """
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    out = []
+    for i, (ax, ay) in enumerate(corners):
+        bx, by = corners[(i + 1) % 4]
+        out.append({"id": f"{prefix}{i}", "type": "Shade", "zone": "Unknown",
+                    "uValue": 0.5, "area": 10.0,
+                    "vertices": [(ax, ay, z1), (ax, ay, z0), (bx, by, z0), (bx, by, z1)]})
+    return out
+
+
+def test_contact_and_enclosed_are_counted_separately():
     from src.simulation.geometry import emit_surfaces, INTERSTITIAL_CONTACT_GAP
 
     class _FakeIdf:
         def add_air_boundary_construction(self, *a, **k): pass
         def add_surface(self, *a, **k): pass
 
-    def _count(top_of_lower):
-        payload = ([_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
-                   + _box_walls("w0_", 0.0, top_of_lower, "Z0"))
+    def _count(extra):
+        payload = ([_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")) + extra
         r = emit_surfaces(_FakeIdf(), payload, valid_zone_ids={"Z1", "Z0"},
                           valid_afn_zones=set())
         return r.interstitial_adiabatic, r.interstitial_contact
 
     # 맞닿음: 아래 존 윗면이 바닥에 붙어 있다
-    assert _count(3.0) == (1, 1)
-    # 추정: 사이에 1.5m 미모델링 띠가 있다 — 같은 처리를 하되 접촉으로 세지 않는다
-    assert _count(1.5) == (1, 0)
+    assert _count(_box_walls("w0_", 0.0, 3.0, "Z0")) == (1, 1)
+    # 밀폐 확인: 1.5m 띠가 있지만 **외피가 그 띠를 지나간다** — 회의실이 이 경우다
+    assert _count(_box_walls("w0_", 0.0, 1.5, "Z0") + _facade("f_", 1.5, 3.0)) == (1, 0)
     assert INTERSTITIAL_CONTACT_GAP < 1.5
+
+
+def test_open_gap_without_an_envelope_is_not_adiabatic(record, tmp_path):
+    """⚠️ **간격만으로는 안 된다** — codex 지적의 핵심.
+
+    아래 존이 있고 높이도 3m 이내지만 그 사이가 뚫려 있으면 개방 필로티·공극이다.
+    외피가 그 띠를 지나가는지 **직접 확인**해서 가른다.
+    """
+    surfaces, _ = record(_payload(
+        [_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
+        + _box_walls("w0_", 0.0, 1.5, "Z0"),          # 1.5~3.0 이 비어 있다
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "F1").boundary == "Outdoors"
+
+
+def test_the_same_gap_becomes_adiabatic_once_the_envelope_covers_it(record, tmp_path):
+    """위 시험과 **간격이 같다.** 달라진 건 그 띠를 외피가 덮는지 뿐이다."""
+    surfaces, _ = record(_payload(
+        [_slab("F1", 3.0)] + _box_walls("w1_", 3.0, 6.0, "Z1")
+        + _box_walls("w0_", 0.0, 1.5, "Z0") + _facade("f_", 1.5, 3.0),
+        zones=_TWO_STOREY_ZONES), tmp_path)
+    assert next(x for x in surfaces if x.id == "F1").boundary == "Adiabatic"
 
 
 def test_interstitial_split_is_reported_to_the_user():

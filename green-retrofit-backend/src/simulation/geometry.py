@@ -235,13 +235,15 @@ INTERSTITIAL_CEILING_TYPES = ("ceiling",)
 # 존 높이 2.41m = 1.2m 가 바로 그 미모델링 띠다. 외피 안쪽이므로 그 위 바닥이
 # 햇빛·바람을 받을 수 없다.
 #
-# ⚠️ 다만 **간격이 접촉을 증명하지는 않는다**는 지적은 옳다. 그래서 값은 유지하되
-# `INTERSTITIAL_CONTACT_GAP` 으로 신뢰도를 갈라 사용자에게 따로 보고한다.
+# ⚠️ **결론: 간격으로 다투지 않는다.** 이 값은 이제 거친 1차 거름망일 뿐이고,
+# 접촉 오차를 넘는 간격은 `_band_is_enclosed()` 로 **그 띠가 막혀 있는지를 직접
+# 증명**해야 통과한다. 진짜 필로티·개방 공극은 그 높이에 수직 외피가 없어 걸러진다.
+# 실제로 회의실 37면 중 **8면이 이 검사에서 떨어졌다**(37 → 29).
 INTERSTITIAL_MAX_GAP = 3.0
 
 #: 이 안쪽은 슬래브 두께·좌표 오차 수준이라 **실제로 맞닿았다**고 볼 수 있다.
-# 이보다 벌어진 것은 같은 처리를 하되 "추정"으로 분리해 센다 — 추정을 접촉으로
-# 제시하면 안 된다(codex 지적).
+# 이보다 벌어지면 밀폐 증명을 요구하고, 통과해도 "맞닿음"이 아니라 "밀폐 확인"으로
+# 따로 센다 — 추정을 접촉으로 제시하면 안 된다(codex 지적).
 INTERSTITIAL_CONTACT_GAP = 0.3
 
 #: 면적의 이만큼이 이웃 존 윤곽 안에 들어와야 인정한다.
@@ -432,6 +434,48 @@ def _zone_extents(surfaces: List[Dict[str, Any]], valid_zone_ids) -> Dict[str, t
     return out
 
 
+def _envelope_hulls(surfaces: List[Dict[str, Any]]) -> List[tuple]:
+    """`(z_min, z_max, XY 껍질)` — **수직면 전부**. 존 소속을 따지지 않는다.
+
+    ⚠️ **존이 없는 `Shade` 면도 넣는다.** 이게 이 함수의 요점이다.
+    회의실.xml 은 파사드를 존 없는 `Shade` 로 내보냈다(675면 24,825㎡). 그 면들은
+    유효 존이 없어 IDF 에 안 들어가지만, **건물 외피가 어디까지 있는지를 말해 주는
+    입력 형상**이다. 시뮬레이션 대상이 아니라 판정 근거로 쓴다 — 존 z 범위를
+    벽 꼭짓점에서 뽑는 것과 같은 종류의 사용이다.
+    """
+    out = []
+    for s in surfaces:
+        verts = s.get("vertices")
+        if not verts or _is_horizontal(verts):
+            continue
+        zs = [p[2] for p in verts]
+        hull = _convex_hull_xy(verts)
+        if len(hull) < 2:
+            continue
+        out.append((min(zs), max(zs), hull))
+    return out
+
+
+def _band_is_enclosed(poly: List[tuple], z_lo: float, z_hi: float,
+                      envelope: List[tuple]) -> bool:
+    """`z_lo~z_hi` 높이에서 `poly` 가 건물 외피 **안쪽**에 있는가.
+
+    ⚠️ 이게 "간격이 3m 나 되는데 왜 단열이냐"에 대한 답이다. 간격 자체를 근거로
+    삼지 않고 **그 띠가 막혀 있는지를 직접 본다.** 진짜 필로티·개방 공극은 그
+    높이에 수직 외피가 없어서 여기서 걸러진다.
+
+    ⚠️ 판정은 "poly 위에 벽이 있는가"가 아니라 **"poly 가 그 높이 건물 윤곽 안에
+    드는가"** 다. 건물 한가운데 바닥 위에는 외벽이 없다 — 외피는 둘레에 있다.
+    """
+    pts = []
+    for lo, hi, hull in envelope:
+        if hi > z_lo + 1e-6 and lo < z_hi - 1e-6:   # 띠와 z 로 겹치는 수직면
+            pts.extend(hull)
+    if len(pts) < 3:
+        return False
+    return _overlap_fraction(_ccw(poly), _ccw(_convex_hull_xy(pts))) >= 0.99
+
+
 def _is_horizontal(verts) -> bool:
     """법선이 거의 수직인가(=수평면인가). 경사로·비스듬한 면은 대상이 아니다."""
     if not verts or len(verts) < 3:
@@ -449,7 +493,8 @@ def _is_horizontal(verts) -> bool:
 
 
 def _stacked_neighbor(surface: Dict[str, Any], zone_id: str, look_below: bool,
-                      extents: Dict[str, tuple]) -> Optional[tuple]:
+                      extents: Dict[str, tuple],
+                      envelope: Optional[List[tuple]] = None) -> Optional[tuple]:
     """이 수평면의 반대편에 실재하는 `(이웃 존, 간격)`. 없으면 None.
 
     ⚠️ **z 부호만으로 판정하면 안 된다**(codex 지적). 높이가 0 보다 크다는 사실은
@@ -481,6 +526,14 @@ def _stacked_neighbor(surface: Dict[str, Any], zone_id: str, look_below: bool,
             gap = abs(lo - z)
         if _overlap_fraction(poly, hull) < INTERSTITIAL_MIN_OVERLAP:
             continue
+        # ⚠️ **간격이 접촉 오차를 넘으면 밀폐를 직접 증명해야 한다.**
+        # 예전엔 `INTERSTITIAL_MAX_GAP` 하나로 3m 까지 통과시켰다 — codex 지적대로
+        # 그러면 비난방 플레넘·개방 필로티·설비층까지 단열이 된다. 간격을 근거로
+        # 삼는 대신 그 높이에서 **건물 외피 안쪽인지**를 본다.
+        if gap > INTERSTITIAL_CONTACT_GAP:
+            band = (hi, z) if look_below else (z, lo)
+            if not _band_is_enclosed(poly, min(band), max(band), envelope or []):
+                continue
         if best_gap is None or gap < best_gap:
             best, best_gap = other, gap
     return None if best is None else (best, best_gap)
@@ -512,6 +565,8 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
 
     # 짝없는 층간 바닥·천장 판정에 쓸 존별 수직 범위·평면 윤곽. 루프 밖에서 한 번만.
     extents = _zone_extents(surfaces, valid_zone_ids)
+    # 밀폐 검사용 외피(수직면 전부, 존 없는 Shade 포함). 위와 달리 존을 안 따진다.
+    envelope = _envelope_hulls(surfaces)
 
     for s in surfaces:
         z_id = s['zone'].replace(" ", "_")
@@ -609,7 +664,7 @@ def emit_surfaces(idf, surfaces: List[Dict[str, Any]], *,
         # 냉방을 과대평가한다. 짝을 실제로 이어 붙이는 건 canonical boundary 작업이다.
         elif (t in INTERSTITIAL_FLOOR_TYPES or t in INTERSTITIAL_CEILING_TYPES) \
                 and (_neighbor := _stacked_neighbor(
-                    s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents)):
+                    s, z_id, t in INTERSTITIAL_FLOOR_TYPES, extents, envelope)):
             obc, sun, wind = "Adiabatic", "NoSun", "NoWind"
             interstitial = _neighbor
         else:
