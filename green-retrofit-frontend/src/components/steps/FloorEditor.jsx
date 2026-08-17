@@ -1075,7 +1075,7 @@ export default function FloorEditor(props) {
                                   <input
                                     type="range"
                                     min="0"
-                                    max="90"
+                                    max="99"
                                     step="1"
                                     value={editState.wwr || 0}
                                     onChange={(e) =>
@@ -1086,7 +1086,7 @@ export default function FloorEditor(props) {
                                   <input
                                     type="number"
                                     min="0"
-                                    max="90"
+                                    max="99"
                                     step="1"
                                     value={editState.wwr || 0}
                                     onChange={(e) =>

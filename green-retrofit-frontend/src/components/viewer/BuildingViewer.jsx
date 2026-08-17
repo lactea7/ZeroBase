@@ -556,7 +556,9 @@ const BuildingViewer = ({
 
         // 창호 그리기
         const liveWwr = editMode === 'surface' && selectedId === surf.id && draftState ? draftState.wwr : surf.wwr;
-        const safeWwr = isNaN(liveWwr) ? 0 : Math.max(0, Math.min(90, liveWwr));
+        // ⚠️ 상한은 백엔드(`gbxml_parser.py`)와 **같은 값이어야 한다.** 한쪽만
+        // 90 이면 화면이 계산과 다른 창을 그린다. 90 → 99 로 함께 올렸다.
+        const safeWwr = isNaN(liveWwr) ? 0 : Math.max(0, Math.min(99, liveWwr));
 
         if ((surf.type === 'Wall' || surf.type === 'ExteriorWall') && safeWwr > 0 && surf.width && surf.height) {
           const winRatio = Math.sqrt(safeWwr / 100);
