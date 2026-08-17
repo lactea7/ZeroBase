@@ -949,7 +949,32 @@ def parse_gbxml_to_json(filepath: str):
             _tol = max(surf_area * 0.005, 0.01)
             if total_op_area > surf_area + _tol:
                 opening_overflow.append((surf_id, round(surf_area, 2), round(total_op_area, 2)))
-            surface_data["wwr"] = min(calc_wwr, 90)
+            # ⚠️ 예전 상한은 **90** 이었다. 그건 기하 오류를 조용히 감추던 장치인데,
+            # 그 역할은 위 `opening_overflow`(severity block) 로 넘어갔고 **상한만
+            # 남았다.** 남은 상한은 아무 오류도 안 막으면서 정상 창을 깎았다:
+            # 용호동 15면이 실측 98.7% → 90 으로 잘려 유리 267.9㎡(실측 294.7㎡),
+            # 회의실은 90.6~91.6% 인 30면이 잘렸다.
+            #
+            # ⚠️ 커튼월과 무관하다. 잘린 면의 개구부는 전부 `FixedWindow`·
+            # `OperableWindow`·`NonSlidingDoor` 같은 평범한 타입이고, gbXML 에는
+            # 커튼월 타입 자체가 없다. 상한은 타입을 보지 않고 모든 면에 걸렸다.
+            #
+            # ⚠️ 99 에 물리적 근거는 없다. 수치 여백일 뿐이다.
+            # (내가 처음 적었던 "100 이면 호스트 면이 사라진다"는 **틀렸다** — codex
+            #  지적. `BuildingSurface:Detailed` 는 그대로 있고 창은 그 하위
+            #  `FenestrationSurface:Detailed` 다. 진짜 문제는 창이 호스트 경계와
+            #  정확히 일치할 때 EnergyPlus 의 포함관계·부동소수 허용오차를 안정적으로
+            #  만족하느냐다.)
+            #
+            # ⚠️ 이 상한은 **실측 좌표 경로에는 원래 필요 없다.** 개구부가 호스트를
+            # 넘으면 `opening_overflow`(severity block)가 이미 막는다. 남겨 둔 건
+            # 사용자가 화면에서 WWR 을 직접 올릴 때 만드는 **합성 창**의 여백이다.
+            # 실측 경로에서 상한을 아예 걷어내는 건 별도 판단으로 남긴다.
+            #
+            # ⚠️ `int()` 절삭으로 최대 1%p 를 버린다. IDF 는 실측 좌표를 쓰는데
+            # 비용·대표 U 는 `벽면적 × wwr` 을 쓰므로(`ep_simulator.py:590`) 그만큼
+            # 어긋난다. 용호동 실측: 상한 90 일 때 −8.9%, 99 로 올린 뒤 −0.8%.
+            surface_data["wwr"] = min(calc_wwr, 99)
 
         # 대표 창호 U/SHGC(면적가중) — 비용/에너지에서 glazingId 미지정 시 실측값으로 사용.
         # Air(개방경계) opening은 창이 아니므로 제외.

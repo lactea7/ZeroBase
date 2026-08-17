@@ -571,14 +571,47 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
     # 창호 속성: 우선순위 = 사용자 튜닝 glazingId → gbXML 실측 windowU → 기본(일반 이중유리 42)
     _DEFAULT_GLZ = GLAZING_DB.get(42, {"u": 2.74, "shgc": 0.60})
 
+    # ── 창틀(프레임) 열교 보정 — **opt-in** ────────────────────────────────────
+    #
+    # ⚠️ gbXML 의 `WindowType` U값은 **유리 중앙부(center-of-glass)** 다. 용호동·ARK
+    # 실측이 그것을 보여준다:
+    #     <Name>Pilkington RW33 이중 유리(1/4인치 + 1/4인치)</Name>
+    #     <U-value>2.8566</U-value>
+    #     <SolarHeatGainCoeff solarIncidentAngle="0|40|50|60|70|80">…
+    # ① 이름이 창호 시스템이 아니라 **판유리 제품**이고 ② 입사각별 SHGC 곡선은
+    # 유리 광학 데이터라 총괄(NFRC) 등급에는 안 붙으며 ③ 2.8566 은 무코팅 복층유리의
+    # center-of-glass 대역(2.7~2.9)이다. 알루미늄 프레임을 포함한 총괄 U 라면 3.5+ 다.
+    #
+    # 그런데 이 값을 `WindowMaterial:SimpleGlazingSystem` 에 넣는다. 그 객체의 U-Factor 는
+    # EnergyPlus 가 **총괄 값으로 해석**하는 입력이고, `FenestrationSurface:Detailed` 의
+    # Frame and Divider 도 비어 있다 — **프레임 열교가 모델 어디에도 없다.**
+    #
+    # ⚠️ 그래서 기본값은 **끔**이다. 보정하려면 프레임 면적비와 프레임 U를 알아야 하는데
+    # gbXML 에 둘 다 없다. 없는 숫자를 지어내느니 "반영 안 함"을 드러내는 편이 낫다
+    # (그 사실은 아래 `assumptions.window_frame` 으로 사용자에게 나간다).
+    # 사용자가 값을 알 때만 켠다: projectData.windowFrame = {"fraction": 0.15, "uValue": 5.5}
+    #
+    # 산식은 면적가중(ISO 10077-1 의 선형 열교 Ψ 항은 뺀 단순형이다 — Ψ 를 쓰려면
+    # 유리 둘레 길이가 필요한데 그것도 없다. 따라서 이 보정도 **과소평가 쪽**이다):
+    #     U_assembly = U_glass × (1 − f) + U_frame × f
+    _frame_cfg = project_data.get("windowFrame") or {}
+    _frame_f = float(_frame_cfg.get("fraction") or 0.0)
+    _frame_u = float(_frame_cfg.get("uValue") or 0.0)
+    _frame_on = 0.0 < _frame_f < 1.0 and _frame_u > 0.0
+
+    def _apply_frame(u):
+        return u * (1.0 - _frame_f) + _frame_u * _frame_f if _frame_on else u
+
     def _window_ushgc(s):
         gid = s.get("glazingId")
         if gid:
             g = GLAZING_DB.get(gid)
             if g:
+                # ⚠️ 사용자가 고른 카탈로그 창호는 이미 총괄 성능이다 — 보정하지 않는다.
                 return g["u"], g["shgc"]
         if s.get("windowU") is not None:
-            return s["windowU"], s.get("windowShgc", _DEFAULT_GLZ["shgc"])
+            # gbXML 실측 = 유리 중앙부 → 켜져 있으면 총괄로 보정한다.
+            return _apply_frame(s["windowU"]), s.get("windowShgc", _DEFAULT_GLZ["shgc"])
         return _DEFAULT_GLZ["u"], _DEFAULT_GLZ["shgc"]
 
     # 건물 대표 창호 U/SHGC(창 면적가중) — 비용 등급 매칭용. 기존엔 대표 glazingId 1개로
@@ -1296,6 +1329,26 @@ def generate_idf_and_simulate(payload: dict, temp_dir: str, on_stage=None,
                      + (f" 이 중 {_geo.interstitial_unconditioned}개는 반대편이 "
                         f"비공조 구역이라 겨울 열손실을 과소평가할 수 있습니다."
                         if _geo.interstitial_unconditioned else "")),
+            "confidence": "low",
+        }, {
+            "key": "window_frame",
+            "label": "창틀(프레임) 열교",
+            "value": (f"총괄 U 로 보정 (프레임 면적비 {_frame_f * 100:.0f}%, "
+                      f"U {_frame_u:.1f} W/㎡K)" if _frame_on else "반영 안 함"),
+            # ⚠️ **이 항목이 이 가정의 존재 이유다.** gbXML 의 창 U값은 유리 중앙부
+            # (center-of-glass)인데 `SimpleGlazingSystem` 은 그것을 총괄 값으로
+            # 해석하고, 프레임 객체도 없다. 즉 프레임 열손실이 모델에 전혀 없다.
+            # 커튼월처럼 창이 벽을 거의 덮는 면에서 특히 크게 어긋난다 —
+            # 용호동 15면이 개구부 98.7% 다.
+            "note": ("gbXML 의 창 U값은 유리 중앙부 성능입니다(제품명·입사각별 SHGC 로 "
+                     "확인). 창틀·멀리언의 열교는 별도 정보가 없어 기본적으로 "
+                     "반영하지 않으므로, 창이 벽을 거의 덮는 커튼월형 외피에서는 "
+                     "겨울 열손실을 과소평가합니다. 프레임 면적비와 U값을 알면 "
+                     "입력해 총괄 성능으로 보정할 수 있습니다."
+                     if not _frame_on else
+                     "유리 중앙부 U값에 프레임 면적비를 가중해 총괄 성능으로 "
+                     "보정했습니다. 선형 열교(Ψ)는 유리 둘레 길이 정보가 없어 "
+                     "빠져 있으므로 실제보다 낮게 잡힙니다."),
             "confidence": "low",
         }, _infiltration_assumption(zones, valid_afn_zones, zone_floor_areas,
                                     building_ach, use_afn,

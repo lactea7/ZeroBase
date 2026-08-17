@@ -796,3 +796,40 @@ def test_unconditioned_neighbour_is_flagged_not_hidden():
     r2 = emit_surfaces(_FakeIdf(), payload, valid_zone_ids={"Z1", "Z0"},
                        valid_afn_zones=set())
     assert r2.interstitial_unconditioned == 0
+
+
+# ── 창틀 열교 보정 (opt-in) ──────────────────────────────────────────────────
+#
+# ⚠️ gbXML 의 `WindowType` U값은 **유리 중앙부**다. 용호동·ARK 실측이 근거다:
+# 이름이 판유리 제품(`Pilkington RW33 이중 유리`)이고, 입사각별 SHGC 곡선
+# (0·40·50·60·70·80°)은 총괄(NFRC) 등급에 안 붙는 유리 광학 데이터이며,
+# 2.8566 은 무코팅 복층유리의 center-of-glass 대역이다.
+# 그런데 `SimpleGlazingSystem` 은 그 값을 총괄로 해석하고 프레임 객체도 없다.
+
+def test_window_u_is_untouched_by_default():
+    """⚠️ 기본값은 **끔**이다 — gbXML 에 프레임 정보가 없으므로 숫자를 지어내지 않는다."""
+    import re
+    src = open(os.path.join(BACKEND, "src", "ep_simulator.py"), encoding="utf-8").read()
+    m = re.search(r'_frame_cfg = project_data\.get\("windowFrame"\) or \{\}', src)
+    assert m, "프레임 설정을 projectData 에서 읽지 않는다"
+    assert re.search(r'_frame_on\s*=\s*0\.0 < _frame_f < 1\.0 and _frame_u > 0\.0', src), \
+        "면적비 0~1, U>0 을 모두 만족할 때만 켜져야 한다"
+
+
+def test_frame_correction_is_area_weighted():
+    """U_assembly = U_glass × (1 − f) + U_frame × f"""
+    u_glass, f, u_frame = 2.8566, 0.15, 5.5
+    expected = u_glass * (1 - f) + u_frame * f
+    assert expected == pytest.approx(3.25311, abs=1e-5)
+    # 보정은 항상 유리보다 나쁜 쪽으로 간다(프레임 U가 더 크므로)
+    assert expected > u_glass
+
+
+def test_frame_assumption_is_reported():
+    """⚠️ 프레임이 **없다는 사실**이 사용자에게 보여야 한다. 조용히 빠뜨리면 안 된다."""
+    import re
+    src = open(os.path.join(BACKEND, "src", "ep_simulator.py"), encoding="utf-8").read()
+    m = re.search(r'"key":\s*"window_frame".*?"confidence":\s*"(\w+)"', src, re.S)
+    assert m, "assumptions 에 window_frame 항목이 없다"
+    assert m.group(1) == "low"
+    assert "반영 안 함" in m.group(0), "끄고 있을 때 그 사실을 표시하지 않는다"
