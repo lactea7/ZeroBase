@@ -2,25 +2,18 @@
 // 3D 건물 뷰어 컴포넌트 (Three.js + OrbitControls)
 // 태양 궤적, 표면 열해석, 환기/풍량 시각화 모드 포함
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { ACTIVITIES } from '../../data/constants';
 import { createTextSprite, clearGroup } from '../../utils/threeHelper';
+import { buildSurfaceGeometry, newellNormal } from '../../utils/polygonGeometry';
 
-// 3D 폴리곤 면적 (뉴웰 법선 크기 / 2) — 창 실형상의 원본 WWR 산출용
-const polyArea3D = (verts) => {
-  if (!verts || verts.length < 3) return 0;
-  let nx = 0, ny = 0, nz = 0;
-  for (let i = 0; i < verts.length; i++) {
-    const a = verts[i], b = verts[(i + 1) % verts.length];
-    nx += (a[1] - b[1]) * (a[2] + b[2]);
-    ny += (a[2] - b[2]) * (a[0] + b[0]);
-    nz += (a[0] - b[0]) * (a[1] + b[1]);
-  }
-  return Math.sqrt(nx * nx + ny * ny + nz * nz) / 2;
-};
+// ⚠️ 면적 계산을 여기서 다시 쓰지 않는다. `utils/geometry.js` 의
+// `calculateSurfaceArea` 가 정본이고 백엔드와의 일치를 참조값 시험이 대조한다.
+// 같은 산식을 세 군데 두면 갈라지는 건 시간문제다(codex 지적).
+import { calculateSurfaceArea as polyArea3D } from '../../utils/geometry';
 import { getSolarPosition, drawSunPathDome } from '../../utils/solarHelper';
 import { getRadiationColor, getTemperatureColor, drawThermalLabel } from '../../utils/thermalHelper';
 import { drawAirflowVisuals } from '../../utils/airflowHelper';
@@ -46,9 +39,41 @@ const BuildingViewer = ({
   res = null,
   latitude = 37.56,
   locationName = '서울특별시 (Seoul)',
+  // ⚠️ **초기값 전용**이다(비제어). 이름을 `showShades` 로 두면 부모가 바꿀 때
+  // 반응할 것으로 오해한다 — `default...` 로 계약을 이름에 적는다(codex 지적).
+  // 기본 false: 기본 뷰는 IDF 에 실제로 들어가는 면만 보여준다.
+  defaultShowExcludedSurfaces = false,
 }) => {
   const mountRef = useRef(null);
   const ctx = useRef({});
+  // 시뮬레이션에서 제외된 면(차양·고아 surface 등)의 표시 여부.
+  const [shownExcluded, setShownExcluded] = useState(defaultShowExcludedSurfaces);
+
+  // ⚠️ 백엔드가 면을 버리는 기준을 **그대로** 옮긴다:
+  //   `z_id = s['zone'].replace(" ", "_")`
+  //   `if z_id == "Unknown" or z_id not in valid_zone_ids: skipped`
+  // ⚠️ 파이썬 `str.replace` 는 **전부** 바꾸지만 JS `String.replace(" ", "_")` 는
+  // **첫 하나만** 바꾼다. 공백이 둘 이상인 존 이름에서 갈린다 — `replaceAll` 이어야
+  // 한다(codex 지적).
+  const normZone = (v) => (v || '').replaceAll(' ', '_');
+  const zoneIds = useMemo(
+    () => new Set((zones || []).map((z) => normZone(z.id))),
+    [zones]
+  );
+  const inSimulation = React.useCallback(
+    (s) => {
+      const z = normZone(s.zone);
+      return z !== '' && z !== 'Unknown' && zoneIds.has(z);
+    },
+    [zoneIds]
+  );
+  // ⚠️ 파생값이다. effect 안에서 state 로 저장하면 토글이 한 렌더 늦게 뜨고
+  // 불필요한 재렌더가 생긴다(codex 지적).
+  const hiddenCount = useMemo(() => {
+    const list =
+      activeFloor === 'all' ? surfaces : (surfaces || []).filter((s) => s.floor === parseInt(activeFloor));
+    return (list || []).filter((s) => !inSimulation(s)).length;
+  }, [surfaces, activeFloor, inSimulation]);
   // NOTE: 한때 `readOnly ? viewMode : 'default'` 로 편집 화면의 특수 뷰를 막으려 했으나
   // 실제로는 어디서도 쓰이지 않았다. 편집 화면(App/FloorEditor)도 setViewMode 를 넘겨
   // 일조·열·기류 전환 UI를 제공하므로, 그 게이팅을 살리면 기능이 죽는다. 그래서 제거했다.
@@ -168,8 +193,14 @@ const BuildingViewer = ({
       ctx.current.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       ctx.current.raycaster.setFromCamera(ctx.current.mouse, ctx.current.camera);
 
-      const meshes = ctx.current.group.children.filter((c) => c.type === 'Mesh' && c.userData?.id);
-      const intersects = ctx.current.raycaster.intersectObjects(meshes);
+      // ⚠️ `Mesh` 만 고르면 **삼각분할에 실패해 윤곽선만 남은 면을 못 고른다.**
+      // 그런 면일수록 사용자가 눌러서 확인해야 하는 대상이다(codex 지적).
+      // 선은 두께가 없으므로 threshold 를 줘서 근처 클릭을 잡는다.
+      const pickable = ctx.current.group.children.filter(
+        (c) => (c.type === 'Mesh' || c.type === 'LineLoop') && c.userData?.id
+      );
+      ctx.current.raycaster.params.Line.threshold = 0.25;
+      const intersects = ctx.current.raycaster.intersectObjects(pickable);
 
       if (intersects.length > 0) {
         const clickedData = intersects[0].object.userData;
@@ -198,8 +229,24 @@ const BuildingViewer = ({
 
     // 2. 프리패스: 바운딩 박스 크기 및 중점 연산
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    const visibleSurfaces =
+    // ⚠️ **차양·지형면(`Shade`)은 열적 표면이 아니다.** 시뮬레이터는 유효 존이
+    // 없다는 이유로 이 면들을 버리는데(`geometry.py` 의 `skipped`), 뷰어는 타입을
+    // 안 가려서 그대로 그렸다. 그래서 화면과 계산이 **다른 건물**을 보여줬다:
+    // 용호동은 12면뿐이라 지붕 위 판 한 장으로 끝나지만(`su-x-s-235`, 지붕보다
+    // 0.33m 위), 회의실은 675면 24,825㎡ 로 IDF 실제 표면적(10,514㎡)의 두 배가
+    // 넘는 형상이 화면에만 존재했다.
+    // 지우지는 않는다 — 차양은 일사에 실제로 영향을 주므로 **구분해서** 보여준다.
+    //
+    // ⚠️ 판정 기준을 `type === 'Shade'` 로 두면 안 된다(codex 지적). 백엔드가 면을
+    // 버리는 기준은 **타입이 아니라 유효 존에 안 붙었는지**다:
+    //   `if z_id == "Unknown" or z_id not in valid_zone_ids: result.skipped += 1`
+    // 타입으로 거르면 ① 존이 없는 비-Shade 면은 화면에 남고 ② 존이 붙은 Shade 는
+    // 계산에 들어가는데 화면에서 사라진다. 같은 기준을 그대로 쓴다.
+    const floorFiltered =
       activeFloor === 'all' ? surfaces : surfaces.filter((s) => s.floor === parseInt(activeFloor));
+    const visibleSurfaces = shownExcluded
+      ? floorFiltered
+      : floorFiltered.filter(inSimulation);
 
     visibleSurfaces.forEach((surf) => {
       if (surf.width && surf.height && surf.pos) {
@@ -327,13 +374,12 @@ const BuildingViewer = ({
           if (surf.width && surf.height && surf.pos && surf.rot) {
             normal.applyEuler(new THREE.Euler(surf.rot.x, surf.rot.y, surf.rot.z));
           } else if (surf.vertices && surf.vertices.length >= 3) {
-            const v0 = new THREE.Vector3(surf.vertices[0][0], surf.vertices[0][2], -surf.vertices[0][1]);
-            const v1 = new THREE.Vector3(surf.vertices[1][0], surf.vertices[1][2], -surf.vertices[1][1]);
-            const v2 = new THREE.Vector3(surf.vertices[2][0], surf.vertices[2][2], -surf.vertices[2][1]);
-            normal.crossVectors(
-              new THREE.Vector3().subVectors(v1, v0),
-              new THREE.Vector3().subVectors(v2, v0)
-            ).normalize();
+            // ⚠️ 첫 세 점의 외적으로 법선을 구하면 **그 셋이 한 직선 위일 때
+            // 영벡터**가 되어 일사 방향 판정이 통째로 틀어진다(codex 지적).
+            // 실제로 회의실·용호동에 공선 정점이 늘어선 면이 있다.
+            // 모든 정점을 쓰는 뉴웰 법선은 그 함정이 없다.
+            const n = newellNormal(surf.vertices);
+            normal.set(n[0], n[2], -n[1]).normalize();
           }
           const dot = normal.dot(sunDir);
           
@@ -375,6 +421,10 @@ const BuildingViewer = ({
             baseColor = 0x78716c;
           } else if (surf.type === 'InternalWall' || surf.type === 'InteriorWall') {
             baseColor = 0xf59e0b;
+          } else if (!inSimulation(surf)) {
+            // ⚠️ 시뮬레이션에 안 들어가는 면이다. 열적 표면과 같은 색으로 그리면
+            // 사용자가 계산 대상으로 오해한다 — 중립 회색으로 뺀다.
+            baseColor = 0x94a3b8;
           } else {
             baseColor = 0x3b82f6;
           }
@@ -433,19 +483,43 @@ const BuildingViewer = ({
         mesh.position.set(surf.pos.x, surf.pos.y, surf.pos.z);
         mesh.rotation.set(surf.rot.x, surf.rot.y, surf.rot.z);
       } else if (surf.vertices && surf.vertices.length >= 3) {
-        geometry = new THREE.BufferGeometry();
-        const verticesArray = [];
-        const v0 = surf.vertices[0];
-        for (let i = 1; i < surf.vertices.length - 1; i++) {
-          const v1 = surf.vertices[i];
-          const v2 = surf.vertices[i + 1];
-          verticesArray.push(v0[0], v0[2], -v0[1]);
-          verticesArray.push(v1[0], v1[2], -v1[1]);
-          verticesArray.push(v2[0], v2[2], -v2[1]);
+        // ⚠️ 예전엔 정점 0에서 부채꼴(triangle fan)로 잘랐다. 부채꼴은 볼록
+        // 다각형에만 유효해서, 오목한 면은 삼각형이 **바깥으로 삐져나갔다.**
+        // 실측(용호동): 235면 중 17면이 어긋났고 최악은 27.8㎡ 가 133.9㎡ 로
+        // 그려졌다(+382%). 화면을 가로지르던 긴 대각선이 그 삼각형의 바깥 변이다.
+        const built = buildSurfaceGeometry(surf.vertices);
+        if (built.triangles.length > 0) {
+          geometry = new THREE.BufferGeometry();
+          const verticesArray = [];
+          for (let i = 0; i < built.triangles.length; i++) {
+            const v = surf.vertices[built.triangles[i]];
+            verticesArray.push(v[0], v[2], -v[1]);
+          }
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verticesArray, 3));
+          geometry.computeVertexNormals();
+          mesh = new THREE.Mesh(geometry, material);
+        } else {
+          // 삼각분할을 **검증하지 못한** 다각형 — 면은 칠하지 않고 윤곽선만 남긴다.
+          // ⚠️ 그룹의 직계 자식이어야 클릭 대상이 된다. 아래에서 윤곽선을 직접
+          // 그룹에 붙이므로 여기서는 자리만 비운다.
+          mesh = null;
         }
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(verticesArray, 3));
-        geometry.computeVertexNormals();
-        mesh = new THREE.Mesh(geometry, material);
+      }
+
+      // 삼각분할을 검증하지 못한 면: 면은 없이 **빨간 윤곽선만** 그룹에 직접 붙인다.
+      // ⚠️ `userData` 를 실어야 클릭으로 조사할 수 있다 — 문제가 있는 면일수록
+      // 사용자가 눌러 봐야 한다.
+      if (!mesh && surf.vertices && surf.vertices.length >= 3) {
+        const loop = new THREE.BufferGeometry().setFromPoints(
+          surf.vertices.map((v) => new THREE.Vector3(v[0], v[2], -v[1]))
+        );
+        const badLine = new THREE.LineLoop(
+          loop, new THREE.LineBasicMaterial({ color: 0xef4444, linewidth: 2 })
+        );
+        surf.baseColor = 0xef4444;
+        badLine.userData = surf;
+        badLine.renderOrder = 999;
+        group.add(badLine);
       }
 
       if (mesh) {
@@ -456,13 +530,27 @@ const BuildingViewer = ({
         mesh.userData = surf;
 
         // 경계선 그리기
-        const edges = new THREE.EdgesGeometry(geometry);
+        //
+        // ⚠️ **삼각분할 결과에서 선을 뽑지 않는다.** 예전엔 `EdgesGeometry(geometry)`
+        // 였는데, 그러면 그리는 건 열적 표면의 경계가 아니라 mesh 의 삼각형 변이다.
+        // 부채꼴이 만든 엉뚱한 삼각형의 바깥 변이 그대로 선으로 나왔다.
+        // 우리가 보고 싶은 건 gbXML `PolyLoop` 그 자체이므로 원본 정점으로 그린다.
         const lineMat = new THREE.LineBasicMaterial({
+          // ⚠️ 검증 실패 면은 여기 오지 않는다(mesh 가 없어 아래 분기로 빠진다).
+          // 예전엔 `malformed ? red : lineColor` 였는데 **항상 false 인 조건**이었다.
           color: lineColor,
           linewidth: isXRayMode ? 2 : 1,
           depthTest: !isXRayMode,
         });
-        const line = new THREE.LineSegments(edges, lineMat);
+        let line;
+        if (surf.vertices && surf.vertices.length >= 3) {
+          const loop = new THREE.BufferGeometry().setFromPoints(
+            surf.vertices.map((v) => new THREE.Vector3(v[0], v[2], -v[1]))
+          );
+          line = new THREE.LineLoop(loop, lineMat);
+        } else {
+          line = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), lineMat);
+        }
         if (isXRayMode) line.renderOrder = 999;
         mesh.add(line);
 
@@ -510,15 +598,15 @@ const BuildingViewer = ({
                 c[1] + (v[1] - c[1]) * opScale,
                 c[2] + (v[2] - c[2]) * opScale,
               ]);
+              // ⚠️ 개구부도 같은 삼각분할을 쓴다. 창은 대개 사각형이지만 오목한
+              // 개구부가 하나라도 있으면 벽면과 똑같이 삐져나간다(codex 지적).
+              const opBuilt = buildSurfaceGeometry(sv);
+              if (opBuilt.triangles.length === 0) return;   // 검증 실패한 개구부는 안 그린다
               const opGeom = new THREE.BufferGeometry();
               const opVerts = [];
-              const ov0 = sv[0];
-              for (let i = 1; i < sv.length - 1; i++) {
-                const ov1 = sv[i];
-                const ov2 = sv[i + 1];
-                opVerts.push(ov0[0], ov0[2], -ov0[1]);
-                opVerts.push(ov1[0], ov1[2], -ov1[1]);
-                opVerts.push(ov2[0], ov2[2], -ov2[1]);
+              for (let i = 0; i < opBuilt.triangles.length; i++) {
+                const ov = sv[opBuilt.triangles[i]];
+                opVerts.push(ov[0], ov[2], -ov[1]);
               }
               opGeom.setAttribute('position', new THREE.Float32BufferAttribute(opVerts, 3));
               opGeom.computeVertexNormals();
@@ -587,7 +675,7 @@ const BuildingViewer = ({
     // latitude 는 위치 변경 시 태양궤적이 달라지므로 반드시 의존성에 있어야 한다.
     // effectiveDarkMode 는 isDarkMode·readOnly·viewMode 로부터 파생되지만, 린터가
     // 그 관계를 알 수 없으므로 명시한다.
-  }, [surfaces, zones, activeFloor, editMode, selectedId, hoveredId, draftState, readOnly, isDarkMode, effectiveDarkMode, viewMode, sunMonth, sunHour, latitude, res]);
+  }, [surfaces, zones, activeFloor, editMode, selectedId, hoveredId, draftState, readOnly, isDarkMode, effectiveDarkMode, viewMode, sunMonth, sunHour, latitude, res, shownExcluded, inSimulation]);
 
   return (
     <div className="relative w-full h-full min-h-[500px] overflow-hidden rounded-xl bg-slate-900 shadow-inner border border-slate-700">
@@ -622,6 +710,25 @@ const BuildingViewer = ({
           </button>
         ))}
       </div>
+
+      {/* 시뮬레이션 제외 면(차양·지형) 표시 토글 */}
+      {(hiddenCount > 0 || shownExcluded) && (
+        <div className={`absolute top-16 left-4 z-20 px-3 py-2 rounded-xl shadow-lg backdrop-blur-md border text-xs ${
+          effectiveDarkMode ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-white/80 border-slate-200 text-slate-700'
+        }`}>
+          <label className="flex items-center gap-2 font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={shownExcluded}
+              onChange={(e) => setShownExcluded(e.target.checked)}
+            />
+            시뮬레이션 제외 면 {hiddenCount}개 표시
+          </label>
+          <p className="mt-1 font-normal opacity-70">
+            유효한 존에 붙지 않아 계산에서 빠진 면입니다 (회색). 차양·지형면이 대부분입니다.
+          </p>
+        </div>
+      )}
 
       {/* 태양/환기 시뮬레이션 설정 패널 (Floating Sun/Airflow Control Panel) */}
       {(viewMode === 'sunpath' || viewMode === 'thermal' || viewMode === 'airflow') && (
