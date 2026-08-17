@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+// ⚠️ `AnimatePresence` 를 빠뜨리면 **결과 화면 전체가 흰 화면으로 죽는다.**
+// `<AnimatePresence>` 는 조건부 렌더 바깥에 있어 대시보드가 그려지는 순간 평가되고,
+// 미정의면 `ReferenceError` 로 컴포넌트 트리가 통째로 무너진다.
+// ⚠️ 빌드는 이걸 못 잡는다 — 번들러에게는 그냥 미정의 전역이라 컴파일이 통과한다.
+// App.jsx 를 쪼갤 때 JSX 만 옮기고 import 를 두고 오면 반복되는 유형이다.
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ReferenceLine, LineChart, Line,
