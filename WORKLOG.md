@@ -57,7 +57,7 @@ EPlusSimple 비교가 다시 필요하면:
 ## 지금 상태 요약 (2026-08-13 기준)
 
 커밋 `7597c64`. **`main` 병합·푸시 완료**(fast-forward 19커밋, `origin/main`).
-백엔드 **763 passed + 3 xfailed**, 프런트 **404 tests**. 골든 IDF 불변.
+백엔드 **763 passed + 3 xfailed**, 프런트 **413 tests**. 골든 IDF 불변.
 
 **배포 상태 (2026-08-19 점검)**
 - 백엔드 Render(Docker, 무료): https://kaebseuton.onrender.com — 커밋 `7597c64` Live
@@ -197,7 +197,8 @@ z 부호만 봤으면 위 27면을 전부 잘못 뒤집었다.
    `ALLOWED_ORIGINS = https://<Vercel도메인>,http://localhost:5173`
    그리고 Vercel 에 `VITE_API_BASE_URL = https://kaebseuton.onrender.com`.
    ⚠️ Vercel 프리뷰는 도메인이 매번 달라진다 — 프로덕션만 넣으면 프리뷰는 막힌다.
-   ⚠️ 클라이언트 타임아웃 60초(`client.js:9`)가 콜드 스타트 32.7초와 겹치면 아슬아슬.
+   ~~클라이언트 타임아웃 60초~~ → **해결**: 요청별 분리(업로드 180초/시작 120초/조회 20초),
+   폴링 복원력(연속 6회까지 재시도), `waking`·`reconnecting` 단계 문구 추가.
    ⚠️ API 에 **인증이 없다** — 공개 URL 이라 누구나 무료 티어 자원을 소모시킬 수 있다.
 
 2. **ARK 의 건물 중간 높이 `Roof` 107면** — z 3.43·6.27·9.37·12.47, 바로 위에 존.

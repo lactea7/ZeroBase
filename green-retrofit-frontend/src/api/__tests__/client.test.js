@@ -52,7 +52,10 @@ describe('runSimulation', () => {
     http.get.mockResolvedValue({ data: { status: 'success' } });
 
     await runSimulation(PAYLOAD);
-    expect(http.get).toHaveBeenCalledWith('/api/simulate/T1');
+    // ⚠️ 요청마다 타임아웃이 다르다 — 조회는 짧게(20초) 준다.
+    // 하나로 묶으면 콜드 스타트(실측 32.7초)에 맞춘 긴 값이 조회에도 걸려,
+    // 한 번 늦을 때 30초씩 멈춘다.
+    expect(http.get).toHaveBeenCalledWith('/api/simulate/T1', { timeout: 20000 });
   });
 
   it('진행 단계를 화면에 전달한다', async () => {
@@ -64,8 +67,10 @@ describe('runSimulation', () => {
 
     const stages = [];
     await runSimulation(PAYLOAD, (s) => stages.push(s));
-    // ⚠️ 단계가 안 오면 사용자는 30분간 아무 표시 없는 화면을 본다
-    expect(stages).toEqual(['queued', 'baseline']);
+    // ⚠️ 단계가 안 오면 사용자는 30분간 아무 표시 없는 화면을 본다.
+    // 'waking' 이 맨 앞에 온다 — 배포(Render 무료)는 잠들어 있다가 깨는 데
+    // 실측 32.7초가 걸리고, 그동안 화면이 비면 멈춘 것처럼 보인다.
+    expect(stages).toEqual(['waking', 'queued', 'baseline']);
   });
 });
 

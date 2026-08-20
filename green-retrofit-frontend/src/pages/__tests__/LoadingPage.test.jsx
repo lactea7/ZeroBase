@@ -59,3 +59,19 @@ describe('LoadingPage 렌더', () => {
       <LoadingPage theme={THEME} loadingMsgIdx={9999} loadingStage={null} />)).not.toThrow();
   });
 });
+
+// ── 배포 환경의 대기 단계 (Render 콜드 스타트) ───────────────────────────────
+describe('배포 환경 단계 문구', () => {
+  it.each([
+    ['waking', /깨우는 중/],
+    ['reconnecting', /계속 진행/],
+  ])('⚠️ %s 단계에 문구가 있어야 한다 — 비면 사용자가 창을 닫는다', (stage, pattern) => {
+    expect(stageMessage(stage)).toMatch(pattern);
+  });
+
+  it('⚠️ 재연결 문구는 실패처럼 읽히면 안 된다', () => {
+    // 계산은 서버에서 계속 돈다. '실패'로 읽히면 사용자가 창을 닫아 그걸 버린다.
+    const msg = stageMessage('reconnecting');
+    expect(msg).not.toMatch(/실패|오류|중단/);
+  });
+});
