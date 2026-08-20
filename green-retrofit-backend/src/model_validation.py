@@ -11,7 +11,32 @@
 import math
 
 
+def _is_finite_polygon(vertices):
+    """좌표가 전부 유한한 실수인가.
+
+    ⚠️ **NaN 은 비교가 전부 False 라 조용히 통과한다.** 면적·초과 검사에 기대면
+    안 되고 여기서 명시적으로 걸러야 한다.
+    """
+    if not isinstance(vertices, (list, tuple)):
+        return False
+    for p in vertices:
+        if not isinstance(p, (list, tuple)) or len(p) < 3:
+            return False
+        for c in p[:3]:
+            if isinstance(c, bool) or not isinstance(c, (int, float)):
+                return False
+            if not math.isfinite(c):
+                return False
+    return True
+
+
 def _area(vertices):
+    # ⚠️ 성한 좌표가 아니면 **여기서 멈춘다.** 예전에는 그대로 계산해서
+    # `None`·문자열 좌표에서 TypeError 로 터졌고, 그게 `/api/simulate` 의
+    # 500 Internal Server Error 로 새어 나갔다. 0 을 돌려주면 호출부의
+    # `if host <= 0: continue` 가 자연히 건너뛴다.
+    if not _is_finite_polygon(vertices):
+        return 0.0
     if not vertices or len(vertices) < 3:
         return 0.0
     nx = ny = nz = 0.0
@@ -90,6 +115,34 @@ def validate_simulation_payload(zones, surfaces):
             "issue": "orphan_surface",
             "count": len(orphan),
             "message": f"어느 존에도 속하지 않는 면이 {len(orphan)}개 있습니다 — 모델에서 제외됩니다.",
+        })
+
+    # 좌표가 유한한 실수인가 — **신뢰 경계의 첫 관문이다.**
+    #
+    # ⚠️ 파서는 이걸 `non_finite_geometry`(severity block)로 잡지만, 그 검사는 XML
+    # 경로에만 있다. `/api/simulate` 는 payload 를 직접 받으므로 그 관문을 지나지
+    # 않는다. 실측: NaN·Inf 좌표가 blocking 0 으로 통과했고, 실제 요청은 422 가
+    # 아니라 **500 Internal Server Error** 로 안쪽에서 터졌다.
+    #
+    # ⚠️ NaN 은 **비교가 전부 False** 라 아래의 면적·초과 검사들을 조용히 지나간다.
+    # `_area()` 도 NaN 을 그대로 흘려보낸다. 그래서 다른 검사에 기대면 안 되고
+    # 여기서 명시적으로 잡아야 한다.
+    bad_geom = []
+    for s in (surfaces or []):
+        if not _is_finite_polygon(s.get("vertices")):
+            bad_geom.append(s.get("id"))
+            continue
+        for o in (s.get("openings") or []):
+            if not _is_finite_polygon(o.get("vertices")):
+                bad_geom.append(s.get("id"))
+                break
+    if bad_geom:
+        blocking.append({
+            "issue": "non_finite_geometry",
+            "count": len(bad_geom),
+            "message": f"좌표가 숫자가 아니거나 무한대인 면이 {len(bad_geom)}개 있습니다 "
+                       f"({', '.join(str(x) for x in bad_geom[:3])}). "
+                       f"이 상태로는 형상을 계산할 수 없습니다.",
         })
 
     # 개구부가 호스트 면을 초과 — 창면적비가 성립하지 않는다.

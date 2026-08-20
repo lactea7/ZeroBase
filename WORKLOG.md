@@ -57,7 +57,7 @@ EPlusSimple 비교가 다시 필요하면:
 ## 지금 상태 요약 (2026-08-13 기준)
 
 커밋 `7597c64`. **`main` 병합·푸시 완료**(fast-forward 19커밋, `origin/main`).
-백엔드 **752 passed + 3 xfailed**, 프런트 **404 tests**. 골든 IDF 불변.
+백엔드 **763 passed + 3 xfailed**, 프런트 **404 tests**. 골든 IDF 불변.
 
 **배포 상태 (2026-08-19 점검)**
 - 백엔드 Render(Docker, 무료): https://kaebseuton.onrender.com — 커밋 `7597c64` Live
@@ -214,7 +214,9 @@ z 부호만 봤으면 위 27면을 전부 잘못 뒤집었다.
 5. **canonical boundary** — `InterZone Surface Tilts/Classes do not match`
    용호동 14 · 회의실 4. 현재 mirror 로직이 상보적 면을 못 만든다는 뜻이다.
 
-6. `severity: block` 을 백엔드 `/api/simulate` 에서도 강제 (지금은 프런트 버튼만 비활성)
+6. ~~`severity: block` 백엔드 강제~~ — **이미 돼 있었다**(`main.py:135`, baselineModel 까지).
+   대신 그 경로의 **구멍**을 찾아 막았다: NaN·Inf·None·문자열 좌표가 통과해
+   **500 Internal Server Error** 로 터지던 것을 422 거절로 바꿨다.
 
 #### codex 가 지적했지만 범위 밖으로 미룬 것
 

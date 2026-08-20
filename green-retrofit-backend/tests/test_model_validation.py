@@ -2,6 +2,7 @@
 #
 # 업로드 모달의 '그대로 진행' 차단은 클라이언트 UX 일 뿐이다. 다른 클라이언트나
 # 변조된 요청은 그 화면을 거치지 않고 /api/simulate 로 직접 들어올 수 있다.
+import pytest
 from src.model_validation import validate_simulation_payload
 
 WALL = [[0, 0, 0], [4, 0, 0], [4, 0, 3], [0, 0, 3]]      # 12㎡
@@ -124,3 +125,74 @@ def test_geometric_area_within_tolerance_passes():
     blocking, _ = validate_simulation_payload(
         [{"id": "Z1", "geometricArea": 20.3}], [floor])
     assert not any(b["issue"] == "geometric_area_drift" for b in blocking)
+
+
+# ── 좌표 유한성 (신뢰 경계) ───────────────────────────────────────────────────
+#
+# ⚠️ 파서는 이걸 `non_finite_geometry`(severity block)로 잡지만 그 검사는 **XML
+# 경로에만** 있다. `/api/simulate` 는 payload 를 직접 받으므로 그 관문을 지나지 않는다.
+# 실측: NaN·Inf 좌표가 blocking 0 으로 통과했고, 실제 요청은 422 가 아니라
+# **500 Internal Server Error** 로 안쪽에서 터졌다.
+
+NAN = float("nan")
+INF = float("inf")
+_OK = [(0, 0, 0), (4, 0, 0), (4, 0, 3), (0, 0, 3)]
+_ZONES = [{"id": "Z1", "area": 20.0, "height": 3.0, "floor": 1}]
+
+
+def _payload_with(verts, openings=None):
+    return _ZONES, [{"id": "S1", "type": "ExteriorWall", "zone": "Z1",
+                     "vertices": verts, "area": 12.0, "uValue": 0.5,
+                     "openings": openings or []}]
+
+
+def _issues(verts, openings=None):
+    from src.model_validation import validate_simulation_payload
+    z, s = _payload_with(verts, openings)
+    blocking, _w = validate_simulation_payload(z, s)
+    return [b["issue"] for b in blocking]
+
+
+def test_finite_geometry_passes():
+    assert "non_finite_geometry" not in _issues(_OK)
+
+
+@pytest.mark.parametrize("label,verts", [
+    ("NaN",      [(0, 0, 0), (NAN, 0, 0), (4, 0, 3), (0, 0, 3)]),
+    ("Inf",      [(0, 0, 0), (INF, 0, 0), (4, 0, 3), (0, 0, 3)]),
+    ("-Inf",     [(0, 0, 0), (-INF, 0, 0), (4, 0, 3), (0, 0, 3)]),
+    ("None",     [(0, 0, 0), (None, 0, 0), (4, 0, 3), (0, 0, 3)]),
+    ("문자열",    [(0, 0, 0), ("x", 0, 0), (4, 0, 3), (0, 0, 3)]),
+    ("2차원 점",  [(0, 0), (4, 0), (4, 3), (0, 3)]),
+    ("점이 아님", [0, 1, 2, 3]),
+])
+def test_non_finite_geometry_is_blocked(label, verts):
+    """⚠️ NaN 은 **비교가 전부 False** 라 면적·초과 검사를 조용히 지나간다.
+    다른 검사에 기대면 안 되고 명시적으로 잡아야 한다."""
+    assert "non_finite_geometry" in _issues(verts), f"{label} 이 통과했다"
+
+
+def test_non_finite_opening_is_blocked():
+    """개구부 좌표만 망가져도 막아야 한다 — 벽은 멀쩡해 보인다."""
+    assert "non_finite_geometry" in _issues(
+        _OK, [{"vertices": [(0, 0, 0), (NAN, 0, 0), (1, 0, 1)]}])
+
+
+def test_validator_never_raises_on_malformed_geometry():
+    """⚠️ **이게 500 의 원인이었다.** 검증기가 예외를 던지면 신뢰 경계가 무너지고
+    FastAPI 가 422 대신 500 을 낸다."""
+    from src.model_validation import validate_simulation_payload
+    for verts in ([(0, 0, 0), (None, 0, 0), (4, 0, 3), (0, 0, 3)],
+                  [(0, 0, 0), ("x", 0, 0), (4, 0, 3), (0, 0, 3)],
+                  [(0, 0), (4, 0), (4, 3)], None, "쓰레기", 42):
+        z, s = _payload_with(verts)
+        validate_simulation_payload(z, s)   # 예외가 나면 실패
+
+
+def test_area_helper_is_defensive():
+    """공용 헬퍼가 방어적이어야 모든 호출부가 함께 보호된다."""
+    from src.model_validation import _area
+    assert _area([(0, 0, 0), (None, 0, 0), (4, 0, 3)]) == 0.0
+    assert _area([(0, 0, 0), (NAN, 0, 0), (4, 0, 3)]) == 0.0
+    assert _area(None) == 0.0
+    assert _area(_OK) > 0.0
