@@ -56,9 +56,17 @@ EPlusSimple 비교가 다시 필요하면:
 
 ## 지금 상태 요약 (2026-08-13 기준)
 
-커밋 `HEAD`. 브랜치 `fix/review-round2-geometry` — **main 미병합.**
-(`7f28b32`·`ee931c7` 는 이미 main `a844170` 에 들어와 있다.)
-백엔드 **747 passed + 3 xfailed**, 프런트 **401 tests**. 골든 IDF 불변.
+커밋 `7597c64`. **`main` 병합·푸시 완료**(fast-forward 19커밋, `origin/main`).
+백엔드 **752 passed + 3 xfailed**, 프런트 **404 tests**. 골든 IDF 불변.
+
+**배포 상태 (2026-08-19 점검)**
+- 백엔드 Render(Docker, 무료): https://kaebseuton.onrender.com — 커밋 `7597c64` Live
+  ✅ **EnergyPlus 동작 확인** (합성 gbXML 로 시뮬레이션 완주). 이전 메모의
+  "무료=EnergyPlus 미설치라 시뮬레이션 불가"는 Docker 배포로 **해소됐다.**
+  ⚠️ 콜드 스타트 **32.7초** 측정됨.
+- 프런트 Vercel: 대시보드 연결형(로컬에 `.vercel`·`vercel.json` 없음)
+- ⛔ **차단 요소**: Render 의 `ALLOWED_ORIGINS` 가 기본값 `http://localhost:5173`
+  뿐이라 **Vercel 도메인이 CORS 로 전부 막힌다.** 화면은 뜨지만 업로드부터 실패.
 
 세션 전체 요약은 저장소 루트 `working.md` 및 구글 드라이브 사본에 있다:
 https://drive.google.com/file/d/16FyeJA4ATWUVWJpDNQG6i8YDntPzaR_x/view
@@ -185,9 +193,12 @@ z 부호만 봤으면 위 27면을 전부 잘못 뒤집었다.
    뷰어에서 숨긴 건 오해를 막은 것뿐이고 근본 해결이 아니다.
    ⚠️ 시뮬레이션 결과가 바뀌므로 fixture 검증과 회귀시험이 필요하다.
 
-1. **WWR 90% 상한 — 프런트에도 박혀 있다**
-   `BuildingViewer.jsx:471` 과 `gbxml_parser.py:947` 양쪽이다.
-   **한쪽만 고치면 화면과 계산이 어긋난다.**
+1. **배포 마무리 — Render 환경변수** ⛔ 지금 유일한 차단 요소
+   `ALLOWED_ORIGINS = https://<Vercel도메인>,http://localhost:5173`
+   그리고 Vercel 에 `VITE_API_BASE_URL = https://kaebseuton.onrender.com`.
+   ⚠️ Vercel 프리뷰는 도메인이 매번 달라진다 — 프로덕션만 넣으면 프리뷰는 막힌다.
+   ⚠️ 클라이언트 타임아웃 60초(`client.js:9`)가 콜드 스타트 32.7초와 겹치면 아슬아슬.
+   ⚠️ API 에 **인증이 없다** — 공개 URL 이라 누구나 무료 티어 자원을 소모시킬 수 있다.
 
 2. **ARK 의 건물 중간 높이 `Roof` 107면** — z 3.43·6.27·9.37·12.47, 바로 위에 존.
    codex 판단: "선언은 유지하되 위 존과 XY 겹침이 크면 **입력 의미 충돌 warning**".
